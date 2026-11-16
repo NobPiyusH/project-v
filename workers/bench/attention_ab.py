@@ -63,7 +63,8 @@ def main(video_id: str, out_dir: str, shots: list[int], mode: str, frames: int) 
                 inputs += ["-i", str(p)]
                 secs = next((x["seconds"] for x in rows if x["id"] == f"ab-shot{n:02d}-{v}"), 0)
                 used = next((x["attention"] for x in rows if x["id"] == f"ab-shot{n:02d}-{v}"), v)
-                labels.append(f"[{len(labels)}:v]drawtext=text='{used} {secs:.0f}s':x=20:y=20:fontsize=36:"
+                labels.append(f"[{len(labels)}:v]drawtext=fontfile='C\:/Windows/Fonts/segoeui.ttf':"
+                              f"text='{used} {secs:.0f}s':x=20:y=20:fontsize=36:"
                               f"fontcolor=white:box=1:boxcolor=black@0.6[v{len(labels)}]")
         if len(labels) > 1:
             stack = "".join(f"[v{i}]" for i in range(len(labels)))
