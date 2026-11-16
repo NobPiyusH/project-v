@@ -6,7 +6,7 @@
   - `8a9c516` M2a story pipeline (research → script → Lyria music → Gemini TTS + transcript check → beat-snapped shot plan → keyframes Nano Banana/Z-Image → animatic), Redo, **Review mode** (semi-auto timer)
   - `6052eeb` per-shot keyframe redo (notes, Auto/Premium/Free, versions, edit prompt)
   - `fc07b42` script line editing + per-line voice redo (takes, needs-voice flag)
-- **NOT committed yet:** `workers/modal_apps/wan.py` (Wan 2.2 I2V on Modal H100, modes fast|hybrid|standard, CRF-12 encoding) and `workers/bench/wan_benchmark.py`. Commit them.
+- `af8fbf5` `workers/modal_apps/wan.py` (Wan 2.2 I2V on Modal H100, modes fast|hybrid|standard, CRF-12 encoding) + `workers/bench/wan_benchmark.py`.
 - Tests: 20 Java (`./gradlew :control-plane:test`), 2 Python (`uv run pytest workers/tests`). All green at last run.
 
 ## M2b (real video) — current state
