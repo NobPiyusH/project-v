@@ -10,15 +10,15 @@ import modal
 from google.genai import types
 from temporalio import activity
 
-from workers.common import gemini, put_bytes, usage_dict, with_retry
+from workers.common import gemini, put_bytes, usage_dict, with_models
 
 MODAL_BATCH = 8  # images per Modal call; heartbeat between batches
 
 
 def _nano_banana(req: dict, job: dict) -> dict:
     t = time.time()
-    response = with_retry(lambda: gemini().models.generate_content(
-        model=req["geminiImageModel"],
+    used, response = with_models(req["geminiImageModel"], lambda m: gemini().models.generate_content(
+        model=m,
         contents=job["prompt"],
         config=types.GenerateContentConfig(
             response_modalities=["IMAGE"],
@@ -31,7 +31,7 @@ def _nano_banana(req: dict, job: dict) -> dict:
             ext = "png" if "png" in mime else "jpg"
             uri = put_bytes(f"videos/{req['videoId']}/keyframes/{job['shotId']}-{job['attempt']}.{ext}",
                             part.inline_data.data, mime)
-            return {"shotId": job["shotId"], "uri": uri, "provider": "gemini_api", "model": req["geminiImageModel"],
+            return {"shotId": job["shotId"], "uri": uri, "provider": "gemini_api", "model": used,
                     "seed": None, "seconds": round(time.time() - t, 2), "usage": usage_dict(response), "error": None}
     raise RuntimeError("Image model returned no image")
 

@@ -8,11 +8,11 @@ import librosa
 import numpy as np
 from temporalio import activity
 
-from workers.common import gemini, media_duration, put_file, run_ffmpeg, usage_dict, with_retry, workdir
+from workers.common import gemini, media_duration, model_list, put_file, run_ffmpeg, usage_dict, with_models, workdir
 
 
 def _generate(model: str, prompt: str, dest: Path) -> tuple[Path, dict]:
-    response = with_retry(lambda: gemini().models.generate_content(model=model, contents=prompt), what="music")
+    _, response = with_models(model, lambda m: gemini().models.generate_content(model=m, contents=prompt), what="music")
     for part in response.candidates[0].content.parts:
         if part.inline_data and (part.inline_data.mime_type or "").startswith("audio"):
             dest.write_bytes(part.inline_data.data)
@@ -75,6 +75,6 @@ def generate_music(req: dict) -> dict:
             "beatTimes": beat_times,
             "downbeatTimes": downbeats,
             "segments": len(seg_paths),
-            "model": req["model"],
+            "model": model_list(req["model"])[0],
             "usage": usages,
         }

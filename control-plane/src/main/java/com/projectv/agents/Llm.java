@@ -4,6 +4,7 @@ import com.projectv.ledger.BudgetGuard;
 import com.projectv.ledger.CostLedger;
 import com.projectv.ledger.Pricing;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.chat.client.ResponseEntity;
 import org.springframework.ai.chat.metadata.Usage;
 import org.springframework.ai.chat.model.ChatModel;
@@ -13,10 +14,9 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
+import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 /**
@@ -31,16 +31,19 @@ public class Llm {
     private final BudgetGuard budget;
     private final long timeoutSeconds;
     private final String model;
+    private final String fallbacks;
 
     public Llm(ObjectProvider<ChatModel> chatModel, CostLedger ledger, Pricing pricing, BudgetGuard budget,
                @Value("${projectv.agents.timeout-seconds:150}") long timeoutSeconds,
-               @Value("${projectv.models.text}") String model) {
+               @Value("${projectv.models.text}") String model,
+               @Value("${projectv.models.text-fallbacks:}") String fallbacks) {
         this.chatModel = chatModel;
         this.ledger = ledger;
         this.pricing = pricing;
         this.budget = budget;
         this.timeoutSeconds = timeoutSeconds;
         this.model = model;
+        this.fallbacks = fallbacks;
     }
 
     public String model() {
@@ -54,25 +57,32 @@ public class Llm {
             throw new IllegalStateException("No LLM configured: set GEMINI_API_KEY in .env");
         }
         budget.require(BigDecimal.ONE, purpose); // a text call costs well under ₹1; refuse only when the cap is hit
+        List<String> models = ModelFallback.models(model, fallbacks);
         try {
-            ResponseEntity<ChatResponse, T> r = CompletableFuture
-                    .supplyAsync(() -> ChatClient.create(cm).prompt().system(system).user(user).call().responseEntity(type))
-                    .get(timeoutSeconds, TimeUnit.SECONDS);
+            ModelFallback.Attempt<ResponseEntity<ChatResponse, T>> a = ModelFallback.run(models, timeoutSeconds, purpose,
+                    m -> ChatClient.create(cm).prompt()
+                            .options(ChatOptions.builder().model(m))
+                            .system(system).user(user).call().responseEntity(type));
+            ResponseEntity<ChatResponse, T> r = a.value();
             com.projectv.media.MediaTypes.Usage usage = toUsage(r.response());
             ledger.record(videoId, BudgetGuard.GEMINI, pricing.textInr(usage), BigDecimal.valueOf(usage.totalTokens()),
-                    "tokens", true, purpose + " (" + model + ")");
+                    "tokens", true, purpose + " (" + a.model() + ")");
             if (r.entity() == null) {
                 throw new IllegalStateException(purpose + ": the model returned no parsable result");
             }
             return r.entity();
         } catch (TimeoutException e) {
-            throw new IllegalStateException(purpose + ": " + model + " did not answer within " + timeoutSeconds + "s");
+            throw new IllegalStateException(purpose + ": no model in " + models + " answered within " + timeoutSeconds + "s");
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException(purpose + " interrupted");
         } catch (ExecutionException e) {
             Throwable c = e.getCause() == null ? e : e.getCause();
             throw new IllegalStateException(purpose + " failed: " + c.getClass().getSimpleName() + ": " + c.getMessage(), c);
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IllegalStateException(purpose + " failed: " + e.getMessage(), e);
         }
     }
 

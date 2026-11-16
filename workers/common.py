@@ -130,6 +130,39 @@ def with_retry(fn, *, attempts: int = 6, what: str = "Gemini call"):
             delay = min(delay * 2, 60.0)
 
 
+def model_list(spec: str | None, default: str | None = None) -> list[str]:
+    """'a,b,c' -> ['a', 'b', 'c'] (the control plane sends ordered fallback lists as comma-separated strings)."""
+    models = [m.strip() for m in (spec or "").split(",") if m.strip()]
+    return models or ([default] if default else [])
+
+
+def _model_problem(e: Exception) -> bool:
+    """Errors where trying the NEXT model makes sense: retired/unknown model, still overloaded after retries, hangs."""
+    text = str(e).lower()
+    if isinstance(e, (TimeoutError,)) or "timed out" in text or "timeout" in text:
+        return True
+    code = getattr(e, "code", None) or getattr(e, "status_code", None)
+    if code in (404, 503, 504):
+        return True
+    return any(s in text for s in ("not found", "no longer available", "not supported", "deprecated"))
+
+
+def with_models(spec: str | None, call, *, what: str, default: str | None = None):
+    """Try each model of an ordered fallback list (Work X). Returns (model_used, result). Each model gets the
+    normal 429/5xx retries first; quota/billing/content errors are NOT model problems and fail immediately."""
+    models = model_list(spec, default)
+    if not models:
+        raise ValueError(f"{what}: no model configured")
+    for i, m in enumerate(models):
+        try:
+            return m, with_retry(lambda: call(m), what=f"{what} ({m})")
+        except Exception as e:  # noqa: BLE001 - decide below whether the next model should be tried
+            if i < len(models) - 1 and _model_problem(e):
+                log.warning("%s: model %s failed (%s), falling back to %s", what, m, str(e)[:160], models[i + 1])
+                continue
+            raise
+
+
 def usage_dict(response) -> dict:
     u = getattr(response, "usage_metadata", None)
     if u is None:

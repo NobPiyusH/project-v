@@ -37,6 +37,9 @@ dependencies {
 
 	testImplementation("org.springframework.boot:spring-boot-starter-webmvc-test")
 	testImplementation("io.temporal:temporal-testing:${property("temporalVersion")}")
+	// Real-Postgres tests (Testcontainers 2.x, version managed by Spring Boot); skipped when Docker is not running.
+	testImplementation("org.testcontainers:testcontainers-postgresql")
+	testImplementation("org.testcontainers:testcontainers-junit-jupiter")
 	testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
@@ -48,6 +51,8 @@ dependencyManagement {
 
 tasks.withType<Test> {
 	useJUnitPlatform()
+	// Same as the app: UTC (Windows reports India as the legacy "Asia/Calcutta", which PostgreSQL rejects).
+	systemProperty("user.timezone", "UTC")
 }
 
 // Run from the repo root so config/ and .env resolve the same way for every module.

@@ -7,7 +7,7 @@ import re
 from google.genai import types
 from temporalio import activity
 
-from workers.common import gemini, usage_dict, with_retry
+from workers.common import gemini, usage_dict, with_models
 
 
 @activity.defn(name="research_topic")
@@ -26,8 +26,8 @@ Write {req.get('maxFacts', 15)} concise, verifiable facts, one per line, each st
 Prefer surprising, visual, emotionally powerful facts with concrete numbers, scales and time spans.
 Only state facts that your search results support. No introduction, no conclusion."""
 
-    response = with_retry(lambda: gemini().models.generate_content(
-        model=req["model"],
+    used, response = with_models(req["model"], lambda m: gemini().models.generate_content(
+        model=m,
         contents=prompt,
         config=types.GenerateContentConfig(
             tools=[types.Tool(google_search=types.GoogleSearch())],
@@ -66,6 +66,6 @@ Only state facts that your search results support. No introduction, no conclusio
         "facts": facts,
         "sources": chunks,
         "queries": list(meta.web_search_queries or []) if meta else [],
-        "model": req["model"],
+        "model": used,
         "usage": usage_dict(response),
     }

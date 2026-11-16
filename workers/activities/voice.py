@@ -16,7 +16,7 @@ import wave
 from google.genai import types
 from temporalio import activity
 
-from workers.common import RateLimiter, gemini, log, pcm_to_wav, put_bytes, usage_dict, with_retry
+from workers.common import RateLimiter, gemini, log, model_list, pcm_to_wav, put_bytes, usage_dict, with_models
 
 # Gemini TTS allows 10 requests/minute per model on the owner's tier; stay just under it.
 TTS_LIMIT = RateLimiter(per_minute=9)
@@ -60,10 +60,10 @@ def judge(expected: str, heard: str) -> tuple[bool, str]:
 
 
 def _tts(req: dict, prompt: str) -> tuple[bytes, dict]:
-    def call():
+    def call(model: str):
         TTS_LIMIT.wait()
         return gemini().models.generate_content(
-            model=req["model"],
+            model=model,
             contents=prompt,
             config=types.GenerateContentConfig(
                 response_modalities=["AUDIO"],
@@ -75,7 +75,7 @@ def _tts(req: dict, prompt: str) -> tuple[bytes, dict]:
             ),
         )
 
-    response = with_retry(call, what="TTS")
+    _, response = with_models(req["model"], call, what="TTS")
     part = response.candidates[0].content.parts[0]
     data, mime = part.inline_data.data, part.inline_data.mime_type or ""
     wav = data if "wav" in mime else pcm_to_wav(data)  # some TTS models return raw 24 kHz PCM
@@ -83,12 +83,12 @@ def _tts(req: dict, prompt: str) -> tuple[bytes, dict]:
 
 
 def _transcribe(req: dict, wav: bytes) -> tuple[str, dict]:
-    response = with_retry(lambda: gemini().models.generate_content(
-        model=req.get("checkModel") or "gemini-3.6-flash",
+    _, response = with_models(req.get("checkModel"), lambda m: gemini().models.generate_content(
+        model=m,
         contents=[types.Part.from_bytes(data=wav, mime_type="audio/wav"),
                   "Transcribe this audio exactly, word for word, including any words that are not part of a "
                   "sentence. Output only the transcript."],
-    ), what="TTS check")
+    ), what="TTS check", default="gemini-3.6-flash")
     return (response.text or "").strip(), usage_dict(response)
 
 
@@ -124,4 +124,4 @@ def synthesize_narration(req: dict) -> dict:
             results.append(f.result())
             activity.heartbeat(len(results))
     results.sort(key=lambda r: r["index"])
-    return {"lines": results, "model": req["model"], "voiceName": req.get("voiceName") or "Charon"}
+    return {"lines": results, "model": model_list(req["model"])[0], "voiceName": req.get("voiceName") or "Charon"}

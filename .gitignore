@@ -30,3 +30,7 @@ dist/
 data/
 drop/
 *.log
+
+# Runtime
+logs/
+.run/

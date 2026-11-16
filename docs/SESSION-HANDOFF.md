@@ -7,7 +7,14 @@
   - `6052eeb` per-shot keyframe redo (notes, Auto/Premium/Free, versions, edit prompt)
   - `fc07b42` script line editing + per-line voice redo (takes, needs-voice flag)
 - `af8fbf5` `workers/modal_apps/wan.py` (Wan 2.2 I2V on Modal H100, modes fast|hybrid|standard, CRF-12 encoding) + `workers/bench/wan_benchmark.py`.
-- Tests: 20 Java (`./gradlew :control-plane:test`), 2 Python (`uv run pytest workers/tests`). All green at last run.
+- **Work X** (code-quality pass, committed after `af8fbf5`):
+  0. Narration timing: `NarrationTiming` places lines from real voice lengths (Shorts: shrink gaps, then up to 8% tempo, never cut words); `ShotTiming.fitAnchored` pins each line's first shot; animatic applies tempo and extends the last shot. Fixes the night-sky Short (last sentence cut, drift). **Not yet re-run on that video** (redo Shot plan ≈ ₹15–20, needs owner OK).
+  1. `scripts/start.ps1` / `scripts/stop.ps1` (`-All` also stops Docker). Logs in `logs/`, PIDs in `.run/`.
+  2. `ProductionService` split into a facade + `ProductionDeps`, `StageSupport`, one class per stage, `ProductionReadModel`.
+  3. `ProductionPersistenceTest`: real Postgres via Testcontainers (skips without Docker).
+  4. Wan worker: no CPU offload on H100 (offload fallback on OOM), `generate_one` per clip via `.map` (up to 4 containers), live progress in `modal.Dict` `projectv-progress`. Redeployed; **speed not yet measured**.
+  5. Model fallback lists (`ModelFallback.java`, `common.with_models`): retired/hanging/overloaded → next model; billing/quota errors don't hop. Verified live 16 Nov: 3.6-flash timed out → 3.5-flash → rule-based plan (Gemini itself was returning 504 for every text model at that moment).
+- Tests: 35 Java (`./gradlew :control-plane:test`), 6 Python (`uv run pytest workers/tests`). All green.
 
 ## M2b (real video) — current state
 - Wan 2.2 I2V A14B + lightx2v 4-step LoRAs (Apache-2.0) deployed as Modal app `projectv-wan`; weights cached in volume `projectv-hf-cache` (~160 GB incl. Z-Image).

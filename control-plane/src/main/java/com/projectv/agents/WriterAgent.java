@@ -52,9 +52,10 @@ public class WriterAgent {
             case "none" -> "There is NO narration. Write %d visual beats (spoken=false), each a vivid description of what the audience sees and feels."
                     .formatted(Math.max(6, plan.durationSec() / 8));
             case "sparse" -> "Narration is SPARSE and poetic: about %d words in total, in %d-%d short lines (spoken=true), leaving long musical silences. Add a few spoken=false visual beats where music alone should carry the moment."
-                    .formatted(Math.round(plan.durationSec() * 0.9), Math.max(6, plan.durationSec() / 20), Math.max(8, plan.durationSec() / 12));
-            default -> "Narration is FULL: about %d words in total (≈2.3 words per second), split into lines of 1-2 sentences (spoken=true)."
-                    .formatted(Math.round(plan.durationSec() * 2.3 * 0.85));
+                    .formatted(Math.round(plan.durationSec() * 0.75), Math.max(6, plan.durationSec() / 20), Math.max(8, plan.durationSec() / 12));
+            // ~2.1 spoken words/s for TTS narration, minus room for breaths between lines and music-only moments.
+            default -> "Narration is FULL but must leave breathing room: at most %d words in total, split into lines of 1-2 sentences (spoken=true). Never exceed this; the video cannot be longer than %d seconds."
+                    .formatted(Math.round(plan.durationSec() * 2.1 * 0.78), plan.durationSec());
         };
         String system = """
                 You are the head writer of a premium documentary studio. Style preset: %s (%s).

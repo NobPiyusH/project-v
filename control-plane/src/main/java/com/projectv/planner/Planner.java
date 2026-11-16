@@ -15,9 +15,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -43,16 +41,19 @@ public class Planner {
     private final String apiKey;
     private final String modelName;
     private final long timeoutSeconds;
+    private final String fallbacks;
 
     public Planner(ObjectProvider<ChatModel> chatModel, StylePresets presets,
                    @Value("${spring.ai.google.genai.api-key:}") String apiKey,
                    @Value("${spring.ai.google.genai.chat.options.model:}") String modelName,
-                   @Value("${projectv.planner.timeout-seconds:90}") long timeoutSeconds) {
+                   @Value("${projectv.planner.timeout-seconds:90}") long timeoutSeconds,
+                   @Value("${projectv.models.text-fallbacks:}") String fallbacks) {
         this.chatModel = chatModel;
         this.presets = presets;
         this.apiKey = apiKey;
         this.modelName = modelName;
         this.timeoutSeconds = timeoutSeconds;
+        this.fallbacks = fallbacks;
     }
 
     public boolean llmConfigured() {
@@ -68,15 +69,19 @@ public class Planner {
             return fallback(prompt, "No GEMINI_API_KEY configured");
         }
         try {
-            // Hard time limit: some Gemini models can hang under load, and a stuck call must not block the video.
-            ResponseEntity<ChatResponse, VideoPlan> response = CompletableFuture
-                    .supplyAsync(() -> ChatClient.create(chatModel.getObject())
+            // Hard time limit per model plus the ordered fallback list (Work X): a hung or retired model moves on to
+            // the next one instead of blocking or failing the video; the rule-based plan is the last resort.
+            com.projectv.agents.ModelFallback.Attempt<ResponseEntity<ChatResponse, VideoPlan>> attempt = com.projectv.agents.ModelFallback.run(
+                    com.projectv.agents.ModelFallback.models(modelName, fallbacks), timeoutSeconds, "PLAN",
+                    m -> ChatClient.create(chatModel.getObject())
                             .prompt()
+                            .options(org.springframework.ai.chat.prompt.ChatOptions.builder().model(m))
                             .system(systemPrompt())
                             .user(userPrompt(prompt, ownerNotes))
                             .call()
-                            .responseEntity(VideoPlan.class))
-                    .get(timeoutSeconds, TimeUnit.SECONDS);
+                            .responseEntity(VideoPlan.class));
+            ResponseEntity<ChatResponse, VideoPlan> response = attempt.value();
+            String usedModel = attempt.model();
             VideoPlan plan = normalise(response.entity(), prompt);
             Long tokens = null;
             if (response.response() != null && response.response().getMetadata() != null
@@ -84,10 +89,10 @@ public class Planner {
                 Integer total = response.response().getMetadata().getUsage().getTotalTokens();
                 tokens = total == null ? null : total.longValue();
             }
-            return new Outcome(plan, stagesFor(plan), "gemini:" + modelName, tokens, null);
+            return new Outcome(plan, stagesFor(plan), "gemini:" + usedModel, tokens, null);
         } catch (TimeoutException e) {
             log.warn("Gemini planning timed out after {}s, using rule-based fallback", timeoutSeconds);
-            return fallback(prompt, "Gemini (" + modelName + ") did not answer within " + timeoutSeconds + "s");
+            return fallback(prompt, "No Gemini model answered within " + timeoutSeconds + "s");
         } catch (Exception e) {
             if (e instanceof InterruptedException) {
                 Thread.currentThread().interrupt();

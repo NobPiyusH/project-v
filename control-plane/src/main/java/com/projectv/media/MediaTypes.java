@@ -73,7 +73,8 @@ public final class MediaTypes {
     public record AnimaticShot(int index, double startSec, double durationSec, String imageUri, String overlayText) {
     }
 
-    public record AnimaticLine(String uri, double startSec) {
+    /** @param tempo voice speed factor (1.0 = as recorded) */
+    public record AnimaticLine(String uri, double startSec, double tempo) {
     }
 
     public record AnimaticRequest(String videoId, String title, List<AnimaticShot> shots, List<AnimaticLine> narration,

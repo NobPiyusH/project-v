@@ -65,7 +65,13 @@ def main(video_id: str, out_dir: str, shot_numbers: list[int] | None = None, mod
 
     wan = modal.Cls.from_name("projectv-wan", "Wan")()
     t = time.time()
-    results = wan.generate.remote(jobs)
+    # One call per clip: parallel across GPUs, each result saved the moment it finishes.
+    results = []
+    for r in wan.generate_one.map(jobs, order_outputs=False):
+        results.append(r)
+        if r.get("mp4"):
+            (out / f"{r['id']}.mp4").write_bytes(r["mp4"])
+        print(f"  finished {r['id']} after {time.time() - t:.0f}s ({r['seconds']:.0f}s on GPU)", flush=True)
     total = time.time() - t
     info = wan.info.remote()
 

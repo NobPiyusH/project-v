@@ -55,13 +55,18 @@ def download() -> str:
     return f"downloaded in {time.time() - t:.0f}s"
 
 
+# Live progress per clip (written every denoising step; read by the media worker / dashboard).
+progress = modal.Dict.from_name("projectv-progress", create_if_missing=True)
+
+
 @app.cls(
     gpu="H100",
     image=image,
     volumes={"/cache": hf_cache},
     timeout=3600,
-    memory=98304,          # model offload keeps idle experts in RAM
+    memory=98304,          # room for the offload fallback
     scaledown_window=120,  # CLAUDE.md rule 8: never leave a GPU idling
+    max_containers=4,      # parallel clips across at most 4 GPUs: faster, same total GPU time, capped spend rate
 )
 class Wan:
     @modal.enter()
@@ -76,9 +81,25 @@ class Wan:
         pipe.load_lora_weights(hf_hub_download(LORA_REPO, LORA_HIGH, cache_dir=CACHE), adapter_name="fast")
         pipe.load_lora_weights(hf_hub_download(LORA_REPO, LORA_LOW, cache_dir=CACHE), adapter_name="fast_2",
                                load_into_transformer_2=True)
-        pipe.enable_model_cpu_offload()
+        # Work X: keep everything on the 80 GB H100. The first benchmark swapped experts to CPU every clip, which cost
+        # ~3/4 of a fast clip's time. If memory ever runs out, _run() falls back to offloading and retries once.
+        try:
+            pipe.to("cuda")
+            self.offloaded = False
+        except torch.cuda.OutOfMemoryError:
+            torch.cuda.empty_cache()
+            pipe.enable_model_cpu_offload()
+            self.offloaded = True
         self.pipe = pipe
         self.load_seconds = time.time() - t
+
+    def _offload(self) -> None:
+        import torch
+
+        torch.cuda.empty_cache()
+        self.pipe.to("cpu")
+        self.pipe.enable_model_cpu_offload()
+        self.offloaded = True
 
     # Quality modes (benchmarked 16 Nov 2026 on an H100, 720p, 81 frames):
     #   fast     - 4-step LoRA on both experts.            ~2 min/clip. Detail turns soft/mushy late in the clip.
@@ -116,46 +137,80 @@ class Wan:
         finally:
             writer.close()
 
-    @modal.method()
-    def generate(self, jobs: list[dict]) -> list[dict]:
-        """jobs: [{id, image: bytes, prompt, width, height, numFrames, mode: fast|hybrid|standard, steps?, seed}]
-        -> [{id, mp4: bytes, seconds, frames, fps, mode, steps, error}]"""
+    def _render(self, job: dict, cfg: dict, steps: int):
         import torch
         from PIL import Image
 
-        out = []
-        for job in jobs:
-            t = time.time()
+        img = Image.open(io.BytesIO(job["image"])).convert("RGB")
+        w, h = int(job.get("width", 1280)), int(job.get("height", 720))
+        img = img.resize((w, h), Image.LANCZOS)
+        started = time.time()
+
+        def on_step(pipe, step, timestep, kwargs):
+            # Progress for the dashboard: which step, and a time-left estimate from the steps done so far.
+            done = step + 1
+            elapsed = time.time() - started
+            progress[job["id"]] = {"step": done, "steps": steps, "elapsed": round(elapsed, 1),
+                                   "etaSec": round(elapsed / done * (steps - done), 1), "state": "rendering"}
+            return kwargs
+
+        return self.pipe(
+            image=img,
+            prompt=job["prompt"],
+            negative_prompt=NEGATIVE,
+            width=w,
+            height=h,
+            num_frames=int(job.get("numFrames", 81)),   # 81 frames = ~5 s at Wan's native 16 fps
+            num_inference_steps=steps,
+            guidance_scale=cfg["g1"],
+            guidance_scale_2=cfg["g2"],
+            generator=torch.Generator("cuda").manual_seed(int(job.get("seed") or 0)),
+            callback_on_step_end=on_step,
+        ).frames[0]
+
+    def _run(self, job: dict) -> dict:
+        """One clip. Never raises: errors come back in the result so one bad clip can't sink a batch."""
+        import torch
+
+        t = time.time()
+        try:
+            mode = job.get("mode") or ("fast" if job.get("fast", True) else "standard")
+            cfg = self.MODES[mode]
+            steps = int(job.get("steps") or cfg["steps"])
+            self._set_mode(cfg)
+            progress[job["id"]] = {"step": 0, "steps": steps, "elapsed": 0, "etaSec": None, "state": "starting"}
             try:
-                mode = job.get("mode") or ("fast" if job.get("fast", True) else "standard")
-                cfg = self.MODES[mode]
-                steps = int(job.get("steps") or cfg["steps"])
-                self._set_mode(cfg)
-                img = Image.open(io.BytesIO(job["image"])).convert("RGB")
-                w, h = int(job.get("width", 1280)), int(job.get("height", 720))
-                img = img.resize((w, h), Image.LANCZOS)
-                frames = self.pipe(
-                    image=img,
-                    prompt=job["prompt"],
-                    negative_prompt=NEGATIVE,
-                    width=w,
-                    height=h,
-                    num_frames=int(job.get("numFrames", 81)),   # 81 frames = ~5 s at Wan's native 16 fps
-                    num_inference_steps=steps,
-                    guidance_scale=cfg["g1"],
-                    guidance_scale_2=cfg["g2"],
-                    generator=torch.Generator("cuda").manual_seed(int(job.get("seed") or 0)),
-                ).frames[0]
-                path = f"/tmp/{job['id']}.mp4"
-                self._encode(frames, path, fps=16)
-                with open(path, "rb") as f:
-                    data = f.read()
-                out.append({"id": job["id"], "mp4": data, "seconds": time.time() - t, "frames": len(frames), "fps": 16,
-                            "mode": mode, "steps": steps, "error": None})
-            except Exception as e:  # one bad clip must not lose the batch
-                out.append({"id": job["id"], "mp4": None, "seconds": time.time() - t, "mode": job.get("mode"),
-                            "error": f"{type(e).__name__}: {e}"[:600]})
-        return out
+                frames = self._render(job, cfg, steps)
+            except torch.cuda.OutOfMemoryError:
+                if self.offloaded:
+                    raise
+                self._offload()   # fall back to swapping experts, then retry this clip once
+                frames = self._render(job, cfg, steps)
+            progress[job["id"]] = {"step": steps, "steps": steps, "elapsed": round(time.time() - t, 1), "etaSec": 0,
+                                   "state": "encoding"}
+            path = f"/tmp/{job['id']}.mp4"
+            self._encode(frames, path, fps=16)
+            with open(path, "rb") as f:
+                data = f.read()
+            progress[job["id"]] = {"step": steps, "steps": steps, "elapsed": round(time.time() - t, 1), "etaSec": 0,
+                                   "state": "done"}
+            return {"id": job["id"], "mp4": data, "seconds": time.time() - t, "frames": len(frames), "fps": 16,
+                    "mode": mode, "steps": steps, "offloaded": self.offloaded, "error": None}
+        except Exception as e:
+            progress[job["id"]] = {"state": "failed", "error": f"{type(e).__name__}: {e}"[:300]}
+            return {"id": job["id"], "mp4": None, "seconds": time.time() - t, "mode": job.get("mode"),
+                    "error": f"{type(e).__name__}: {e}"[:600]}
+
+    @modal.method()
+    def generate_one(self, job: dict) -> dict:
+        """One clip per call: callers use generate_one.map(jobs, order_outputs=False) so clips render in parallel
+        on up to max_containers GPUs and each result arrives (and can be saved) as soon as it is finished."""
+        return self._run(job)
+
+    @modal.method()
+    def generate(self, jobs: list[dict]) -> list[dict]:
+        """Batch in one container (kept for the first benchmark script)."""
+        return [self._run(job) for job in jobs]
 
     @modal.method()
     def info(self) -> dict:

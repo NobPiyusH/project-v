@@ -60,7 +60,9 @@ def render_animatic(req: dict) -> dict:
             p = download(line["uri"], tmp / f"n{i}.wav")
             inputs += ["-i", str(p)]
             ms = int(float(line["startSec"]) * 1000)
-            filters.append(f"[{i}:a]aresample=48000,aformat=channel_layouts=stereo,adelay={ms}|{ms}[n{i}]")
+            tempo = float(line.get("tempo") or 1.0)
+            speed = f",atempo={tempo:.3f}" if abs(tempo - 1.0) > 1e-3 else ""
+            filters.append(f"[{i}:a]aresample=48000,aformat=channel_layouts=stereo{speed},adelay={ms}|{ms}[n{i}]")
             labels.append(f"[n{i}]")
         n_voice = len(labels)
         audio = tmp / "audio.wav"
