@@ -80,12 +80,24 @@ public class OpenAiCompatChat {
         if (r == null || !(r.get("choices") instanceof List<?> choices) || choices.isEmpty()) {
             throw new IllegalStateException("unavailable: the provider returned no choices");
         }
-        Map<String, Object> msg = (Map<String, Object>) ((Map<String, Object>) choices.getFirst()).get("message");
+        Map<String, Object> choice = (Map<String, Object>) choices.getFirst();
+        Map<String, Object> msg = (Map<String, Object>) choice.get("message");
         String text = msg == null ? null : (String) msg.get("content");
         if (text == null || text.isBlank()) {
             throw new IllegalStateException("unavailable: the provider returned an empty answer");
         }
-        T entity = converter.convert(clean(text));
+        // A cut-off or unreadable answer is this model's problem: report it so the next model is tried
+        // (16 Nov 2026: Groq's answer for a shot plan stopped mid-JSON and failed the whole stage).
+        if ("length".equals(choice.get("finish_reason"))) {
+            throw new IllegalStateException("unavailable: " + model + " answer was cut off (token limit)");
+        }
+        T entity;
+        try {
+            entity = converter.convert(clean(text));
+        } catch (RuntimeException e) {
+            throw new IllegalStateException("unavailable: " + model + " returned an unreadable answer ("
+                    + e.getClass().getSimpleName() + ")", e);
+        }
         Map<String, Object> u = r.get("usage") instanceof Map<?, ?> m ? (Map<String, Object>) m : Map.of();
         long p = num(u.get("prompt_tokens"));
         long c = num(u.get("completion_tokens"));
