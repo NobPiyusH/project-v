@@ -70,10 +70,54 @@ def test_a_modal_failure_is_reported_per_clip(fake, monkeypatch):
         def get(self, timeout=0):
             raise C.modal.exception.FunctionTimeoutError("clip ran past its time limit")
 
-    monkeypatch.setattr(fake, "calls", [])
     wan = SimpleNamespace(generate_one=SimpleNamespace(spawn=lambda job: Boom(job, 1)))
     monkeypatch.setattr(C.modal.Cls, "from_name", lambda app, cls: (lambda: wan))
-    out = C.generate_clips(_req(1))
-    assert out["clips"][0]["uri"] is None
-    assert "FunctionTimeoutError" in out["clips"][0]["error"]
+    out = C.generate_clips({**_req(2), "containers": 4})
+    assert [c["uri"] for c in out["clips"]] == [None, None]
+    assert all("FunctionTimeoutError" in c["error"] for c in out["clips"])
     assert out["stopped"] is False
+
+
+def _stream(monkeypatch, fake, stop_after=None):
+    """Fake one-container stream: yields clips in turn and honours the stop flag between clips."""
+    seen = {}
+
+    class Stream:
+        def remote_gen(self, payloads, stop_key):
+            seen["stop_key"] = stop_key
+            for i, p in enumerate(payloads):
+                if stop_after is not None and i >= stop_after:
+                    fake.stop["after"] = 0  # the owner pressed Stop while clip i-1 rendered
+                    import threading  # time.sleep is stubbed out by the fixture; Event.wait really waits
+                    for _ in range(100):
+                        if progress.get(stop_key):
+                            break
+                        threading.Event().wait(0.01)
+                if progress.get(stop_key):
+                    yield {"id": p["id"], "mp4": None, "error": "stopped"}
+                    continue
+                yield {"id": p["id"], "mp4": b"MP4", "seconds": 12.0, "frames": 33, "fps": 16, "mode": "fast"}
+
+    progress = {}
+    monkeypatch.setattr(C.modal.Dict, "from_name", lambda name, create_if_missing=False: progress)
+    wan = SimpleNamespace(generate_stream=Stream(), generate_one=None)
+    monkeypatch.setattr(C.modal.Cls, "from_name", lambda app, cls: (lambda: wan))
+    monkeypatch.setattr(C, "POLL_SECONDS", 0.05)
+    return seen
+
+
+def test_drafts_run_in_one_container_and_are_saved_one_by_one(fake, monkeypatch):
+    _stream(monkeypatch, fake)
+    out = C.generate_clips({**_req(3), "containers": 1})
+    assert out["containers"] == 1
+    assert [c["uri"] is not None for c in out["clips"]] == [True, True, True]
+    assert len(fake.saved) == 3 and out["stopped"] is False
+
+
+def test_stop_in_one_container_mode_keeps_finished_clips(fake, monkeypatch):
+    seen = _stream(monkeypatch, fake, stop_after=1)
+    out = C.generate_clips({**_req(3), "containers": 1})
+    by_shot = {c["shotId"]: c for c in out["clips"]}
+    assert by_shot["shot-1"]["uri"] is not None
+    assert by_shot["shot-2"]["error"] == "stopped" and by_shot["shot-3"]["error"] == "stopped"
+    assert out["stopped"] is True and seen["stop_key"].startswith("stop-")

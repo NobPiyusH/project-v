@@ -222,6 +222,9 @@ class ProductionPersistenceTest {
         assertEquals(480, job.width(), "vertical Short: 480x832 drafts");
         assertEquals(832, job.height());
         assertEquals("fast", job.mode());
+        assertEquals(1, request.containers(), "drafts share one GPU: one start-up");
+        assertEquals(1, VideoStage.containers(VideoStage.DRAFT, 24));
+        assertEquals(4, VideoStage.containers(VideoStage.FINAL, 24));
         assertTrue(job.prompt().startsWith("slow push in. stars wheel overhead. Visual style:"), job.prompt());
 
         var result = new com.projectv.media.MediaTypes.ClipResult(List.of(

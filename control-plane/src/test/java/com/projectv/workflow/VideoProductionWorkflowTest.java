@@ -192,7 +192,7 @@ class VideoProductionWorkflowTest {
         @Override
         public com.projectv.media.MediaTypes.ClipRequest clipRequest(String videoId, String kind, List<String> shotIds) {
             clipRequests.add(kind + ":" + shotIds);
-            return new com.projectv.media.MediaTypes.ClipRequest(videoId, "app", "Wan", "http://x", List.of(), 100,
+            return new com.projectv.media.MediaTypes.ClipRequest(videoId, "app", "Wan", "http://x", List.of(), 1, 100,
                     java.math.BigDecimal.TEN);
         }
 

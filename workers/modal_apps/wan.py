@@ -207,6 +207,17 @@ class Wan:
         on up to max_containers GPUs and each result arrives (and can be saved) as soon as it is finished."""
         return self._run(job)
 
+    @modal.method(is_generator=True)
+    def generate_stream(self, jobs: list[dict], stop_key: str | None = None):
+        """Several clips in ONE container, one after another, each yielded as soon as it is finished. Used for drafts:
+        the container start + model load (~2 min of H100 time) is paid once per batch instead of once per GPU.
+        The caller sets progress[stop_key] to stop: the clips not started yet come back as "stopped"."""
+        for job in jobs:
+            if stop_key and progress.get(stop_key):
+                yield {"id": job["id"], "mp4": None, "seconds": 0, "mode": job.get("mode"), "error": "stopped"}
+                continue
+            yield self._run(job)
+
     @modal.method()
     def generate(self, jobs: list[dict]) -> list[dict]:
         """Batch in one container (kept for the first benchmark script)."""

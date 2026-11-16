@@ -140,8 +140,9 @@ public final class MediaTypes {
     }
 
     /** @param estimateInr GPU estimate for the whole batch incl. container start-up (shown to the owner first) */
+    /** @param containers GPU containers to use: 1 = render in turn on one GPU (one start-up), else up to 4 in parallel */
     public record ClipRequest(String videoId, String modalApp, String modalClass, String progressUrl, List<ClipJob> jobs,
-                              double estimateGpuSeconds, java.math.BigDecimal estimateInr) {
+                              int containers, double estimateGpuSeconds, java.math.BigDecimal estimateInr) {
     }
 
     /** One finished (or failed / stopped) clip. {@code gpuSeconds} is render time on the GPU. */

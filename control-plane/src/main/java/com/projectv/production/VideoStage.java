@@ -69,7 +69,7 @@ public class VideoStage extends StageSupport {
         double gpu = gpuSeconds(jobs, kind);
         BigDecimal inr = pricing.modalGpuInr("H100", gpu).setScale(2, RoundingMode.HALF_UP);
         double usd = inr.doubleValue() / pricing.fx();
-        int containers = Math.min(MAX_CONTAINERS, jobs.size());
+        int containers = containers(kind, jobs.size());
         double wall = jobs.isEmpty() ? 0 : (pricing.gpuContainerStartSeconds() + (gpu - containers * pricing.gpuContainerStartSeconds()) / containers) / 60;
         String what = DRAFT.equals(kind) ? "draft clips (fast, 480p)" : "final clips (hybrid, 720p)";
         String summary = jobs.isEmpty() ? "No shots need " + what + "."
@@ -90,7 +90,7 @@ public class VideoStage extends StageSupport {
         double gpu = gpuSeconds(jobs, kind);
         BigDecimal inr = pricing.modalGpuInr("H100", gpu);
         budget.requireGpu(inr, jobs.size() + " " + kind + " clips");
-        return new ClipRequest(videoId.toString(), wanApp, wanClass, publicUrl, jobs, gpu, inr.setScale(2, RoundingMode.HALF_UP));
+        return new ClipRequest(videoId.toString(), wanApp, wanClass, publicUrl, jobs, containers(kind, jobs.size()), gpu, inr.setScale(2, RoundingMode.HALF_UP));
     }
 
     List<ClipJob> jobs(UUID videoId, String kind, List<UUID> only) {
@@ -136,7 +136,15 @@ public class VideoStage extends StageSupport {
     double gpuSeconds(List<ClipJob> jobs, String kind) {
         double perClip81 = pricing.wanSecondsPer81Frames(kind);
         double render = jobs.stream().mapToDouble(j -> perClip81 * j.numFrames() / MAX_FRAMES).sum();
-        return render + Math.min(MAX_CONTAINERS, jobs.size()) * pricing.gpuContainerStartSeconds();
+        return render + containers(kind, jobs.size()) * pricing.gpuContainerStartSeconds();
+    }
+
+    /**
+     * Drafts render in turn on ONE GPU: start-up + model load (~2 min of H100 time) is paid once, and a draft takes
+     * only ~12 s, so parallel GPUs would mostly pay for start-ups. Finals (~8 min each) spread over up to 4 GPUs.
+     */
+    static int containers(String kind, int clips) {
+        return clips == 0 ? 0 : DRAFT.equals(kind) ? 1 : Math.min(MAX_CONTAINERS, clips);
     }
 
     // ------------------------------------------------------------------------------------------- save results
