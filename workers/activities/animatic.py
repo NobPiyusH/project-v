@@ -9,7 +9,8 @@ from temporalio import activity
 
 from workers.common import download, media_duration, put_file, run_ffmpeg, workdir
 
-W, H, FPS = 1920, 1080, 30
+FPS = 30
+SIZES = {"16:9": (1920, 1080), "9:16": (1080, 1920), "1:1": (1080, 1080), "4:5": (1080, 1350)}
 FONT = "C\\:/Windows/Fonts/segoeui.ttf"
 
 
@@ -20,8 +21,10 @@ def _esc(text: str) -> str:
 @activity.defn(name="render_animatic")
 def render_animatic(req: dict) -> dict:
     """req: {videoId, title, shots:[{index, startSec, durationSec, imageUri, overlayText}],
-             narration:[{uri, startSec}], musicUri, totalSec}
+             narration:[{uri, startSec, tempo}], musicUri, totalSec, aspectRatio}
     -> {uri, durationSec}"""
+    # The animatic matches the video's frame: a vertical Short is rendered vertical (its keyframes are vertical too).
+    W, H = SIZES.get(req.get("aspectRatio") or "16:9", SIZES["16:9"])
     with workdir("animatic") as tmp:
         tmp = Path(tmp)
         shots = sorted(req["shots"], key=lambda s: s["startSec"])

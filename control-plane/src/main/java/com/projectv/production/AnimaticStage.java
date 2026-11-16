@@ -81,12 +81,15 @@ public class AnimaticStage extends StageSupport {
         String musicUri = jdbc.sql("""
                         SELECT a.uri_hot FROM music_cue m JOIN asset a ON a.id = m.asset_id WHERE m.video_id = :v
                         """).param("v", videoId).query(String.class).optional().orElse(null);
-        return new AnimaticRequest(videoId.toString(), plan.title(), shots, narration, musicUri, Math.max(end, prevEnd));
+        return new AnimaticRequest(videoId.toString(), plan.title(), shots, narration, musicUri, Math.max(end, prevEnd),
+                plan.aspectRatio());
     }
 
     @Transactional
     public StageResult saveAnimatic(UUID videoId, AnimaticResult r) {
-        UUID assetId = assets.create(new NewAsset(videoId, "video", r.uri(), "video/mp4", 1920, 1080, r.durationSec(),
+        boolean vertical = "9:16".equals(plan(videoId).aspectRatio());
+        UUID assetId = assets.create(new NewAsset(videoId, "video", r.uri(), "video/mp4", vertical ? 1080 : 1920,
+                vertical ? 1920 : 1080, r.durationSec(),
                 "projectv", "ffmpeg animatic", null, null, AssetStore.LICENCE_OWN_RENDER, false));
         jdbc.sql("UPDATE video SET animatic_asset_id = :a, updated_at = now() WHERE id = :v")
                 .param("a", assetId).param("v", videoId).update();

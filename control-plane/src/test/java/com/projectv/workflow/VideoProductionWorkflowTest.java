@@ -152,7 +152,7 @@ class VideoProductionWorkflowTest {
 
         @Override
         public AnimaticRequest animaticRequest(String videoId) {
-            return new AnimaticRequest(videoId, "t", List.of(), List.of(), null, 1);
+            return new AnimaticRequest(videoId, "t", List.of(), List.of(), null, 1, "16:9");
         }
 
         @Override

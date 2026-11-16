@@ -85,14 +85,30 @@ def get_bytes(uri: str) -> bytes:
 
 # ----------------------------------------------------------------------------------------------------------- gemini
 
-@functools.cache
+_client: genai.Client | None = None
+_client_lock = threading.Lock()
+
+
 def gemini() -> genai.Client:
-    key = os.getenv("GEMINI_API_KEY")
-    if not key:
-        raise RuntimeError("GEMINI_API_KEY is not set in .env")
-    # v1beta: Lyria, Nano Banana and the TTS models are only served there (the SDK defaults to v1).
-    # Generous timeout: media models (music, images) can take a while. Value is in milliseconds.
-    return genai.Client(api_key=key, http_options=types.HttpOptions(api_version="v1beta", timeout=300_000))
+    """One shared client for the process. A throwaway client (``gemini().models...``) can be garbage-collected, and
+    so closed, while its request is still running ("client has been closed"), so the client is kept alive here."""
+    global _client
+    with _client_lock:
+        if _client is None:
+            key = os.getenv("GEMINI_API_KEY")
+            if not key:
+                raise RuntimeError("GEMINI_API_KEY is not set in .env")
+            # v1beta: Lyria, Nano Banana and the TTS models are only served there (the SDK defaults to v1).
+            # Generous timeout: media models (music, images) can take a while. Value is in milliseconds.
+            _client = genai.Client(api_key=key, http_options=types.HttpOptions(api_version="v1beta", timeout=300_000))
+        return _client
+
+
+def _reset_gemini() -> None:
+    """Drops the shared client so the next gemini() builds a fresh one (after "client has been closed")."""
+    global _client
+    with _client_lock:
+        _client = None
 
 
 class RateLimiter:
@@ -119,6 +135,12 @@ def with_retry(fn, *, attempts: int = 6, what: str = "Gemini call"):
     for i in range(attempts):
         try:
             return fn()
+        except RuntimeError as e:
+            # Seen 16 Nov on parallel Nano Banana calls: the SDK's HTTP client was found closed. Rebuild and retry.
+            if "client has been closed" not in str(e) or i == attempts - 1:
+                raise
+            log.warning("%s: Gemini client was closed, rebuilding it and retrying (%d/%d)", what, i + 1, attempts)
+            _reset_gemini()
         except (genai_errors.ClientError, genai_errors.ServerError) as e:
             code = getattr(e, "code", None) or getattr(e, "status_code", None)
             if code not in (429, 500, 503, 504) or i == attempts - 1:

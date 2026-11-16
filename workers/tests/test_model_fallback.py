@@ -55,3 +55,18 @@ def test_last_model_error_is_raised():
 def test_model_list_parsing_and_default():
     assert common.model_list(" a , b ,, ") == ["a", "b"]
     assert common.model_list(None, default="x") == ["x"]
+
+
+def test_closed_client_is_rebuilt_and_retried(monkeypatch):
+    resets = []
+    monkeypatch.setattr(common, "_reset_gemini", lambda: resets.append(1))
+    calls = []
+
+    def fn():
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("Cannot send a request, as the client has been closed.")
+        return "ok"
+
+    assert common.with_retry(fn, what="test") == "ok"
+    assert resets == [1]

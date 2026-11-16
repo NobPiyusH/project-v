@@ -78,7 +78,7 @@ public final class MediaTypes {
     }
 
     public record AnimaticRequest(String videoId, String title, List<AnimaticShot> shots, List<AnimaticLine> narration,
-                                  String musicUri, double totalSec) {
+                                  String musicUri, double totalSec, String aspectRatio) {
     }
 
     public record AnimaticResult(String uri, double durationSec) {
