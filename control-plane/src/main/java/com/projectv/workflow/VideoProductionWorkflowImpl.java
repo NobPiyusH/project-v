@@ -1,5 +1,7 @@
 package com.projectv.workflow;
 
+import com.projectv.media.MediaTypes.ClipEstimate;
+import com.projectv.media.MediaTypes.ClipRequest;
 import com.projectv.media.MediaTypes.Finding;
 import com.projectv.media.MediaTypes.ImageReviewRequest;
 import com.projectv.media.MediaTypes.MediaInspectRequest;
@@ -96,11 +98,25 @@ public class VideoProductionWorkflowImpl implements VideoProductionWorkflow {
     /** Stages the Inspector already sent back once in this run (the automatic redo happens only once). */
     private final java.util.Set<Stage> inspectorRedone = EnumSet.noneOf(Stage.class);
 
-    /** A pending targeted image redo: only these shots, with the owner's notes if any. */
-    private record KeyframeFix(List<String> shotIds, String ownerNotes) {
+    /** A pending targeted redo (images or clips): only these shots, with the owner's notes if any. */
+    private record StageFix(Stage stage, List<String> shotIds, String ownerNotes) {
     }
 
-    private KeyframeFix keyframeFix;
+    private StageFix pendingFix;
+
+    /** Set when the owner declines a GPU batch: the stage is recorded as skipped instead of passed. */
+    private boolean skipStage;
+
+    // Wan clips on Modal (M2b): a batch can take an hour; the worker heartbeats every few seconds. Never retried by
+    // Temporal: a retry would pay for every clip again, so a failure waits for the owner instead.
+    private final MediaActivities clipMedia = Workflow.newActivityStub(MediaActivities.class,
+            ActivityOptions.newBuilder()
+                    .setTaskQueue(TaskQueues.MEDIA)
+                    .setStartToCloseTimeout(Duration.ofHours(4))
+                    .setHeartbeatTimeout(Duration.ofMinutes(3))
+                    .setScheduleToCloseTimeout(Duration.ofHours(24))
+                    .setRetryOptions(RetryOptions.newBuilder().setMaximumAttempts(1).build())
+                    .build());
 
     private record Decision(Stage stage, boolean approve, String notes) {
     }
@@ -186,6 +202,11 @@ public class VideoProductionWorkflowImpl implements VideoProductionWorkflow {
             StageResult result;
             try {
                 result = runStageActivity(videoId, stage, prompt, notes, attempt);
+                if (skipStage) {
+                    skipStage = false;
+                    finish(videoId, stage, attempt, "SKIPPED", result, notes);
+                    return result;
+                }
             } catch (ActivityFailure failure) {
                 // A failed stage never kills the video: it waits for the owner, whatever the stage's mode.
                 // Approve = continue without this stage's output; reject (with notes) = run it again.
@@ -311,12 +332,45 @@ public class VideoProductionWorkflowImpl implements VideoProductionWorkflow {
      * regenerating the whole set. Returns true when the next KEYFRAMES run will be such a targeted redo.
      */
     private boolean targetedRedo(Stage stage, InspectionReport inspection, String ownerNotes) {
-        if (stage != Stage.KEYFRAMES || inspection.redoTargets() == null || inspection.redoTargets().isEmpty()
-                || !creativeDirectorEnabled()) {
+        if (!Inspector.PER_SHOT.contains(stage) || inspection.redoTargets() == null || inspection.redoTargets().isEmpty()
+                || !(stage == Stage.KEYFRAMES ? creativeDirectorEnabled() : videoClipsEnabled())) {
             return false;
         }
-        keyframeFix = new KeyframeFix(inspection.redoTargets(), ownerNotes);
+        pendingFix = new StageFix(stage, inspection.redoTargets(), ownerNotes);
         return true;
+    }
+
+    private StageFix takeFix(Stage stage) {
+        StageFix fix = pendingFix != null && pendingFix.stage() == stage ? pendingFix : null;
+        pendingFix = null;
+        return fix;
+    }
+
+    /**
+     * M2b clip stages. The batch is estimated first and, unless it is under the auto-approve amount, the owner must
+     * approve the GPU spend before anything runs (CLAUDE.md rule 2); declining skips the stage.
+     */
+    private StageResult runClips(String videoId, Stage stage, int attempt, String notes) {
+        String kind = stage == Stage.DRAFT_GEN ? "draft" : "final";
+        StageFix fix = takeFix(stage);
+        List<String> only = fix == null ? null : fix.shotIds();
+        ClipEstimate estimate = activities.clipEstimate(videoId, kind, only);
+        if (estimate.clips() == 0) {
+            skipStage = true;
+            return StageResult.of(estimate.summary(), null);
+        }
+        if (estimate.needsApproval()) {
+            Decision d = awaitOwner(videoId, stage, attempt, "WAITING_APPROVAL", estimate.summary(),
+                    estimate.summary() + " Approve to start, or Reject to skip this stage (nothing is spent).", null, notes, false);
+            if (!d.approve()) {
+                skipStage = true;
+                return StageResult.of("Skipped: the owner didn't approve the GPU spend (" + estimate.summary() + ")", null);
+            }
+            activities.recordStage(videoId, stage, attempt, modeOf(stage), "RUNNING", null, null, notes);
+            views.put(stage, new StageView(stage, modeOf(stage), "RUNNING", attempt, null));
+        }
+        ClipRequest request = agents.clipRequest(videoId, kind, only);
+        return activities.saveClips(videoId, request, clipMedia.generateClips(request));
     }
 
     private StageResult runStageActivity(String videoId, Stage stage, String prompt, String notes, int attempt) {
@@ -337,14 +391,19 @@ public class VideoProductionWorkflowImpl implements VideoProductionWorkflow {
             case SHOT_PLAN:
                 return agents.shotPlan(videoId, notes);
             case KEYFRAMES: {
-                KeyframeFix fix = keyframeFix;
-                keyframeFix = null;
+                StageFix fix = takeFix(Stage.KEYFRAMES);
                 var request = fix == null ? activities.keyframeRequest(videoId, notes)
                         : agents.fixKeyframeRequest(videoId, fix.shotIds(), fix.ownerNotes());
                 return activities.saveKeyframes(videoId, request, media.generateKeyframes(request));
             }
             case ANIMATIC:
                 return activities.saveAnimatic(videoId, media.renderAnimatic(activities.animaticRequest(videoId)));
+            case DRAFT_GEN:
+            case FINAL_GEN:
+                if (videoClipsEnabled()) {
+                    return runClips(videoId, stage, attempt, notes);
+                }
+                break;
             default:
                 break;
         }
@@ -402,6 +461,11 @@ public class VideoProductionWorkflowImpl implements VideoProductionWorkflow {
         List<Finding> findings = new ArrayList<>(files == null || files.findings() == null ? List.of() : files.findings());
         findings.addAll(more);
         return new MediaInspectResult(findings, files == null || files.checked() == null ? List.of() : files.checked());
+    }
+
+    /** Workflows started before M2b replay their old placeholder clip stages (Temporal determinism). */
+    private boolean videoClipsEnabled() {
+        return Workflow.getVersion("video-clips", Workflow.DEFAULT_VERSION, 1) != Workflow.DEFAULT_VERSION;
     }
 
     /** Workflows started before the Creative Director existed replay without it (Temporal determinism). */

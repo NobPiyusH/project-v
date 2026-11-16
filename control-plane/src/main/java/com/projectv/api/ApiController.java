@@ -26,6 +26,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Arrays;
@@ -52,11 +53,14 @@ public class ApiController {
     private final Pricing pricing;
     private final com.projectv.production.Inspector inspector;
     private final com.projectv.production.CreativeDirector creative;
+    private final com.projectv.production.VideoStage video;
+    private final com.projectv.video.ClipProgress clipProgress;
 
     public ApiController(VideoService videos, ProviderRegistry providers, StylePresets presets, CostLedger ledger,
                          Planner planner, ProductionService production, AssetStore assets, MediaUrls mediaUrls,
                          BudgetGuard budget, Pricing pricing, com.projectv.production.Inspector inspector,
-                         com.projectv.production.CreativeDirector creative) {
+                         com.projectv.production.CreativeDirector creative,
+                         com.projectv.production.VideoStage video, com.projectv.video.ClipProgress clipProgress) {
         this.videos = videos;
         this.providers = providers;
         this.presets = presets;
@@ -69,6 +73,8 @@ public class ApiController {
         this.pricing = pricing;
         this.inspector = inspector;
         this.creative = creative;
+        this.video = video;
+        this.clipProgress = clipProgress;
     }
 
     public record CreateVideoRequest(@NotBlank @Size(max = 4000) String prompt, StageMode defaultMode,
@@ -172,6 +178,62 @@ public class ApiController {
     @PutMapping("/videos/{id}/script/lines/{index}")
     public Object editLine(@PathVariable UUID id, @PathVariable int index, @Valid @RequestBody LineEditBody body) {
         return production.editLine(id, index, body.text(), body.spoken());
+    }
+
+    // ---- M2b clips
+
+    public record ClipRedoBody(List<UUID> shotIds, String kind) {
+    }
+
+    public record ClipProgressBody(UUID videoId, List<Map<String, Object>> clips, boolean finished) {
+    }
+
+    @GetMapping("/videos/{id}/clips/estimate")
+    public Object clipEstimate(@PathVariable UUID id, @RequestParam String kind,
+                               @RequestParam(required = false) List<UUID> shotIds) {
+        return video.estimate(id, kind, shotIds == null || shotIds.isEmpty() ? null : shotIds);
+    }
+
+    @PostMapping("/videos/{id}/clips/redo")
+    public Map<String, Object> redoClips(@PathVariable UUID id, @RequestBody ClipRedoBody body) {
+        return Map.of("workflowId", videos.redoClips(id, body.shotIds(), body.kind()));
+    }
+
+    @PostMapping("/videos/{id}/clips/stop")
+    public void stopClips(@PathVariable UUID id) {
+        clipProgress.requestStop(id);
+    }
+
+    @GetMapping("/videos/{id}/clips/progress")
+    public Object clipProgressView(@PathVariable UUID id) {
+        var p = clipProgress.get(id);
+        return p == null ? Map.of("clips", List.of(), "finished", true) : p;
+    }
+
+    @PutMapping("/shots/{shotId}/final-wanted")
+    public void finalWanted(@PathVariable UUID shotId, @RequestParam boolean wanted) {
+        video.setFinalWanted(shotId, wanted);
+    }
+
+    @GetMapping("/shots/{shotId}/clips")
+    public List<Map<String, Object>> clipVersions(@PathVariable UUID shotId) {
+        return video.clipVersions(shotId);
+    }
+
+    @PutMapping("/shots/{shotId}/clips/{assetId}")
+    public void selectClip(@PathVariable UUID shotId, @PathVariable UUID assetId) {
+        video.selectClip(shotId, assetId);
+    }
+
+    // Called by the local media worker (same machine): progress of a running batch, and whether to stop.
+    @PostMapping("/internal/clips/progress")
+    public void reportClipProgress(@RequestBody ClipProgressBody body) {
+        clipProgress.report(body.videoId(), body.clips(), body.finished());
+    }
+
+    @GetMapping("/internal/clips/{id}/stop")
+    public Map<String, Object> clipStop(@PathVariable UUID id) {
+        return Map.of("stop", clipProgress.stopRequested(id));
     }
 
     @PostMapping("/videos/{id}/creative-review")

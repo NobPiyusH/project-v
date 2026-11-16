@@ -88,6 +88,19 @@ public interface VideoActivities {
     /** Targeted redo of weak images: applies the Creative Director's suggested prompts, then builds the request. */
     KeyframeRequest fixKeyframeRequest(String videoId, java.util.List<String> shotIds, String ownerNotes);
 
+    // ---- M2b: moving video per shot (Wan on Modal)
+
+    /** What a batch of clips would cost and take; whether the owner must approve it first. */
+    com.projectv.media.MediaTypes.ClipEstimate clipEstimate(String videoId, String kind, java.util.List<String> shotIds);
+
+    /** The batch for the media worker (null shotIds = every shot that needs one). Refused over the GPU cap. */
+    com.projectv.media.MediaTypes.ClipRequest clipRequest(String videoId, String kind, java.util.List<String> shotIds);
+
+    StageResult saveClips(String videoId, com.projectv.media.MediaTypes.ClipRequest request,
+                          com.projectv.media.MediaTypes.ClipResult result);
+
+    void markClips(String videoId, java.util.List<String> shotIds, String status, String error);
+
     /** Upsert the stage_run row and the video's status / current stage. */
     void recordStage(String videoId, Stage stage, int attempt, StageMode mode, String status,
                      String summary, String artifactJson, String ownerNotes);

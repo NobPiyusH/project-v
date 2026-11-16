@@ -127,4 +127,34 @@ public final class MediaTypes {
     public record MediaInspectResult(List<Finding> findings, List<String> checked) {
         public static final MediaInspectResult NONE = new MediaInspectResult(List.of(), List.of());
     }
+
+    // ---- M2b: moving video per shot (Wan 2.2 image-to-video on Modal)
+
+    /**
+     * @param kind      draft (fast mode, 480p) or final (hybrid mode, 720p)
+     * @param mode      Wan quality mode: fast | hybrid | standard
+     * @param numFrames 4n+1 frames at 16 fps (81 = ~5 s, Wan's limit)
+     */
+    public record ClipJob(String shotId, int shotNumber, int take, String kind, String mode, String imageUri, String prompt,
+                          int width, int height, int numFrames, long seed) {
+    }
+
+    /** @param estimateInr GPU estimate for the whole batch incl. container start-up (shown to the owner first) */
+    public record ClipRequest(String videoId, String modalApp, String modalClass, String progressUrl, List<ClipJob> jobs,
+                              double estimateGpuSeconds, java.math.BigDecimal estimateInr) {
+    }
+
+    /** One finished (or failed / stopped) clip. {@code gpuSeconds} is render time on the GPU. */
+    public record ClipOutput(String shotId, int take, String kind, String uri, double gpuSeconds, int frames, int fps,
+                             String mode, String error) {
+    }
+
+    /** @param containers GPU containers the batch started (each billed its start-up + model load once) */
+    public record ClipResult(List<ClipOutput> clips, int containers, boolean stopped) {
+    }
+
+    /** What a batch would cost, for the owner's go-ahead before any GPU time is spent. */
+    public record ClipEstimate(String kind, int clips, double gpuSeconds, java.math.BigDecimal inr, double usd,
+                               double wallMinutes, boolean needsApproval, String summary) {
+    }
 }

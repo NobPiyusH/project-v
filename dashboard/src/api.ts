@@ -101,6 +101,8 @@ export interface ShotRow {
   id: string; ord: number; duration_target_sec: number; shot_type: string | null; camera_move: string | null
   description: string | null; priority: string; overlay_text: string | null; keyframe_asset_id: string | null
   keyframe_provider: string | null; scene_title: string; status: string; error: string | null
+  draft_clip_asset_id: string | null; final_clip_asset_id: string | null; clip_status: string | null
+  clip_error: string | null; final_wanted: boolean
   prompt_json: { keyframePrompt?: string; motionPrompt?: string; lineIndex?: number | null; startSec?: number; editedByOwner?: boolean }
 }
 
@@ -116,6 +118,14 @@ export interface Production {
   redoingLines: number
   linesNeedingVoice: number
 }
+
+export type ClipKind = 'draft' | 'final'
+
+export interface ClipEstimate { kind: ClipKind; clips: number; gpuSeconds: number; inr: number; usd: number; wallMinutes: number; needsApproval: boolean; summary: string }
+
+export interface ClipProgressRow { shotId: string; shotNumber?: number; kind: ClipKind; state: string; step?: number; steps?: number; etaSec?: number | null }
+
+export interface ClipVersion { id: string; kind: ClipKind; created_at: string; model: string | null; active: boolean }
 
 export type ImagePolicy = 'AUTO' | 'PREMIUM' | 'FREE'
 export interface ShotVersion { id: string; created_at: string; provider: string; model: string; active: boolean }
@@ -155,6 +165,14 @@ export const api = {
     call<void>('POST', `/videos/${id}/stages/${stage}/reject`, { notes }),
   setMode: (id: string, stage: string, mode: Mode) => call<void>('PUT', `/videos/${id}/modes/${stage}`, { mode }),
   setAllModes: (id: string, mode: Mode) => call<void>('PUT', `/videos/${id}/modes`, { mode }),
+  clipEstimate: (id: string, kind: ClipKind, shotIds: string[]) =>
+    call<ClipEstimate>('GET', `/videos/${id}/clips/estimate?kind=${kind}${shotIds.map((s) => `&shotIds=${s}`).join('')}`),
+  redoClips: (id: string, shotIds: string[], kind: ClipKind) => call<{ workflowId: string }>('POST', `/videos/${id}/clips/redo`, { shotIds, kind }),
+  stopClips: (id: string) => call<void>('POST', `/videos/${id}/clips/stop`),
+  clipProgress: (id: string) => call<{ clips: ClipProgressRow[]; finished: boolean }>('GET', `/videos/${id}/clips/progress`),
+  setFinalWanted: (shotId: string, wanted: boolean) => call<void>('PUT', `/shots/${shotId}/final-wanted?wanted=${wanted}`),
+  clipVersions: (shotId: string) => call<ClipVersion[]>('GET', `/shots/${shotId}/clips`),
+  selectClip: (shotId: string, assetId: string) => call<void>('PUT', `/shots/${shotId}/clips/${assetId}`),
   reviewImages: (id: string) => call<{ workflowId: string }>('POST', `/videos/${id}/creative-review`),
   rerun: (id: string, stage: string) => call<{ stages: string[] }>('POST', `/videos/${id}/stages/${stage}/rerun`),
   redoShots: (id: string, shotIds: string[], notes: string, policy: ImagePolicy) =>

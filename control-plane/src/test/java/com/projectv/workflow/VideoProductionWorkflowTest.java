@@ -176,6 +176,37 @@ class VideoProductionWorkflowTest {
             events.add("VIDEO:" + status);
         }
 
+        // ---- M2b clips
+        volatile int clipsToMake = 2;
+        volatile boolean clipsNeedApproval;
+        volatile int brokenClipInspections;
+        final List<String> clipRequests = new CopyOnWriteArrayList<>();
+
+        @Override
+        public com.projectv.media.MediaTypes.ClipEstimate clipEstimate(String videoId, String kind, List<String> shotIds) {
+            int n = shotIds == null ? clipsToMake : shotIds.size();
+            return new com.projectv.media.MediaTypes.ClipEstimate(kind, n, 100, java.math.BigDecimal.TEN, 0.1, 3,
+                    clipsNeedApproval, "Ready to make " + n + " " + kind + " clips: about ₹10");
+        }
+
+        @Override
+        public com.projectv.media.MediaTypes.ClipRequest clipRequest(String videoId, String kind, List<String> shotIds) {
+            clipRequests.add(kind + ":" + shotIds);
+            return new com.projectv.media.MediaTypes.ClipRequest(videoId, "app", "Wan", "http://x", List.of(), 100,
+                    java.math.BigDecimal.TEN);
+        }
+
+        @Override
+        public StageResult saveClips(String videoId, com.projectv.media.MediaTypes.ClipRequest request,
+                                     com.projectv.media.MediaTypes.ClipResult result) {
+            return StageResult.of("clips saved", "{}");
+        }
+
+        @Override
+        public void markClips(String videoId, List<String> shotIds, String status, String error) {
+            events.add("CLIPS:" + shotIds + ":" + status);
+        }
+
         /** How many more image reviews report shot-3 as weak. */
         volatile int weakImageReviews;
         volatile boolean failCreative;
@@ -233,6 +264,10 @@ class VideoProductionWorkflowTest {
                 return new WorkflowTypes.InspectionReport("FAIL", "Creative Director: weak image", "fix it",
                         fails.stream().map(com.projectv.media.MediaTypes.Finding::targetId).toList());
             }
+            if (stage == Stage.DRAFT_GEN && brokenClipInspections > 0) {
+                brokenClipInspections--;
+                return new WorkflowTypes.InspectionReport("FAIL", "Inspector: frozen clip", "fix", List.of("shot-7"));
+            }
             if (stage == Stage.KEYFRAMES && keyframeInspectionFails > 0) {
                 keyframeInspectionFails--;
                 return new WorkflowTypes.InspectionReport("FAIL", "Inspector: FAIL", "shot 3: blank image");
@@ -247,6 +282,11 @@ class VideoProductionWorkflowTest {
         volatile boolean failVoice;
 
         volatile boolean failInspector;
+
+        @Override
+        public com.projectv.media.MediaTypes.ClipResult generateClips(com.projectv.media.MediaTypes.ClipRequest request) {
+            return new com.projectv.media.MediaTypes.ClipResult(List.of(), 1, false);
+        }
 
         @Override
         public com.projectv.media.MediaTypes.ImageReviewResult reviewImages(
@@ -449,6 +489,41 @@ class VideoProductionWorkflowTest {
         WorkflowStub.fromTyped(wf).getResult(Void.class);
         assertTrue(activities.events.contains("SHOT_PLAN:1:AUTO_PASSED"));
         assertEquals("VIDEO:COMPLETED", activities.events.getLast());
+    }
+
+    @Test
+    void clipsAboveTheAutoApproveAmountWaitForTheOwnersGoAheadEvenInAuto() {
+        activities.clipsNeedApproval = true;
+        VideoProductionWorkflow wf = start("clips-gate", StageMode.AUTO, Map.of());
+        awaitWaiting(wf, Stage.DRAFT_GEN);
+        assertTrue(activities.clipRequests.isEmpty(), "nothing is sent to the GPU before the owner says yes");
+        wf.approve(Stage.DRAFT_GEN, null);
+        awaitWaiting(wf, Stage.FINAL_GEN);
+        wf.reject(Stage.FINAL_GEN, "too expensive");               // declining the spend skips the stage
+        WorkflowStub.fromTyped(wf).getResult(Void.class);
+        assertEquals(List.of("draft:null"), activities.clipRequests);
+        assertTrue(activities.events.contains("DRAFT_GEN:1:AUTO_PASSED"));
+        assertTrue(activities.events.contains("FINAL_GEN:1:SKIPPED"));
+        assertEquals("VIDEO:COMPLETED", activities.events.getLast());
+    }
+
+    @Test
+    void aBrokenClipIsRedoneOnItsOwn() {
+        activities.brokenClipInspections = 1;
+        VideoProductionWorkflow wf = start("clips-fix", StageMode.AUTO, Map.of());
+        WorkflowStub.fromTyped(wf).getResult(Void.class);
+        assertTrue(activities.events.contains("DRAFT_GEN:1:INSPECTION_FAILED"));
+        assertTrue(activities.clipRequests.contains("draft:[shot-7]"), "only the broken shot is rendered again");
+        assertTrue(activities.events.contains("DRAFT_GEN:2:AUTO_PASSED"));
+    }
+
+    @Test
+    void nothingToRenderSkipsTheClipStage() {
+        activities.clipsToMake = 0;
+        VideoProductionWorkflow wf = start("clips-none", StageMode.AUTO, Map.of());
+        WorkflowStub.fromTyped(wf).getResult(Void.class);
+        assertTrue(activities.events.contains("DRAFT_GEN:1:SKIPPED"));
+        assertTrue(activities.clipRequests.isEmpty());
     }
 
     @Test

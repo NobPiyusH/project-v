@@ -106,7 +106,8 @@ public abstract class StageSupport {
         return jdbc.sql("""
                         SELECT s.id, s.ord, s.duration_target_sec, s.shot_type, s.camera_move, s.description,
                                s.prompt_json::text AS prompt_json, s.priority, s.overlay_text, s.keyframe_asset_id,
-                               s.status, s.error,
+                               s.status, s.error, s.draft_clip_asset_id, s.final_clip_asset_id, s.clip_status,
+                               s.clip_error, s.final_wanted,
                                a.uri_hot AS keyframe_uri, p.provider AS keyframe_provider, sc.title AS scene_title
                         FROM shot s JOIN scene sc ON sc.id = s.scene_id
                         LEFT JOIN asset a ON a.id = s.keyframe_asset_id

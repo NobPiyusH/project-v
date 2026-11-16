@@ -66,3 +66,17 @@ def test_clipping_voice_without_whisper_is_flagged_and_marked_unchecked(local, m
 def test_a_check_that_breaks_becomes_a_warning_not_an_error(local):
     r = I.inspect_media({"stage": "ANIMATIC", "videoUri": str(local / "missing.mp4")})
     assert codes(r) == ["CHECK_ERROR"]
+
+
+def test_a_still_pretending_to_be_video_is_frozen_and_real_motion_passes(local):
+    still = local / "still.mp4"
+    moving = local / "moving.mp4"
+    run_ffmpeg(["-f", "lavfi", "-i", "testsrc2=s=270x480:d=3", "-vf", "trim=end_frame=1,loop=loop=80:size=1",
+                "-r", "16", "-c:v", "libx264", "-pix_fmt", "yuv420p", str(still)])
+    run_ffmpeg(["-f", "lavfi", "-i", "testsrc2=s=270x480:d=3:r=16", "-c:v", "libx264", "-pix_fmt", "yuv420p", str(moving)])
+    r = I.inspect_media({"stage": "DRAFT_GEN", "aspectRatio": "9:16",
+                         "images": [{"ref": "shot 1", "uri": str(still)}, {"ref": "shot 2", "uri": str(moving)}]})
+    by_ref = {(f["ref"], f["code"]) for f in r["findings"]}
+    assert ("shot 1", "FROZEN") in by_ref
+    assert not any(ref == "shot 2" for ref, _ in by_ref), r["findings"]
+    assert r["checked"] == ["shot 1", "shot 2"]

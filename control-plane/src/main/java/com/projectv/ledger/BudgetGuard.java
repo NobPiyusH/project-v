@@ -48,6 +48,32 @@ public class BudgetGuard {
         }
     }
 
+    // ---- GPU (Modal): its own monthly cap, the free credit by default (owner rule: ask before spending money)
+
+    public static final String GPU_PREFIX = "modal_";
+
+    public BigDecimal gpuSpentThisMonth() {
+        return jdbc.sql("""
+                        SELECT COALESCE(sum(amount_inr), 0) FROM cost_entry
+                        WHERE left(provider_id, 6) = 'modal_'
+                          AND ts >= date_trunc('month', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'
+                        """).query(BigDecimal.class).single();
+    }
+
+    public BigDecimal gpuRemaining() {
+        return pricing.gpuMonthlyCapInr().subtract(gpuSpentThisMonth());
+    }
+
+    /** Throws (non-retryable) when a GPU job's estimate would break the monthly GPU cap. */
+    public void requireGpu(BigDecimal estimateInr, String what) {
+        if (gpuRemaining().compareTo(estimateInr) < 0) {
+            throw new BudgetExceededException("Monthly GPU cap of ₹" + pricing.gpuMonthlyCapInr().setScale(0, java.math.RoundingMode.HALF_UP)
+                    + " would be exceeded by " + what + " (≈₹" + estimateInr.setScale(0, java.math.RoundingMode.HALF_UP) + "; ₹"
+                    + gpuRemaining().max(BigDecimal.ZERO).setScale(0, java.math.RoundingMode.HALF_UP)
+                    + " left). Raise modal.monthlyCapUsd in config/providers.yaml to allow paid GPU time.");
+        }
+    }
+
     public static class BudgetExceededException extends RuntimeException {
         public BudgetExceededException(String message) {
             super(message);

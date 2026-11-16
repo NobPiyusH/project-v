@@ -39,7 +39,10 @@ public class VideoService {
             Stage.NARRATION, List.of(Stage.NARRATION, Stage.ANIMATIC),
             Stage.SHOT_PLAN, List.of(Stage.SHOT_PLAN, Stage.KEYFRAMES, Stage.ANIMATIC),
             Stage.KEYFRAMES, List.of(Stage.KEYFRAMES, Stage.ANIMATIC),
-            Stage.ANIMATIC, List.of(Stage.ANIMATIC));
+            Stage.ANIMATIC, List.of(Stage.ANIMATIC),
+            // Clips cost GPU money: each runs alone, after showing its estimate (finals follow drafts on request).
+            Stage.DRAFT_GEN, List.of(Stage.DRAFT_GEN),
+            Stage.FINAL_GEN, List.of(Stage.FINAL_GEN));
 
     private final JdbcClient jdbc;
     private final WorkflowClient temporal;
@@ -126,6 +129,28 @@ public class VideoService {
         WorkflowClient.start(wf::run, new com.projectv.workflow.ShotRedoWorkflow.ShotRedoRequest(id.toString(),
                 shotIds.stream().map(UUID::toString).toList(), notes, p));
         recordDecision(id, Stage.KEYFRAMES, "shot_redo", (notes == null ? "" : notes) + " [" + shotIds.size() + " shot(s), " + p + "]");
+        return workflowId;
+    }
+
+    /** Redo the clips of the given shots (draft or final). Blocked while the main run is making clips. */
+    public String redoClips(UUID id, List<UUID> shotIds, String kind) {
+        if (shotIds == null || shotIds.isEmpty()) {
+            throw new IllegalStateException("Pick at least one shot");
+        }
+        if (!List.of("draft", "final").contains(kind)) {
+            throw new IllegalStateException("kind must be draft or final");
+        }
+        Map<String, Object> v = jdbc.sql("SELECT status, current_stage FROM video WHERE id = :id").param("id", id)
+                .query().listOfRows().stream().findFirst().orElseThrow(() -> new NoSuchElementException("No video " + id));
+        if ("RUNNING".equals(v.get("status")) && List.of("DRAFT_GEN", "FINAL_GEN").contains(v.get("current_stage"))) {
+            throw new IllegalStateException("Clips are being made right now; wait until that batch finishes");
+        }
+        String workflowId = "clip-redo-" + id + "-" + UUID.randomUUID();
+        com.projectv.workflow.ClipRedoWorkflow wf = temporal.newWorkflowStub(com.projectv.workflow.ClipRedoWorkflow.class,
+                WorkflowOptions.newBuilder().setWorkflowId(workflowId).setTaskQueue(TaskQueues.CONTROL).build());
+        WorkflowClient.start(wf::run, new com.projectv.workflow.ClipRedoWorkflow.ClipRedoRequest(id.toString(),
+                shotIds.stream().map(UUID::toString).toList(), kind));
+        recordDecision(id, "draft".equals(kind) ? Stage.DRAFT_GEN : Stage.FINAL_GEN, "clip_redo", kind + " " + shotIds.size() + " shot(s)");
         return workflowId;
     }
 

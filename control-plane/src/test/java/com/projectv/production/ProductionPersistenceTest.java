@@ -50,6 +50,7 @@ class ProductionPersistenceTest {
     static ShotStage shots;
     static Inspector inspector;
     static CreativeDirector creative;
+    static VideoStage clips;
     static BudgetGuard budget;
 
     UUID video;
@@ -68,6 +69,7 @@ class ProductionPersistenceTest {
         shots = new ShotStage(deps);
         inspector = new Inspector(deps);
         creative = new CreativeDirector(deps, null, "gemini-3.6-flash");
+        clips = new VideoStage(deps, "projectv-wan", "Wan", "http://127.0.0.1:8080", BigDecimal.ZERO);
     }
 
     @BeforeEach
@@ -118,8 +120,8 @@ class ProductionPersistenceTest {
 
     @Test
     void allMigrationsApplyAndLicencesAreSeeded() {
-        assertEquals(3, jdbc.sql("SELECT count(*) FROM licence").query(Integer.class).single());
-        assertEquals(6, jdbc.sql("SELECT count(*) FROM flyway_schema_history WHERE success").query(Integer.class).single());
+        assertEquals(4, jdbc.sql("SELECT count(*) FROM licence").query(Integer.class).single());
+        assertEquals(7, jdbc.sql("SELECT count(*) FROM flyway_schema_history WHERE success").query(Integer.class).single());
     }
 
     @Test
@@ -182,6 +184,75 @@ class ProductionPersistenceTest {
         assertTrue(prompt.contains("\"keyframePrompt\": \"ancient light leaving a distant galaxy\""), prompt);
         assertTrue(prompt.contains("\"originalPrompt\": \"a flashlight beam\""), prompt);
         assertFalse(prompt.contains("suggestedPrompt"), prompt);
+    }
+
+    private UUID shotWithKeyframe(int ord, double seconds) {
+        UUID scene = jdbc.sql("SELECT id FROM scene WHERE video_id = :v").param("v", video).query(UUID.class).optional()
+                .orElseGet(() -> {
+                    UUID id = UUID.randomUUID();
+                    jdbc.sql("INSERT INTO scene (id, video_id, ord, title) VALUES (:s, :v, 0, 'S')").param("s", id).param("v", video).update();
+                    return id;
+                });
+        UUID shot = UUID.randomUUID();
+        UUID image = UUID.randomUUID();
+        jdbc.sql("INSERT INTO asset (id, video_id, kind, uri_hot, shot_id) VALUES (:a, :v, 'image', 's3://b/k.png', NULL)")
+                .param("a", image).param("v", video).update();
+        jdbc.sql("""
+                        INSERT INTO shot (id, scene_id, ord, duration_target_sec, description, prompt_json, keyframe_asset_id)
+                        VALUES (:id, :s, :o, :d, 'stars wheel overhead', CAST('{"motionPrompt":"slow push in"}' AS jsonb), :k)
+                        """).param("id", shot).param("s", scene).param("o", ord).param("d", seconds).param("k", image).update();
+        return shot;
+    }
+
+    @Test
+    void clipsAreEstimatedRenderedAndCostedPerShot() {
+        assertEquals(33, VideoStage.frames(1.2), "at least ~2 s");
+        assertEquals(49, VideoStage.frames(3.0));
+        assertEquals(81, VideoStage.frames(9.0), "Wan's ~5 s limit");
+        UUID a = shotWithKeyframe(0, 3.0);
+        UUID b = shotWithKeyframe(1, 6.0);
+
+        var estimate = clips.estimate(video, VideoStage.DRAFT, null);
+        assertEquals(2, estimate.clips());
+        assertTrue(estimate.needsApproval(), "auto-approve is 0: the owner always says yes first");
+        assertEquals(0, clips.estimate(video, VideoStage.FINAL, null).clips(), "no finals before drafts");
+
+        var request = clips.clipRequest(video, VideoStage.DRAFT, null);
+        var job = request.jobs().getFirst();
+        assertEquals(480, job.width(), "vertical Short: 480x832 drafts");
+        assertEquals(832, job.height());
+        assertEquals("fast", job.mode());
+        assertTrue(job.prompt().startsWith("slow push in. stars wheel overhead. Visual style:"), job.prompt());
+
+        var result = new com.projectv.media.MediaTypes.ClipResult(List.of(
+                new com.projectv.media.MediaTypes.ClipOutput(a.toString(), 1, "draft", "s3://b/a.mp4", 50, 49, 16, "fast", null),
+                new com.projectv.media.MediaTypes.ClipOutput(b.toString(), 1, "draft", null, 0, 0, 0, "fast", "stopped")), 2, true);
+        var saved = clips.saveClips(video, request, result);
+        assertTrue(saved.summary().startsWith("1/2 draft clips"), saved.summary());
+        assertEquals("READY", jdbc.sql("SELECT clip_status FROM shot WHERE id = :s").param("s", a).query(String.class).single());
+        assertEquals("STOPPED", jdbc.sql("SELECT clip_status FROM shot WHERE id = :s").param("s", b).query(String.class).single());
+        assertEquals(1, jdbc.sql("""
+                        SELECT count(*) FROM asset x JOIN provenance p ON p.id = x.provenance_id
+                        WHERE x.shot_id = :s AND x.kind = 'video' AND x.clip_kind = 'draft' AND p.licence_id = :l
+                        """).param("s", a).param("l", com.projectv.assets.AssetStore.LICENCE_WAN).query(Integer.class).single());
+        assertEquals(2, jdbc.sql("SELECT count(*) FROM cost_entry WHERE video_id = :v AND provider_id = 'modal_h100'")
+                .param("v", video).query(Integer.class).single(), "the clip + the container start-up");
+
+        assertEquals(1, clips.estimate(video, VideoStage.FINAL, null).clips(), "a final for the shot with a draft");
+        clips.setFinalWanted(a, false);
+        assertEquals(0, clips.estimate(video, VideoStage.FINAL, null).clips(), "kept draft: no final");
+        assertEquals(1, clips.clipVersions(a).size());
+    }
+
+    @Test
+    void theMonthlyGpuCapStopsClips() {
+        shotWithKeyframe(0, 4.0);
+        jdbc.sql("""
+                        INSERT INTO cost_entry (id, video_id, provider_id, amount_inr, units, unit_type, estimated, note)
+                        VALUES (:id, :v, 'modal_h100', 100000, 1, 'gpu_seconds', true, 'test: cap already used')
+                        """).param("id", UUID.randomUUID()).param("v", video).update();
+        assertThrows(BudgetGuard.BudgetExceededException.class, () -> clips.clipRequest(video, VideoStage.DRAFT, null));
+        jdbc.sql("DELETE FROM cost_entry WHERE note = 'test: cap already used'").update();
     }
 
     @Test

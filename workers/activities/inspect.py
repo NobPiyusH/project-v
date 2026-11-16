@@ -237,8 +237,52 @@ def check_video(req: dict, tmp: Path) -> tuple[list[dict], list[str]]:
     return findings, ["video"]
 
 
+def frozen_segments(path: Path, min_sec: float = 1.0) -> list[tuple[float, float]]:
+    text = _ffmpeg_log(["-i", str(path), "-an", "-vf", f"freezedetect=n=0.002:d={min_sec}"])
+    starts = [float(x) for x in re.findall(r"freeze_start: (-?[\d.]+)", text)]
+    ends = [float(x) for x in re.findall(r"freeze_end: (-?[\d.]+)", text)]
+    return [(s, ends[i] if i < len(ends) else float("inf")) for i, s in enumerate(starts)]
+
+
+def brightness_jumps(path: Path, jump: float = 14.0) -> int:
+    """How many frame-to-frame changes in average brightness exceed {jump} (0-255): a measure of flicker."""
+    text = _ffmpeg_log(["-i", str(path), "-an", "-vf", "signalstats,metadata=print:key=lavfi.signalstats.YAVG"])
+    values = [float(v) for v in re.findall(r"lavfi\.signalstats\.YAVG=([\d.]+)", text)]
+    return sum(1 for a, b in zip(values, values[1:]) if abs(b - a) > jump)
+
+
+def check_clips(req: dict, tmp: Path) -> tuple[list[dict], list[str]]:
+    """Moving video per shot (M2b): the clip must move, show a picture all the way through, not flicker, and have the
+    right shape. Findings use "shot N" refs so the control plane can redo that shot alone."""
+    findings, checked = [], []
+    want = ASPECTS.get(req.get("aspectRatio") or "16:9", 16 / 9)
+    for n, clip in enumerate(req.get("images") or []):
+        ref = clip["ref"]
+        path = download(clip["uri"], tmp / f"clip{n}.mp4")
+        info = _probe(path)
+        w, h, dur = info.get("width"), info.get("height"), info.get("duration", 0.0)
+        if w and h and abs(w / h - want) / want > 0.05:
+            findings.append(finding("FAIL", "WRONG_FRAME", f"Clip is {w}x{h} but the video is {req.get('aspectRatio')}.", ref))
+        if dur < 1.5:
+            findings.append(finding("FAIL", "CLIP_TOO_SHORT", f"Clip is only {dur:.1f}s long.", ref))
+        frozen = sum(min(e, dur) - s for s, e in frozen_segments(path))
+        if dur and frozen >= max(1.0, dur * 0.4):
+            findings.append(finding("FAIL", "FROZEN", f"The picture barely moves for {frozen:.1f}s of {dur:.1f}s: "
+                                                      "it's a still, not video.", ref))
+        black = sum(e - s for s, e in black_segments(path, min_sec=0.3))
+        if black >= 0.3:
+            findings.append(finding("FAIL", "BLACK_FRAMES", f"{black:.1f}s of black picture.", ref))
+        jumps = brightness_jumps(path)
+        if jumps >= 3:
+            findings.append(finding("WARN" if jumps < 6 else "FAIL", "FLICKER",
+                                    f"Brightness jumps {jumps} times: the clip flickers.", ref))
+        checked.append(ref)
+        _beat(ref)
+    return findings, checked
+
+
 CHECKS = {"NARRATION": [check_narration], "MUSIC": [check_music], "KEYFRAMES": [check_images],
-          "ANIMATIC": [check_video]}
+          "ANIMATIC": [check_video], "DRAFT_GEN": [check_clips], "FINAL_GEN": [check_clips]}
 
 
 @activity.defn(name="inspect_media")

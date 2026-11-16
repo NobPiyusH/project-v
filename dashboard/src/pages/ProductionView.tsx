@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react'
 import { api, assetUrl, type Fact, type ImagePolicy, type Production, type ShotRow, type ShotVersion } from '../api'
 import { usePoll } from '../hooks'
 import { ScriptEditor } from './ScriptEditor'
+import { ClipsCard } from './ClipsCard'
 
 /** What the stages have actually produced so far: research, concept, script + voice, music, shots, animatic. */
 export function ProductionView({ id }: { id: string }) {
@@ -13,6 +14,7 @@ export function ProductionView({ id }: { id: string }) {
   return (
     <>
       {p.animaticAssetId && <AnimaticCard id={id} p={p} onChange={refresh} />}
+      {p.shots.length > 0 && <ClipsCard id={id} p={p} onChange={refresh} />}
       {p.shots.length > 0 && <ShotGrid id={id} p={p} onChange={refresh} />}
       {(p.concept || p.script || p.music) && <StoryCard id={id} p={p} onChange={refresh} />}
       {p.research && <ResearchCard facts={JSON.parse(p.research.facts) as Fact[]} queries={p.research.queries} />}

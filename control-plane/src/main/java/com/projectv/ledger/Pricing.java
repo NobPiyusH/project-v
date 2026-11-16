@@ -70,6 +70,21 @@ public class Pricing {
         return inr(num(map(modal, "gpuPerSecondUsd"), gpu) * seconds);
     }
 
+    /** Hard monthly cap on GPU work (Modal), in rupees. Default: the free credit. */
+    public BigDecimal gpuMonthlyCapInr() {
+        return inr(num(map(pricing, "modal"), "monthlyCapUsd"));
+    }
+
+    /** Expected H100 render seconds for one 81-frame Wan clip of this kind (draft / final). */
+    public double wanSecondsPer81Frames(String kind) {
+        return num(map(map(pricing, "modal"), "wanSecondsPer81Frames"), kind);
+    }
+
+    /** Container start + model load, billed once per GPU container a batch uses. */
+    public double gpuContainerStartSeconds() {
+        return num(map(pricing, "modal"), "containerStartSeconds");
+    }
+
     private BigDecimal tokensInr(Map<String, Object> rates, Usage u) {
         if (u == null) {
             return BigDecimal.ZERO;

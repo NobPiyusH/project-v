@@ -38,11 +38,14 @@ public class VideoActivitiesImpl implements VideoActivities {
     private final Pricing pricing;
     private final com.projectv.production.Inspector inspector;
     private final com.projectv.production.CreativeDirector creative;
+    private final com.projectv.production.VideoStage video;
+    private final com.projectv.video.ClipProgress clipProgress;
 
     public VideoActivitiesImpl(JdbcClient jdbc, Planner planner, CostLedger ledger, ObjectMapper json,
                                ProductionService production, Pricing pricing,
                                com.projectv.production.Inspector inspector,
-                               com.projectv.production.CreativeDirector creative) {
+                               com.projectv.production.CreativeDirector creative,
+                               com.projectv.production.VideoStage video, com.projectv.video.ClipProgress clipProgress) {
         this.jdbc = jdbc;
         this.planner = planner;
         this.ledger = ledger;
@@ -51,6 +54,37 @@ public class VideoActivitiesImpl implements VideoActivities {
         this.pricing = pricing;
         this.inspector = inspector;
         this.creative = creative;
+        this.video = video;
+        this.clipProgress = clipProgress;
+    }
+
+    private static java.util.List<UUID> ids(java.util.List<String> shotIds) {
+        return shotIds == null ? null : shotIds.stream().map(UUID::fromString).toList();
+    }
+
+    @Override
+    public com.projectv.media.MediaTypes.ClipEstimate clipEstimate(String videoId, String kind, java.util.List<String> shotIds) {
+        return video.estimate(UUID.fromString(videoId), kind, ids(shotIds));
+    }
+
+    @Override
+    public com.projectv.media.MediaTypes.ClipRequest clipRequest(String videoId, String kind, java.util.List<String> shotIds) {
+        var request = video.clipRequest(UUID.fromString(videoId), kind, ids(shotIds));
+        clipProgress.startBatch(UUID.fromString(videoId));
+        video.markClips(UUID.fromString(videoId), request.jobs().stream().map(j -> UUID.fromString(j.shotId())).toList(),
+                "RENDERING", null);
+        return request;
+    }
+
+    @Override
+    public StageResult saveClips(String videoId, com.projectv.media.MediaTypes.ClipRequest request,
+                                 com.projectv.media.MediaTypes.ClipResult result) {
+        return video.saveClips(UUID.fromString(videoId), request, result);
+    }
+
+    @Override
+    public void markClips(String videoId, java.util.List<String> shotIds, String status, String error) {
+        video.markClips(UUID.fromString(videoId), ids(shotIds), status, error);
     }
 
     @Override

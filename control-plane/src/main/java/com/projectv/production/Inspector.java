@@ -31,14 +31,18 @@ import java.util.UUID;
 @Component
 public class Inspector extends StageSupport {
 
-    /** Stages the Inspector looks at. PLAN and CONCEPT have no hard rules yet; later stages arrive with M2b/M2c. */
+    /** Stages the Inspector looks at. PLAN and CONCEPT have no hard rules yet; finishing stages arrive with M2c. */
     public static final Set<Stage> INSPECTED = EnumSet.of(Stage.RESEARCH, Stage.SCRIPT, Stage.MUSIC, Stage.NARRATION,
-            Stage.SHOT_PLAN, Stage.KEYFRAMES, Stage.ANIMATIC);
+            Stage.SHOT_PLAN, Stage.KEYFRAMES, Stage.ANIMATIC, Stage.DRAFT_GEN, Stage.FINAL_GEN);
+
+    /** Stages whose findings name shots, so a FAIL can be fixed by redoing only those shots. */
+    public static final Set<Stage> PER_SHOT = EnumSet.of(Stage.KEYFRAMES, Stage.DRAFT_GEN, Stage.FINAL_GEN);
 
     /** Silence between two narration lines longer than this reads as dead air. */
     static final double MAX_GAP_SEC = 2.5;
 
-    private static final Set<Stage> MEDIA = EnumSet.of(Stage.NARRATION, Stage.MUSIC, Stage.KEYFRAMES, Stage.ANIMATIC);
+    private static final Set<Stage> MEDIA = EnumSet.of(Stage.NARRATION, Stage.MUSIC, Stage.KEYFRAMES, Stage.ANIMATIC,
+            Stage.DRAFT_GEN, Stage.FINAL_GEN);
 
     public Inspector(ProductionDeps d) {
         super(d);
@@ -81,6 +85,15 @@ public class Inspector extends StageSupport {
                                 """).param("v", videoId).query(String.class).optional().orElse(null);
                 speechEnd = script == null ? null : speechEnd(script);
             }
+            case DRAFT_GEN, FINAL_GEN -> {
+                // The worker's clip checks read the clips from "images" (ref + uri), like keyframes.
+                for (Map<String, Object> s : clipShots(videoId)) {
+                    Object uri = s.get(stage == Stage.DRAFT_GEN ? "draft_uri" : "final_uri");
+                    if (uri != null) {
+                        images.add(new InspectImage(shotRef(s), (String) uri));
+                    }
+                }
+            }
             default -> {
             }
         }
@@ -96,7 +109,7 @@ public class Inspector extends StageSupport {
             findings.addAll(media.findings() == null ? List.of() : media.findings());
             checked.addAll(media.checked() == null ? List.of() : media.checked());
         }
-        if (stage == Stage.KEYFRAMES) {
+        if (PER_SHOT.contains(stage)) {
             findings = withShotTargets(findings, shots(videoId));
         }
         InspectionReport report = report(findings, checked.size());
@@ -176,6 +189,8 @@ public class Inspector extends StageSupport {
             case SHOT_PLAN -> shotPlan(plan, script, shots(videoId));
             case KEYFRAMES -> keyframes(shots(videoId));
             case ANIMATIC -> animatic(videoId, script);
+            case DRAFT_GEN -> missingClips(clipShots(videoId), true);
+            case FINAL_GEN -> missingClips(clipShots(videoId), false);
             default -> List.of();
         };
     }
@@ -288,6 +303,29 @@ public class Inspector extends StageSupport {
                 .map(s -> new Finding("FAIL", "MISSING_KEYFRAME", "This shot has no image.", shotRef(s),
                         String.valueOf(s.get("id"))))
                 .toList();
+    }
+
+    /** Every shot with an image needs a draft; every draft the owner didn't mark "keep" needs a final. */
+    static List<Finding> missingClips(List<Map<String, Object>> shots, boolean drafts) {
+        return shots.stream()
+                .filter(s -> drafts ? s.get("keyframe_uri") != null && s.get("draft_uri") == null
+                        : s.get("draft_uri") != null && Boolean.TRUE.equals(s.get("final_wanted")) && s.get("final_uri") == null)
+                .filter(s -> !"STOPPED".equals(s.get("clip_status")))
+                .map(s -> new Finding("FAIL", "MISSING_CLIP", "This shot has no " + (drafts ? "draft" : "final") + " clip"
+                        + (s.get("clip_error") == null ? "." : ": " + s.get("clip_error")), shotRef(s), String.valueOf(s.get("id"))))
+                .toList();
+    }
+
+    private List<Map<String, Object>> clipShots(UUID videoId) {
+        return jdbc.sql("""
+                        SELECT s.id, s.ord, s.final_wanted, s.clip_status, s.clip_error, k.uri_hot AS keyframe_uri,
+                               d.uri_hot AS draft_uri, f.uri_hot AS final_uri
+                        FROM shot s JOIN scene sc ON sc.id = s.scene_id
+                        LEFT JOIN asset k ON k.id = s.keyframe_asset_id
+                        LEFT JOIN asset d ON d.id = s.draft_clip_asset_id
+                        LEFT JOIN asset f ON f.id = s.final_clip_asset_id
+                        WHERE sc.video_id = :v ORDER BY s.ord
+                        """).param("v", videoId).query().listOfRows();
     }
 
     private List<Finding> animatic(UUID videoId, StoredScript script) {

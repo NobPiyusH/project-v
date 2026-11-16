@@ -39,6 +39,10 @@ public interface MediaActivities {
     @ActivityMethod(name = "render_animatic")
     AnimaticResult renderAnimatic(AnimaticRequest request);
 
+    /** M2b: one Wan clip per job on Modal, saved as each finishes; honours the owner's Stop. */
+    @ActivityMethod(name = "generate_clips")
+    com.projectv.media.MediaTypes.ClipResult generateClips(com.projectv.media.MediaTypes.ClipRequest request);
+
     /** Creative Director image review: a vision model judges every image against its line, paragraph and video. */
     @ActivityMethod(name = "review_images")
     com.projectv.media.MediaTypes.ImageReviewResult reviewImages(com.projectv.media.MediaTypes.ImageReviewRequest request);

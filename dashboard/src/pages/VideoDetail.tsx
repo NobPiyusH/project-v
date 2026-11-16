@@ -143,7 +143,11 @@ function StageRow(props: {
               title={'Redoes: ' + stage.redoWith.map((r) => props.stages.find((x) => x.id === r)?.label ?? r).join(' → ')}
               onClick={() => {
                 const names = stage.redoWith.map((r) => props.stages.find((x) => x.id === r)?.label ?? r).join(' → ')
-                if (window.confirm(`Redo ${names}? Everything else is kept. This may use paid Gemini credits.`)) props.onRedo()
+                const clips = stage.id === 'DRAFT_GEN' || stage.id === 'FINAL_GEN'
+                const cost = clips
+                  ? 'Nothing runs yet: the stage first shows the GPU estimate and waits for your Approve.'
+                  : 'This may use paid Gemini credits.'
+                if (window.confirm(`Redo ${names}? Everything else is kept. ${cost}`)) props.onRedo()
               }}>
               Redo
             </button>
