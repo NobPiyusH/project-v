@@ -74,6 +74,20 @@ public interface VideoActivities {
     WorkflowTypes.InspectionReport saveInspection(String videoId, Stage stage, int attempt,
                                                   com.projectv.media.MediaTypes.MediaInspectResult media);
 
+    // ---- Creative Director (story review: shot, paragraph, whole video)
+
+    /** Text review of the shot plan; rewrites weak shot prompts in place. Paid LLM call. */
+    java.util.List<com.projectv.media.MediaTypes.Finding> creativeShotPlanReview(String videoId, int attempt);
+
+    /** Images + their lines/paragraphs for the vision review on the media worker. Budget-checked. */
+    com.projectv.media.MediaTypes.ImageReviewRequest imageReviewRequest(String videoId);
+
+    java.util.List<com.projectv.media.MediaTypes.Finding> saveImageReview(String videoId, int attempt,
+                                                                          com.projectv.media.MediaTypes.ImageReviewResult result);
+
+    /** Targeted redo of weak images: applies the Creative Director's suggested prompts, then builds the request. */
+    KeyframeRequest fixKeyframeRequest(String videoId, java.util.List<String> shotIds, String ownerNotes);
+
     /** Upsert the stage_run row and the video's status / current stage. */
     void recordStage(String videoId, Stage stage, int attempt, StageMode mode, String status,
                      String summary, String artifactJson, String ownerNotes);

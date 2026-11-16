@@ -39,6 +39,10 @@ public interface MediaActivities {
     @ActivityMethod(name = "render_animatic")
     AnimaticResult renderAnimatic(AnimaticRequest request);
 
+    /** Creative Director image review: a vision model judges every image against its line, paragraph and video. */
+    @ActivityMethod(name = "review_images")
+    com.projectv.media.MediaTypes.ImageReviewResult reviewImages(com.projectv.media.MediaTypes.ImageReviewRequest request);
+
     /** Inspector file checks (Whisper, FFmpeg, image statistics). Free to run; reports findings, changes nothing. */
     @ActivityMethod(name = "inspect_media")
     com.projectv.media.MediaTypes.MediaInspectResult inspectMedia(com.projectv.media.MediaTypes.MediaInspectRequest request);

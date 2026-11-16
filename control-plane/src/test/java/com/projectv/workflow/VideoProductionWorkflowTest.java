@@ -176,6 +176,43 @@ class VideoProductionWorkflowTest {
             events.add("VIDEO:" + status);
         }
 
+        /** How many more image reviews report shot-3 as weak. */
+        volatile int weakImageReviews;
+        volatile boolean failCreative;
+
+        @Override
+        public List<com.projectv.media.MediaTypes.Finding> creativeShotPlanReview(String videoId, int attempt) {
+            events.add("CD:SHOT_PLAN");
+            if (failCreative) {
+                throw ApplicationFailure.newNonRetryableFailure("no model answered", "Test");
+            }
+            return List.of(new com.projectv.media.MediaTypes.Finding("INFO", "CD_PROMPT_IMPROVED", "rewritten", "shot 2"));
+        }
+
+        @Override
+        public com.projectv.media.MediaTypes.ImageReviewRequest imageReviewRequest(String videoId) {
+            return new com.projectv.media.MediaTypes.ImageReviewRequest(videoId, "m", "r", "t", "9:16", "s", null, null,
+                    null, null, List.of(), List.of());
+        }
+
+        @Override
+        public List<com.projectv.media.MediaTypes.Finding> saveImageReview(String videoId, int attempt,
+                                                                           com.projectv.media.MediaTypes.ImageReviewResult result) {
+            events.add("CD:KEYFRAMES:" + attempt);
+            if (weakImageReviews > 0) {
+                weakImageReviews--;
+                return List.of(new com.projectv.media.MediaTypes.Finding("FAIL", "CD_SHOT", "shows a flashlight",
+                        "shot 3", "shot-3"));
+            }
+            return List.of();
+        }
+
+        @Override
+        public KeyframeRequest fixKeyframeRequest(String videoId, List<String> shotIds, String ownerNotes) {
+            events.add("FIX:" + shotIds + ":" + ownerNotes);
+            return new KeyframeRequest(videoId, "m", "a", "c", List.of());
+        }
+
         /** How many more times the Inspector reports FAIL for KEYFRAMES. */
         volatile int keyframeInspectionFails;
         final List<String> inspected = new CopyOnWriteArrayList<>();
@@ -190,6 +227,12 @@ class VideoProductionWorkflowTest {
         public WorkflowTypes.InspectionReport saveInspection(String videoId, Stage stage, int attempt,
                                                              com.projectv.media.MediaTypes.MediaInspectResult media) {
             inspected.add(stage + ":" + attempt);
+            var fails = media == null ? List.<com.projectv.media.MediaTypes.Finding>of()
+                    : media.findings().stream().filter(f -> "FAIL".equals(f.severity())).toList();
+            if (!fails.isEmpty()) {
+                return new WorkflowTypes.InspectionReport("FAIL", "Creative Director: weak image", "fix it",
+                        fails.stream().map(com.projectv.media.MediaTypes.Finding::targetId).toList());
+            }
             if (stage == Stage.KEYFRAMES && keyframeInspectionFails > 0) {
                 keyframeInspectionFails--;
                 return new WorkflowTypes.InspectionReport("FAIL", "Inspector: FAIL", "shot 3: blank image");
@@ -204,6 +247,12 @@ class VideoProductionWorkflowTest {
         volatile boolean failVoice;
 
         volatile boolean failInspector;
+
+        @Override
+        public com.projectv.media.MediaTypes.ImageReviewResult reviewImages(
+                com.projectv.media.MediaTypes.ImageReviewRequest request) {
+            return new com.projectv.media.MediaTypes.ImageReviewResult(null, "m", Usage.NONE, 0);
+        }
 
         @Override
         public com.projectv.media.MediaTypes.MediaInspectResult inspectMedia(
@@ -366,6 +415,39 @@ class VideoProductionWorkflowTest {
         wf.approve(Stage.KEYFRAMES, null);                       // accept it anyway
         WorkflowStub.fromTyped(wf).getResult(Void.class);
         assertTrue(activities.events.contains("KEYFRAMES:2:APPROVED"));
+        assertEquals("VIDEO:COMPLETED", activities.events.getLast());
+    }
+
+    @Test
+    void aWeakImageIsRedoneOnItsOwnWithTheBetterPromptThenThePlanContinues() {
+        activities.weakImageReviews = 1;
+        VideoProductionWorkflow wf = start("cd-image", StageMode.AUTO, Map.of());
+        WorkflowStub.fromTyped(wf).getResult(Void.class);
+        assertTrue(activities.events.contains("CD:SHOT_PLAN"), "the shot plan gets a story review");
+        assertTrue(activities.events.contains("KEYFRAMES:1:INSPECTION_FAILED"));
+        assertTrue(activities.events.contains("FIX:[shot-3]:null"), "only the weak shot is regenerated");
+        assertTrue(activities.events.contains("CD:KEYFRAMES:2"), "the images are reviewed again");
+        assertTrue(activities.events.contains("KEYFRAMES:2:AUTO_PASSED"));
+        assertEquals("VIDEO:COMPLETED", activities.events.getLast());
+    }
+
+    @Test
+    void aStillWeakImageWaitsForTheOwnerAndRejectRedoesThatShotWithTheirNotes() {
+        activities.weakImageReviews = 2;
+        VideoProductionWorkflow wf = start("cd-image-owner", StageMode.AUTO, Map.of());
+        awaitWaiting(wf, Stage.KEYFRAMES);
+        wf.reject(Stage.KEYFRAMES, "show the Moon's far side in shadow");
+        WorkflowStub.fromTyped(wf).getResult(Void.class);
+        assertTrue(activities.events.contains("FIX:[shot-3]:show the Moon's far side in shadow"));
+        assertTrue(activities.events.contains("KEYFRAMES:3:AUTO_PASSED"));
+    }
+
+    @Test
+    void anUnavailableCreativeDirectorOnlyWarns() {
+        activities.failCreative = true;
+        VideoProductionWorkflow wf = start("cd-down", StageMode.AUTO, Map.of());
+        WorkflowStub.fromTyped(wf).getResult(Void.class);
+        assertTrue(activities.events.contains("SHOT_PLAN:1:AUTO_PASSED"));
         assertEquals("VIDEO:COMPLETED", activities.events.getLast());
     }
 

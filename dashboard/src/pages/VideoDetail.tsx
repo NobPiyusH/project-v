@@ -2,6 +2,7 @@ import { Fragment, useState } from 'react'
 import { api, type Inspection, type Mode, type StageInfo, type StageRun, type VideoDetail as Detail } from '../api'
 import { Countdown, ModeSwitch, StatusBadge } from '../components'
 import { fmtTime, usePoll } from '../hooks'
+import { CreativeCard } from './CreativeCard'
 import { ProductionView } from './ProductionView'
 
 interface Modes { default: Mode; stages: Record<string, Mode> }
@@ -66,6 +67,10 @@ export function VideoDetail({ id, stages }: { id: string; stages: StageInfo[] })
       <PlanCard video={video} />
 
       <ProductionView id={id} />
+
+      <CreativeCard reports={video.creativeReviews ?? []}
+        canReview={finished && video.stageRuns.some((r) => r.stage === 'KEYFRAMES' && r.status !== 'SKIPPED')}
+        onReview={() => act(() => api.reviewImages(id))} />
 
       <section className="card">
         <div className="card-head">

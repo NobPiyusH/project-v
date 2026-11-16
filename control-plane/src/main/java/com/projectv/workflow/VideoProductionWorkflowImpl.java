@@ -1,5 +1,7 @@
 package com.projectv.workflow;
 
+import com.projectv.media.MediaTypes.Finding;
+import com.projectv.media.MediaTypes.ImageReviewRequest;
 import com.projectv.media.MediaTypes.MediaInspectRequest;
 import com.projectv.media.MediaTypes.MediaInspectResult;
 import com.projectv.production.Inspector;
@@ -29,8 +31,9 @@ import java.util.Map;
  * <p>Stage loop for every stage the plan includes:
  * <ol>
  *   <li>run the stage (activity)</li>
- *   <li>Inspector: independent second-level checks. A FAIL is redone once automatically with the findings as notes;
- *       a second FAIL waits for the owner (approve = accept anyway, reject = redo with notes), whatever the mode.</li>
+ *   <li>Inspector: independent second-level checks, plus the Creative Director's story review of the shot plan and
+ *       the images. A FAIL is redone once automatically (images: only the failing shots, with better prompts); a
+ *       second FAIL waits for the owner (approve = accept anyway, reject = redo with notes), whatever the mode.</li>
  *   <li>AUTO: record AUTO_PASSED and continue</li>
  *   <li>MANUAL: record WAITING_APPROVAL and wait for approve / reject / a switch to AUTO.
  *       Reject re-runs the stage with the owner's notes.</li>
@@ -92,6 +95,12 @@ public class VideoProductionWorkflowImpl implements VideoProductionWorkflow {
 
     /** Stages the Inspector already sent back once in this run (the automatic redo happens only once). */
     private final java.util.Set<Stage> inspectorRedone = EnumSet.noneOf(Stage.class);
+
+    /** A pending targeted image redo: only these shots, with the owner's notes if any. */
+    private record KeyframeFix(List<String> shotIds, String ownerNotes) {
+    }
+
+    private KeyframeFix keyframeFix;
 
     private record Decision(Stage stage, boolean approve, String notes) {
     }
@@ -181,17 +190,8 @@ public class VideoProductionWorkflowImpl implements VideoProductionWorkflow {
                 // A failed stage never kills the video: it waits for the owner, whatever the stage's mode.
                 // Approve = continue without this stage's output; reject (with notes) = run it again.
                 String reason = rootMessage(failure);
-                views.put(stage, new StageView(stage, modeOf(stage), "FAILED", attempt, reason));
-                activities.recordStage(videoId, stage, attempt, modeOf(stage), "FAILED",
-                        "Failed: " + reason + " Approve to continue without it, or Reject to retry.", null, notes);
-                phase = "WAITING";
-                waitingStage = stage;
-                decision = null;
-                Workflow.await(() -> decision != null);
-                waitingStage = null;
-                phase = "RUNNING";
-                Decision d = decision;
-                decision = null;
+                Decision d = awaitOwner(videoId, stage, attempt, "FAILED", reason,
+                        "Failed: " + reason + " Approve to continue without it, or Reject to retry.", null, notes, false);
                 if (d.approve()) {
                     StageResult skipped = StageResult.of("Skipped by owner after failure: " + reason, null);
                     finish(videoId, stage, attempt, "SKIPPED", skipped, notes);
@@ -208,32 +208,25 @@ public class VideoProductionWorkflowImpl implements VideoProductionWorkflow {
             }
             if ("FAIL".equals(inspection.verdict()) && modeOf(stage) != StageMode.MANUAL) {
                 if (!inspectorRedone.contains(stage)) {
-                    // First FAIL: redo once by itself, telling the stage what was wrong.
+                    // First FAIL: redo once by itself. Images: only the shots that failed, with better prompts.
                     inspectorRedone.add(stage);
                     log.info("Inspector failed stage {}, redoing once", stage);
                     finish(videoId, stage, attempt, "INSPECTION_FAILED", result, notes);
-                    notes = inspection.notes();
+                    notes = targetedRedo(stage, inspection, null) ? null : inspection.notes();
                     continue;
                 }
                 // Failed again after the automatic redo: never pass it unseen, whatever the mode or review timer.
-                views.put(stage, new StageView(stage, modeOf(stage), "WAITING_APPROVAL", attempt, result.summary()));
-                activities.recordStage(videoId, stage, attempt, modeOf(stage), "WAITING_APPROVAL",
+                Decision d = awaitOwner(videoId, stage, attempt, "WAITING_APPROVAL", result.summary(),
                         result.summary() + " Approve to accept it anyway, or Reject (with notes) to redo.",
-                        result.artifactJson(), notes);
-                phase = "WAITING";
-                waitingStage = stage;
-                decision = null;
-                Workflow.await(() -> decision != null);
-                waitingStage = null;
-                phase = "RUNNING";
-                Decision d = decision;
-                decision = null;
+                        result.artifactJson(), notes, false);
                 if (d.approve()) {
                     finish(videoId, stage, attempt, "APPROVED", result, notes);
                     return result;
                 }
                 finish(videoId, stage, attempt, "REJECTED", result, notes);
-                notes = d.notes() == null || d.notes().isBlank() ? inspection.notes() : d.notes();
+                String ownerNotes = d.notes() == null || d.notes().isBlank() ? null : d.notes();
+                notes = targetedRedo(stage, inspection, ownerNotes) ? ownerNotes
+                        : ownerNotes == null ? inspection.notes() : ownerNotes;
                 continue;
             }
 
@@ -278,18 +271,8 @@ public class VideoProductionWorkflowImpl implements VideoProductionWorkflow {
             }
 
             // MANUAL: wait for the owner, or for the stage to be switched to AUTO.
-            views.put(stage, new StageView(stage, StageMode.MANUAL, "WAITING_APPROVAL", attempt, result.summary()));
-            activities.recordStage(videoId, stage, attempt, StageMode.MANUAL, "WAITING_APPROVAL",
-                    result.summary(), result.artifactJson(), notes);
-            phase = "WAITING";
-            waitingStage = stage;
-            decision = null;
-            Workflow.await(() -> decision != null || modeOf(stage) == StageMode.AUTO);
-            waitingStage = null;
-            phase = "RUNNING";
-            Decision d = decision;
-            decision = null;
-
+            Decision d = awaitOwner(videoId, stage, attempt, "WAITING_APPROVAL", result.summary(), result.summary(),
+                    result.artifactJson(), notes, true);
             if (d == null) {
                 finish(videoId, stage, attempt, "AUTO_PASSED", result, notes);
                 return result;
@@ -302,6 +285,38 @@ public class VideoProductionWorkflowImpl implements VideoProductionWorkflow {
             finish(videoId, stage, attempt, "REJECTED", result, notes);
             notes = d.notes();
         }
+    }
+
+    /**
+     * Records the stage as waiting and blocks until the owner approves/rejects (or, when {@code autoReleases}, until
+     * the stage is switched to AUTO, which returns null).
+     */
+    private Decision awaitOwner(String videoId, Stage stage, int attempt, String status, String viewSummary,
+                                String summary, String artifactJson, String notes, boolean autoReleases) {
+        views.put(stage, new StageView(stage, modeOf(stage), status, attempt, viewSummary));
+        activities.recordStage(videoId, stage, attempt, modeOf(stage), status, summary, artifactJson, notes);
+        phase = "WAITING";
+        waitingStage = stage;
+        decision = null;
+        Workflow.await(() -> decision != null || (autoReleases && modeOf(stage) == StageMode.AUTO));
+        waitingStage = null;
+        phase = "RUNNING";
+        Decision d = decision;
+        decision = null;
+        return d;
+    }
+
+    /**
+     * Images whose every problem names its shot are fixed one by one (the Creative Director's better prompts), not by
+     * regenerating the whole set. Returns true when the next KEYFRAMES run will be such a targeted redo.
+     */
+    private boolean targetedRedo(Stage stage, InspectionReport inspection, String ownerNotes) {
+        if (stage != Stage.KEYFRAMES || inspection.redoTargets() == null || inspection.redoTargets().isEmpty()
+                || !creativeDirectorEnabled()) {
+            return false;
+        }
+        keyframeFix = new KeyframeFix(inspection.redoTargets(), ownerNotes);
+        return true;
     }
 
     private StageResult runStageActivity(String videoId, Stage stage, String prompt, String notes, int attempt) {
@@ -322,7 +337,10 @@ public class VideoProductionWorkflowImpl implements VideoProductionWorkflow {
             case SHOT_PLAN:
                 return agents.shotPlan(videoId, notes);
             case KEYFRAMES: {
-                var request = activities.keyframeRequest(videoId, notes);
+                KeyframeFix fix = keyframeFix;
+                keyframeFix = null;
+                var request = fix == null ? activities.keyframeRequest(videoId, notes)
+                        : agents.fixKeyframeRequest(videoId, fix.shotIds(), fix.ownerNotes());
                 return activities.saveKeyframes(videoId, request, media.generateKeyframes(request));
             }
             case ANIMATIC:
@@ -341,8 +359,9 @@ public class VideoProductionWorkflowImpl implements VideoProductionWorkflow {
     }
 
     /**
-     * Second-level inspection of a finished stage. Never fails the stage itself: if the Inspector can't run, that is
-     * reported as a warning and production continues.
+     * Second-level inspection of a finished stage: the Inspector's checks plus, for the shot plan and the images, the
+     * Creative Director's story review. Never fails the stage itself: a check that can't run is reported as a warning
+     * and production continues.
      */
     private InspectionReport inspect(String videoId, Stage stage, int attempt) {
         if (!Inspector.INSPECTED.contains(stage)) {
@@ -355,11 +374,39 @@ public class VideoProductionWorkflowImpl implements VideoProductionWorkflow {
         try {
             MediaInspectRequest request = activities.inspectionRequest(videoId, stage);
             MediaInspectResult files = request == null ? null : inspectorMedia.inspectMedia(request);
+            if ((stage == Stage.SHOT_PLAN || stage == Stage.KEYFRAMES) && creativeDirectorEnabled()) {
+                files = merge(files, creativeReview(videoId, stage, attempt));
+            }
             return activities.saveInspection(videoId, stage, attempt, files);
         } catch (ActivityFailure failure) {
             log.warn("Inspector could not check {}: {}", stage, rootMessage(failure));
             return new InspectionReport("WARN", "Inspector could not run: " + rootMessage(failure), null);
         }
+    }
+
+    private List<Finding> creativeReview(String videoId, Stage stage, int attempt) {
+        try {
+            if (stage == Stage.SHOT_PLAN) {
+                return agents.creativeShotPlanReview(videoId, attempt);
+            }
+            ImageReviewRequest request = agents.imageReviewRequest(videoId);
+            return activities.saveImageReview(videoId, attempt, inspectorMedia.reviewImages(request));
+        } catch (ActivityFailure failure) {
+            log.warn("Creative Director could not review {}: {}", stage, rootMessage(failure));
+            return List.of(new Finding("WARN", "CREATIVE_REVIEW_UNAVAILABLE",
+                    "The Creative Director could not review this: " + rootMessage(failure), stage.name().toLowerCase()));
+        }
+    }
+
+    private static MediaInspectResult merge(MediaInspectResult files, List<Finding> more) {
+        List<Finding> findings = new ArrayList<>(files == null || files.findings() == null ? List.of() : files.findings());
+        findings.addAll(more);
+        return new MediaInspectResult(findings, files == null || files.checked() == null ? List.of() : files.checked());
+    }
+
+    /** Workflows started before the Creative Director existed replay without it (Temporal determinism). */
+    private boolean creativeDirectorEnabled() {
+        return Workflow.getVersion("creative-director", Workflow.DEFAULT_VERSION, 1) != Workflow.DEFAULT_VERSION;
     }
 
     private static String rootMessage(Throwable t) {

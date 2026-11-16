@@ -37,10 +37,12 @@ public class VideoActivitiesImpl implements VideoActivities {
     private final ProductionService production;
     private final Pricing pricing;
     private final com.projectv.production.Inspector inspector;
+    private final com.projectv.production.CreativeDirector creative;
 
     public VideoActivitiesImpl(JdbcClient jdbc, Planner planner, CostLedger ledger, ObjectMapper json,
                                ProductionService production, Pricing pricing,
-                               com.projectv.production.Inspector inspector) {
+                               com.projectv.production.Inspector inspector,
+                               com.projectv.production.CreativeDirector creative) {
         this.jdbc = jdbc;
         this.planner = planner;
         this.ledger = ledger;
@@ -48,6 +50,30 @@ public class VideoActivitiesImpl implements VideoActivities {
         this.production = production;
         this.pricing = pricing;
         this.inspector = inspector;
+        this.creative = creative;
+    }
+
+    @Override
+    public java.util.List<com.projectv.media.MediaTypes.Finding> creativeShotPlanReview(String videoId, int attempt) {
+        return creative.reviewShotPlan(UUID.fromString(videoId), attempt);
+    }
+
+    @Override
+    public com.projectv.media.MediaTypes.ImageReviewRequest imageReviewRequest(String videoId) {
+        return creative.imageReviewRequest(UUID.fromString(videoId));
+    }
+
+    @Override
+    public java.util.List<com.projectv.media.MediaTypes.Finding> saveImageReview(String videoId, int attempt,
+                                                                                 com.projectv.media.MediaTypes.ImageReviewResult result) {
+        return creative.saveImageReview(UUID.fromString(videoId), attempt, result);
+    }
+
+    @Override
+    public KeyframeRequest fixKeyframeRequest(String videoId, java.util.List<String> shotIds, String ownerNotes) {
+        java.util.List<UUID> ids = shotIds.stream().map(UUID::fromString).toList();
+        creative.applySuggestedPrompts(UUID.fromString(videoId), ids);
+        return production.shotKeyframeRequest(UUID.fromString(videoId), ids, ownerNotes, ProductionService.ImagePolicy.AUTO);
     }
 
     @Override

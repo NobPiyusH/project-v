@@ -49,6 +49,7 @@ class ProductionPersistenceTest {
     static VoiceStage voice;
     static ShotStage shots;
     static Inspector inspector;
+    static CreativeDirector creative;
     static BudgetGuard budget;
 
     UUID video;
@@ -66,6 +67,7 @@ class ProductionPersistenceTest {
         voice = new VoiceStage(deps);
         shots = new ShotStage(deps);
         inspector = new Inspector(deps);
+        creative = new CreativeDirector(deps, null, "gemini-3.6-flash");
     }
 
     @BeforeEach
@@ -117,7 +119,7 @@ class ProductionPersistenceTest {
     @Test
     void allMigrationsApplyAndLicencesAreSeeded() {
         assertEquals(3, jdbc.sql("SELECT count(*) FROM licence").query(Integer.class).single());
-        assertEquals(5, jdbc.sql("SELECT count(*) FROM flyway_schema_history WHERE success").query(Integer.class).single());
+        assertEquals(6, jdbc.sql("SELECT count(*) FROM flyway_schema_history WHERE success").query(Integer.class).single());
     }
 
     @Test
@@ -148,6 +150,38 @@ class ProductionPersistenceTest {
                 .query(BigDecimal.class).single();
         assertTrue(spent.signum() > 0);
         assertThrows(IllegalStateException.class, () -> voice.selectLineVoice(video, 0, UUID.randomUUID()));
+    }
+
+    @Test
+    void creativeDirectorKeepsItsFixAsASuggestionUntilTheShotIsRedone() {
+        UUID scene = UUID.randomUUID();
+        UUID shot = UUID.randomUUID();
+        jdbc.sql("INSERT INTO scene (id, video_id, ord, title) VALUES (:s, :v, 0, 'S')").param("s", scene).param("v", video).update();
+        jdbc.sql("""
+                        INSERT INTO shot (id, scene_id, ord, prompt_json)
+                        VALUES (:id, :s, 0, CAST('{"keyframePrompt":"a flashlight beam","lineIndex":0}' AS jsonb))
+                        """).param("id", shot).param("s", scene).update();
+        var review = new com.projectv.agents.AgentTypes.CreativeReview(
+                new com.projectv.agents.AgentTypes.VideoCritique(4, 4, 4, 4, "", ""), List.of(),
+                List.of(new com.projectv.agents.AgentTypes.ShotCritique(1, 1, 4, 4, true, "a torch, not starlight",
+                        "ancient light leaving a distant galaxy")));
+        var findings = creative.saveImageReview(video, 1, new com.projectv.media.MediaTypes.ImageReviewResult(review,
+                "gemini-3.6-flash", new Usage(5000, 800, 0, 5800), 1));
+        assertEquals(1, findings.size());
+        assertEquals(shot.toString(), findings.getFirst().targetId());
+        String prompt = jdbc.sql("SELECT prompt_json::text FROM shot WHERE id = :s").param("s", shot).query(String.class).single();
+        assertTrue(prompt.contains("\"keyframePrompt\": \"a flashlight beam\""), "not changed before the redo: " + prompt);
+        assertTrue(prompt.contains("suggestedPrompt"));
+        assertEquals(1, jdbc.sql("SELECT count(*) FROM creative_review WHERE video_id = :v").param("v", video)
+                .query(Integer.class).single());
+        assertTrue(jdbc.sql("SELECT count(*) FROM cost_entry WHERE video_id = :v AND note LIKE 'CREATIVE_REVIEW%'")
+                .param("v", video).query(Integer.class).single() == 1);
+
+        creative.applySuggestedPrompts(video, List.of(shot));
+        prompt = jdbc.sql("SELECT prompt_json::text FROM shot WHERE id = :s").param("s", shot).query(String.class).single();
+        assertTrue(prompt.contains("\"keyframePrompt\": \"ancient light leaving a distant galaxy\""), prompt);
+        assertTrue(prompt.contains("\"originalPrompt\": \"a flashlight beam\""), prompt);
+        assertFalse(prompt.contains("suggestedPrompt"), prompt);
     }
 
     @Test

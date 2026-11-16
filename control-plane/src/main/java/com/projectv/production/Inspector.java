@@ -96,6 +96,9 @@ public class Inspector extends StageSupport {
             findings.addAll(media.findings() == null ? List.of() : media.findings());
             checked.addAll(media.checked() == null ? List.of() : media.checked());
         }
+        if (stage == Stage.KEYFRAMES) {
+            findings = withShotTargets(findings, shots(videoId));
+        }
         InspectionReport report = report(findings, checked.size());
         jdbc.sql("""
                         INSERT INTO inspection (video_id, stage, attempt, verdict, findings_json, checked_json)
@@ -124,6 +127,16 @@ public class Inspector extends StageSupport {
                 }).toList();
     }
 
+    /** Links "shot N" findings from the worker to their shot ids, so a FAIL can be fixed on that shot alone. */
+    static List<Finding> withShotTargets(List<Finding> findings, List<Map<String, Object>> shots) {
+        Map<String, String> idByRef = new java.util.HashMap<>();
+        for (Map<String, Object> s : shots) {
+            idByRef.put(shotRef(s), String.valueOf(s.get("id")));
+        }
+        return findings.stream().map(f -> f.targetId() == null && f.ref() != null && idByRef.containsKey(f.ref())
+                ? new Finding(f.severity(), f.code(), f.message(), f.ref(), idByRef.get(f.ref())) : f).toList();
+    }
+
     static InspectionReport report(List<Finding> findings, int filesChecked) {
         List<Finding> fails = findings.stream().filter(f -> "FAIL".equals(f.severity())).toList();
         List<Finding> warns = findings.stream().filter(f -> "WARN".equals(f.severity())).toList();
@@ -139,7 +152,10 @@ public class Inspector extends StageSupport {
         String notes = fails.isEmpty() ? null
                 : "The Inspector rejected the previous attempt. Fix these problems:\n- " + String.join("\n- ",
                 fails.stream().map(f -> (f.ref() == null ? "" : f.ref() + ": ") + f.message()).toList());
-        return new InspectionReport(verdict, summary, notes);
+        // A targeted redo (only the broken shots) is possible when every problem names its shot.
+        List<String> targets = !fails.isEmpty() && fails.stream().allMatch(f -> f.targetId() != null)
+                ? fails.stream().map(Finding::targetId).distinct().toList() : List.of();
+        return new InspectionReport(verdict, summary, notes, targets);
     }
 
     private static String describe(List<Finding> list, int max) {
@@ -268,12 +284,10 @@ public class Inspector extends StageSupport {
     }
 
     static List<Finding> keyframes(List<Map<String, Object>> shots) {
-        List<String> missing = shots.stream().filter(s -> s.get("keyframe_uri") == null).map(Inspector::shotRef).toList();
-        if (missing.isEmpty()) {
-            return List.of();
-        }
-        return List.of(fail("MISSING_KEYFRAMES", missing.size() + " shot" + (missing.size() == 1 ? " has" : "s have")
-                + " no image: " + String.join(", ", missing) + ".", "keyframes"));
+        return shots.stream().filter(s -> s.get("keyframe_uri") == null)
+                .map(s -> new Finding("FAIL", "MISSING_KEYFRAME", "This shot has no image.", shotRef(s),
+                        String.valueOf(s.get("id"))))
+                .toList();
     }
 
     private List<Finding> animatic(UUID videoId, StoredScript script) {

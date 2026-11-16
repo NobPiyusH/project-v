@@ -51,10 +51,12 @@ public class ApiController {
     private final BudgetGuard budget;
     private final Pricing pricing;
     private final com.projectv.production.Inspector inspector;
+    private final com.projectv.production.CreativeDirector creative;
 
     public ApiController(VideoService videos, ProviderRegistry providers, StylePresets presets, CostLedger ledger,
                          Planner planner, ProductionService production, AssetStore assets, MediaUrls mediaUrls,
-                         BudgetGuard budget, Pricing pricing, com.projectv.production.Inspector inspector) {
+                         BudgetGuard budget, Pricing pricing, com.projectv.production.Inspector inspector,
+                         com.projectv.production.CreativeDirector creative) {
         this.videos = videos;
         this.providers = providers;
         this.presets = presets;
@@ -66,6 +68,7 @@ public class ApiController {
         this.budget = budget;
         this.pricing = pricing;
         this.inspector = inspector;
+        this.creative = creative;
     }
 
     public record CreateVideoRequest(@NotBlank @Size(max = 4000) String prompt, StageMode defaultMode,
@@ -112,6 +115,7 @@ public class ApiController {
         Map<String, Object> d = new LinkedHashMap<>(videos.detail(id));
         d.put("costs", ledger.forVideo(id));
         d.put("inspections", inspector.reports(id));
+        d.put("creativeReviews", creative.reports(id));
         return d;
     }
 
@@ -168,6 +172,11 @@ public class ApiController {
     @PutMapping("/videos/{id}/script/lines/{index}")
     public Object editLine(@PathVariable UUID id, @PathVariable int index, @Valid @RequestBody LineEditBody body) {
         return production.editLine(id, index, body.text(), body.spoken());
+    }
+
+    @PostMapping("/videos/{id}/creative-review")
+    public Map<String, Object> creativeReview(@PathVariable UUID id) {
+        return Map.of("workflowId", videos.reviewImages(id));
     }
 
     @PostMapping("/videos/{id}/script/lines/redo")

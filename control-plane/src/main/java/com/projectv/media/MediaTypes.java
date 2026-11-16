@@ -87,7 +87,11 @@ public final class MediaTypes {
     // ---- Inspector (second-level checks)
 
     /** @param severity FAIL (must not pass unseen), WARN (shown, does not block) or INFO */
-    public record Finding(String severity, String code, String message, String ref) {
+    /** @param targetId the shot id a FAIL can be fixed on alone (targeted redo), or null */
+    public record Finding(String severity, String code, String message, String ref, String targetId) {
+        public Finding(String severity, String code, String message, String ref) {
+            this(severity, code, message, ref, null);
+        }
     }
 
     public record InspectLine(int index, String text, String uri) {
@@ -99,6 +103,25 @@ public final class MediaTypes {
     public record MediaInspectRequest(String videoId, String stage, String aspectRatio, boolean isShort, double targetSec,
                                       List<InspectLine> lines, String musicUri, List<InspectImage> images,
                                       String videoUri, Double speechEndSec) {
+    }
+
+    // ---- Creative Director image review (vision model on the media worker)
+
+    public record ReviewLine(int index, String act, String text, double startSec) {
+    }
+
+    public record ReviewShot(int n, String shotId, Integer lineIndex, String act, double startSec, double durationSec,
+                             String description, String keyframePrompt, String priority, String imageUri) {
+    }
+
+    /** @param rubric the Creative Director's scoring rules (one copy, in CreativeDirectorAgent) */
+    public record ImageReviewRequest(String videoId, String model, String rubric, String title, String aspectRatio,
+                                     String visualStyle, String logline, String bigIdea, String emotionalArc,
+                                     String musicBrief, List<ReviewLine> lines, List<ReviewShot> shots) {
+    }
+
+    public record ImageReviewResult(com.projectv.agents.AgentTypes.CreativeReview review, String model, Usage usage,
+                                    int imagesSent) {
     }
 
     public record MediaInspectResult(List<Finding> findings, List<String> checked) {

@@ -43,4 +43,37 @@ public final class AgentTypes {
 
     public record ShotPlan(List<PlannedShot> shots) {
     }
+
+    // ---- Creative Director (story-level review at three levels: shot, paragraph/act, whole video). Scores 1-5.
+
+    /**
+     * @param shot       1-based shot number
+     * @param meaning    does the shot show the IDEA of its line in the context of its paragraph (not one keyword)?
+     * @param accuracy   is what we see factually/scientifically right?
+     * @param continuity does it belong with its neighbours (style, colour, scale, direction)?
+     * @param literal    true when the shot illustrates a single word of the line instead of its meaning
+     * @param fixPrompt  for any score of 3 or less: a complete replacement image prompt, else empty
+     */
+    public record ShotCritique(int shot, int meaning, int accuracy, int continuity, boolean literal, String problem,
+                               String fixPrompt) {
+    }
+
+    /**
+     * @param flow       do the paragraph's shots, in order, explain its point?
+     * @param keyMoment  does the paragraph's main idea get the strongest image?
+     * @param shotsToFix shot numbers that would fix this paragraph's problem (each needs a ShotCritique fixPrompt)
+     */
+    public record ActCritique(String act, int flow, int keyMoment, int continuity, int mood, String summary,
+                              String problem, List<Integer> shotsToFix) {
+    }
+
+    /**
+     * @param arc     hook -> build -> payoff -> ending, as a whole
+     * @param variety no repeated images or ideas
+     */
+    public record VideoCritique(int arc, int hook, int ending, int variety, String summary, String problem) {
+    }
+
+    public record CreativeReview(VideoCritique video, List<ActCritique> acts, List<ShotCritique> shots) {
+    }
 }

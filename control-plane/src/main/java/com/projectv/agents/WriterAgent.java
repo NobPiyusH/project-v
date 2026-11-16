@@ -89,7 +89,12 @@ public class WriterAgent {
     }
 
     static String notes(String ownerNotes) {
-        return blank(ownerNotes) ? "" : "The owner rejected the previous version with these notes; follow them exactly:\n" + ownerNotes;
+        if (blank(ownerNotes)) {
+            return "";
+        }
+        // Notes from the Inspector / Creative Director already say who rejected what and why.
+        return ownerNotes.startsWith("The Inspector") ? ownerNotes + "\n"
+                : "The owner rejected the previous version with these notes; follow them exactly:\n" + ownerNotes;
     }
 
     static boolean blank(String s) {

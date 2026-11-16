@@ -50,6 +50,19 @@ export interface Inspection {
   created_at: string
 }
 
+export interface ShotCritique { shot: number; meaning: number; accuracy: number; continuity: number; literal: boolean; problem: string; fixPrompt: string }
+export interface ActCritique { act: string; flow: number; keyMoment: number; continuity: number; mood: number; summary: string; problem: string; shotsToFix: number[] }
+export interface VideoCritique { arc: number; hook: number; ending: number; variety: number; summary: string; problem: string }
+
+/** Creative Director report card for one stage (SHOT_PLAN = prompts, KEYFRAMES = the real images). */
+export interface CreativeReport {
+  stage: 'SHOT_PLAN' | 'KEYFRAMES'
+  attempt: number
+  model: string | null
+  review: { video: VideoCritique | null; acts: ActCritique[]; shots: ShotCritique[] }
+  created_at: string
+}
+
 export interface VideoDetail extends VideoSummary {
   workflow_id: string
   plan_json: string | null
@@ -58,6 +71,7 @@ export interface VideoDetail extends VideoSummary {
   stageRuns: StageRun[]
   costs: CostRow[]
   inspections: Inspection[]
+  creativeReviews: CreativeReport[]
 }
 
 export interface Provider {
@@ -141,6 +155,7 @@ export const api = {
     call<void>('POST', `/videos/${id}/stages/${stage}/reject`, { notes }),
   setMode: (id: string, stage: string, mode: Mode) => call<void>('PUT', `/videos/${id}/modes/${stage}`, { mode }),
   setAllModes: (id: string, mode: Mode) => call<void>('PUT', `/videos/${id}/modes`, { mode }),
+  reviewImages: (id: string) => call<{ workflowId: string }>('POST', `/videos/${id}/creative-review`),
   rerun: (id: string, stage: string) => call<{ stages: string[] }>('POST', `/videos/${id}/stages/${stage}/rerun`),
   redoShots: (id: string, shotIds: string[], notes: string, policy: ImagePolicy) =>
     call<{ workflowId: string }>('POST', `/videos/${id}/shots/redo`, { shotIds, notes: notes || null, policy }),

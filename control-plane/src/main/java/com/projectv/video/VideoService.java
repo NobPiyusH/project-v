@@ -129,6 +129,22 @@ public class VideoService {
         return workflowId;
     }
 
+    /** Creative Director review of the existing images (nothing is regenerated). */
+    public String reviewImages(UUID id) {
+        Integer images = jdbc.sql("""
+                        SELECT count(*) FROM shot s JOIN scene sc ON sc.id = s.scene_id
+                        WHERE sc.video_id = :id AND s.keyframe_asset_id IS NOT NULL
+                        """).param("id", id).query(Integer.class).single();
+        if (images == 0) {
+            throw new IllegalStateException("This video has no images to review yet");
+        }
+        String workflowId = "creative-review-" + id + "-" + UUID.randomUUID();
+        com.projectv.workflow.CreativeReviewWorkflow wf = temporal.newWorkflowStub(com.projectv.workflow.CreativeReviewWorkflow.class,
+                WorkflowOptions.newBuilder().setWorkflowId(workflowId).setTaskQueue(TaskQueues.CONTROL).build());
+        WorkflowClient.start(wf::run, new com.projectv.workflow.CreativeReviewWorkflow.CreativeReviewRequest(id.toString()));
+        return workflowId;
+    }
+
     /** Re-voice only the given lines. Blocked while the main run is voicing or building the animatic. */
     public String redoLines(UUID id, List<Integer> lineIndexes, String styleNotes) {
         if (lineIndexes == null || lineIndexes.isEmpty()) {

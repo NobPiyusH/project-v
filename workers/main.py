@@ -15,6 +15,7 @@ from workers.activities.keyframes import generate_keyframes
 from workers.activities.media import tool_versions
 from workers.activities.music import generate_music
 from workers.activities.research import research_topic
+from workers.activities.review import review_images
 from workers.activities.voice import synthesize_narration
 from workers.common import ensure_bucket
 
@@ -36,7 +37,7 @@ async def main() -> None:
             client,
             task_queue=MEDIA_TASK_QUEUE,
             activities=[tool_versions, research_topic, synthesize_narration, generate_music,
-                        generate_keyframes, render_animatic, inspect_media],
+                        generate_keyframes, render_animatic, inspect_media, review_images],
             activity_executor=pool,
             max_concurrent_activities=8,
         )
