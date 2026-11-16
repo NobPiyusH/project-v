@@ -23,7 +23,8 @@ CACHE = "/cache/hf"
 app = modal.App(APP_NAME)
 
 image = modal.Image.debian_slim(python_version="3.11").apt_install("ffmpeg").pip_install(
-    "torch==2.8.0",
+    "torch==2.8.0",   # 2.9.1 enables the FlashAttention 3 Hub kernel, but clips ran ~4x slower on it (17 Nov 2026 A/B);
+                      # stay on 2.8 until that slowdown is understood (fa3 then falls back to native and says so)
     "diffusers>=0.43.0",
     "transformers>=4.57.0",
     "accelerate>=1.10",

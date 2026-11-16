@@ -18,7 +18,8 @@ from dotenv import load_dotenv
 
 from workers.common import get_bytes, run_ffmpeg
 
-VARIANTS = ["native", "fa3", "sage"]
+VARIANTS = ["native", "fa3", "sage"]  # override: 6th arg, e.g. native,fa3
+REPEATS = 1                           # 7th arg: render each variant N times (GPU timings vary a lot)
 
 
 def main(video_id: str, out_dir: str, shots: list[int], mode: str, frames: int) -> None:
@@ -37,8 +38,10 @@ def main(video_id: str, out_dir: str, shots: list[int], mode: str, frames: int) 
         prompt = f"{prompt_json.get('motionPrompt') or ''}. {s.get('description') or ''}".strip(". ")
         base = {"image": get_bytes(asset["uri_hot"]), "prompt": prompt, "width": w, "height": h, "numFrames": frames,
                 "seed": 1234 + n, "mode": mode}
-        for v in VARIANTS:
-            jobs.append({**base, "id": f"ab-shot{n:02d}-{v}", "attention": v})
+        for r in range(REPEATS):
+            for v in VARIANTS:
+                suffix = "" if r == 0 else f"-r{r + 1}"
+                jobs.append({**base, "id": f"ab-shot{n:02d}-{v}{suffix}", "attention": v})
 
     wan = modal.Cls.from_name("projectv-wan", "Wan")()
     t = time.time()
@@ -48,8 +51,9 @@ def main(video_id: str, out_dir: str, shots: list[int], mode: str, frames: int) 
         if r.get("mp4"):
             path.write_bytes(r["mp4"])
         rows.append({"id": r["id"], "seconds": round(r.get("seconds") or 0, 1), "attention": r.get("attention"),
+                     "offloaded": r.get("offloaded"),
                      "fallback": r.get("attentionFallback"), "error": r.get("error")})
-        print(f"{r['id']:24} {r.get('seconds') or 0:6.1f}s  used={r.get('attention')}  "
+        print(f"{r['id']:24} {r.get('seconds') or 0:6.1f}s  used={r.get('attention')}  offloaded={r.get('offloaded')}  "
               f"{r.get('attentionFallback') or ''} {r.get('error') or ''}", flush=True)
     total = time.time() - t
     (out / "timings.json").write_text(json.dumps({"totalWallSeconds": round(total, 1), "clips": rows}, indent=2))
@@ -74,5 +78,9 @@ def main(video_id: str, out_dir: str, shots: list[int], mode: str, frames: int) 
 
 
 if __name__ == "__main__":
+    if len(sys.argv) > 6:
+        VARIANTS = sys.argv[6].split(",")
+    if len(sys.argv) > 7:
+        REPEATS = int(sys.argv[7])
     main(sys.argv[1], sys.argv[2], [int(x) for x in (sys.argv[3] if len(sys.argv) > 3 else "1,2").split(",")],
          sys.argv[4] if len(sys.argv) > 4 else "fast", int(sys.argv[5]) if len(sys.argv) > 5 else 33)
