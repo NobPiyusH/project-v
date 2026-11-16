@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { api, assetUrl, type ClipKind, type ClipVersion, type Production, type ShotRow } from '../api'
 import { usePoll } from '../hooks'
 
-const STATE_LABEL: Record<string, string> = {
+export const STATE_LABEL: Record<string, string> = {
   queued: 'Waiting for a GPU', starting: 'Starting', rendering: 'Rendering', encoding: 'Saving',
   done: 'Done', failed: 'Failed', stopped: 'Stopped',
 }
@@ -148,7 +148,7 @@ function ClipTile({ shot: s, selected, onToggle, busy, onKeepDraft, showTakes, o
  * Every take of a shot side by side, all playing together, so motion can be compared at a glance (hero shots get
  * two draft takes by default). Picking one is free: nothing is regenerated.
  */
-function Takes({ shotId, onSelect }: { shotId: string; onSelect: (assetId: string) => void }) {
+export function Takes({ shotId, onSelect }: { shotId: string; onSelect: (assetId: string) => void }) {
   const { data } = usePoll<ClipVersion[]>(() => api.clipVersions(shotId), 10000, [shotId])
   if (!data) return <div className="muted small">Loading takes…</div>
   const playAll = () => document.querySelectorAll<HTMLVideoElement>(`[data-takes="${shotId}"] video`).forEach((v) => {

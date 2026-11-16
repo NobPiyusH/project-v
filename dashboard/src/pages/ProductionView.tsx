@@ -41,7 +41,7 @@ function useAction(onChange: () => void) {
   return { error, busy, run }
 }
 
-function AnimaticCard({ id, p, onChange }: { id: string; p: Production; onChange: () => void }) {
+export function AnimaticCard({ id, p, onChange }: { id: string; p: Production; onChange: () => void }) {
   const { error, busy, run } = useAction(onChange)
   return (
     <section className="card">
@@ -71,7 +71,7 @@ const POLICY_LABEL: Record<ImagePolicy, string> = {
   FREE: 'Free: Z-Image on Modal',
 }
 
-function PolicySelect({ value, onChange }: { value: ImagePolicy; onChange: (p: ImagePolicy) => void }) {
+export function PolicySelect({ value, onChange }: { value: ImagePolicy; onChange: (p: ImagePolicy) => void }) {
   return (
     <select value={value} onChange={(e) => onChange(e.target.value as ImagePolicy)} aria-label="Image model">
       {(Object.keys(POLICY_LABEL) as ImagePolicy[]).map((k) => <option key={k} value={k}>{POLICY_LABEL[k]}</option>)}
@@ -149,7 +149,7 @@ function ShotGrid({ id, p, onChange }: { id: string; p: Production; onChange: ()
   )
 }
 
-function ShotEditor({ videoId, shot, onChange }: { videoId: string; shot: ShotRow; onChange: () => void }) {
+export function ShotEditor({ videoId, shot, onChange }: { videoId: string; shot: ShotRow; onChange: () => void }) {
   const [prompt, setPrompt] = useState(shot.prompt_json.keyframePrompt ?? '')
   const [notes, setNotes] = useState('')
   const [policy, setPolicy] = useState<ImagePolicy>('AUTO')
@@ -164,7 +164,7 @@ function ShotEditor({ videoId, shot, onChange }: { videoId: string; shot: ShotRo
         <strong>Image prompt</strong> {shot.prompt_json.editedByOwner ? <span className="muted">(edited by you)</span> : null}
       </label>
       <textarea id={`prompt-${shot.id}`} rows={5} value={prompt} onChange={(e) => setPrompt(e.target.value)} />
-      <div className="small muted"><strong>Motion (used for real video in M2b):</strong> {shot.prompt_json.motionPrompt}</div>
+      <div className="small muted"><strong>Motion prompt (for the video clip):</strong> {shot.prompt_json.motionPrompt}</div>
       <textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Notes for this redo (optional)" />
       <div className="row">
         <PolicySelect value={policy} onChange={setPolicy} />
@@ -253,7 +253,7 @@ function FootagePanel({ videoId, shot, onChange }: { videoId: string; shot: Shot
   )
 }
 
-function StoryCard({ id, p, onChange }: { id: string; p: Production; onChange: () => void }) {
+export function StoryCard({ id, p, onChange }: { id: string; p: Production; onChange: () => void }) {
   return (
     <section className="card">
       <div className="card-head"><h2>Story</h2>{p.script && <span className="pill">Voice: {p.script.voiceName}</span>}</div>
@@ -277,7 +277,7 @@ function StoryCard({ id, p, onChange }: { id: string; p: Production; onChange: (
   )
 }
 
-function ResearchCard({ facts, queries }: { facts: Fact[]; queries: string[] }) {
+export function ResearchCard({ facts, queries }: { facts: Fact[]; queries: string[] }) {
   return (
     <section className="card">
       <div className="card-head"><h2>Research</h2><span className="pill">{facts.length} facts · Google Search</span></div>

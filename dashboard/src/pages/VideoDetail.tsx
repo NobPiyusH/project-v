@@ -1,17 +1,39 @@
 import { Fragment, useState } from 'react'
-import { api, assetUrl, type Inspection, type Mode, type StageInfo, type StageRun, type VideoDetail as Detail } from '../api'
-import { Countdown, ModeSwitch, StatusBadge } from '../components'
+import { api, assetUrl, type Fact, type Inspection, type Mode, type StageInfo, type StageRun, type VideoDetail as Detail } from '../api'
+import { Countdown, ModeSwitch, STATUS_TEXT, StatusBadge } from '../components'
 import { fmtTime, usePoll } from '../hooks'
 import { CreativeCard } from './CreativeCard'
-import { ProductionView } from './ProductionView'
+import { AnimaticCard, ResearchCard, StoryCard } from './ProductionView'
+import { Storyboard } from './Storyboard'
 
 interface Modes { default: Mode; stages: Record<string, Mode> }
 
 const FINISHED = new Set(['AUTO_PASSED', 'APPROVED', 'SKIPPED'])
 
+type Tab = 'storyboard' | 'story' | 'reviews' | 'stages' | 'plan'
+
+const DONE = new Set(['AUTO_PASSED', 'APPROVED', 'AUTO_APPROVED'])
+
+function pipeClass(status: string | undefined) {
+  if (!status) return ''
+  if (DONE.has(status)) return 'done'
+  if (status === 'RUNNING') return 'running'
+  if (status === 'WAITING_APPROVAL') return 'waiting'
+  if (status === 'FAILED' || status === 'INSPECTION_FAILED' || status === 'REJECTED') return 'failed'
+  if (status === 'SKIPPED') return 'skipped'
+  return ''
+}
+
+/**
+ * The video workspace: what the video looks like now (master, else animatic, else first frame), what needs the owner,
+ * the whole pipeline at a glance, and tabs for the storyboard, story, reviews, stages and plan/costs.
+ */
 export function VideoDetail({ id, stages }: { id: string; stages: StageInfo[] }) {
-  const { data: video, error, refresh } = usePoll(() => api.video(id), 1500, [id])
+  const { data: video, error, refresh } = usePoll(() => api.video(id), 2000, [id])
+  const { data: production, refresh: refreshProduction } = usePoll(() => api.production(id), 3000, [id])
   const [actionError, setActionError] = useState<string | null>(null)
+  const [tab, setTab] = useState<Tab | null>(null)
+  const [screen, setScreen] = useState<'master' | 'animatic' | null>(null)
 
   if (error && !video) return <p className="error">{error}</p>
   if (!video) return <p className="muted">Loading…</p>
@@ -20,81 +42,183 @@ export function VideoDetail({ id, stages }: { id: string; stages: StageInfo[] })
   const modeOf = (stage: string): Mode => modes.stages?.[stage] ?? modes.default
   const latest = latestRuns(video.stageRuns)
   const finished = video.status === 'COMPLETED' || video.status === 'CANCELLED'
+  const vertical = (video.plan_json ?? '').includes('"9:16"')
+  const p = production
+  const current = tab ?? (p && p.shots.length > 0 ? 'storyboard' : 'stages')
+  const waitingStage = stages.find((s) => ['WAITING_APPROVAL', 'FAILED'].includes(latest[s.id]?.status ?? ''))
+  const reviewCount = (video.inspections ?? []).filter((x) => x.verdict !== 'PASS').length + (video.creativeReviews?.length ?? 0)
 
   const act = async (fn: () => Promise<unknown>) => {
     setActionError(null)
     try {
       await fn()
       await refresh()
+      await refreshProduction()
     } catch (e) {
       setActionError(e instanceof Error ? e.message : String(e))
     }
   }
+  const stageRow = (s: StageInfo, i: number) => (
+    <StageRow key={s.id} index={i + 1} stage={s} run={latest[s.id]} mode={modeOf(s.id)} stages={stages}
+      inspection={(video.inspections ?? []).find((x) => x.stage === s.id && x.attempt === latest[s.id]?.attempt)}
+      canRedo={finished && s.redoWith.length > 0 && latest[s.id] !== undefined && latest[s.id].status !== 'SKIPPED'}
+      onRedo={() => act(() => api.rerun(id, s.id))}
+      attempts={video.stageRuns.filter((r) => r.stage === s.id && r.attempt > 0).length}
+      locked={finished || (latest[s.id] !== undefined && FINISHED.has(latest[s.id].status))}
+      onMode={(m) => act(() => api.setMode(id, s.id, m))}
+      onApprove={(notes) => act(() => api.approve(id, s.id, notes))}
+      onReject={(notes) => act(() => api.reject(id, s.id, notes))} />
+  )
+
+  const masterId = video.master_asset_id
+  const animaticId = p?.animaticAssetId ?? null
+  const show = screen === 'animatic' && animaticId ? 'animatic' : masterId ? 'master' : animaticId ? 'animatic' : null
+  const firstImage = p?.shots.find((s) => s.keyframe_asset_id)?.keyframe_asset_id
 
   return (
     <>
-      <section className="card">
-        <div className="card-head">
-          <div className="grow">
-            <a href="#/" className="small">← All videos</a>
-            <h1 style={{ marginTop: 6 }}>{video.title ?? 'Untitled video'}</h1>
-          </div>
-          <StatusBadge status={video.status} />
-        </div>
-        <p className="muted" style={{ marginTop: 0 }}>“{video.prompt}”</p>
+      <section className="workspace-head">
         <div className="row">
+          <a href="#/" className="small">← Studio</a>
+          <span className="grow" />
+          <StatusBadge status={video.status} />
           {!finished && (video.status === 'PAUSED'
             ? <button onClick={() => act(() => api.resume(id))}>Resume</button>
             : <button onClick={() => act(() => api.pause(id))}>Pause</button>)}
-          <span className="grow" />
-          {!finished && (
-            <>
-              <span className="muted small">Set all remaining stages</span>
-              <button onClick={() => act(() => api.setAllModes(id, 'AUTO'))}>All Auto</button>
-              <button onClick={() => act(() => api.setAllModes(id, 'REVIEW'))}>All Review</button>
-              <button onClick={() => act(() => api.setAllModes(id, 'MANUAL'))}>All Manual</button>
+        </div>
+        <h1>{video.title ?? 'Untitled video'}</h1>
+        <p className="muted" style={{ margin: 0 }}>“{video.prompt}”</p>
+        {actionError && <p className="error">{actionError}</p>}
+      </section>
+
+      <div className="stage-hero">
+        <div style={{ display: 'grid', gap: 8 }}>
+          <div className={`screen ${vertical ? 'vertical' : ''}`}>
+            {show === 'master' && masterId && <video key={masterId} src={assetUrl(masterId)} controls preload="metadata" />}
+            {show === 'animatic' && animaticId && <video key={animaticId} src={assetUrl(animaticId)} controls preload="metadata" />}
+            {!show && (firstImage ? <img src={assetUrl(firstImage)} alt="" />
+              : <div className="empty-screen">The first pictures appear here once the shot plan is made.</div>)}
+          </div>
+          <div className="row">
+            {masterId && animaticId && (
+              <div className="seg" role="group" aria-label="What to watch">
+                <button className={show === 'master' ? 'on' : ''} onClick={() => setScreen('master')}>Master</button>
+                <button className={show === 'animatic' ? 'on' : ''} onClick={() => setScreen('animatic')}>Animatic</button>
+              </div>
+            )}
+            <span className="grow" />
+            {masterId && <a className="button" href={assetUrl(masterId)} download="master.mp4">Download MP4</a>}
+            {video.master_package_asset_id && (
+              <a className="button" href={assetUrl(video.master_package_asset_id)} download="premiere_package.zip"
+                title="Unzip, then in Premiere Pro: File > Import > project.xml (keep the media folder next to it)">Premiere</a>
+            )}
+            {video.master_captions_asset_id && (
+              <a className="button" href={assetUrl(video.master_captions_asset_id)} download="captions.srt">SRT</a>
+            )}
+          </div>
+        </div>
+        <div style={{ display: 'grid', gap: 12 }}>
+          {waitingStage ? (
+            <div className="waiting-banner">
+              <strong>Waiting for you: {waitingStage.label}</strong>
+              <div className="stages">{stageRow(waitingStage, stages.indexOf(waitingStage))}</div>
+            </div>
+          ) : (
+            <div className="card">
+              <div className="small muted">{finished ? 'Done' : video.current_stage ? 'Working on' : 'Status'}</div>
+              <div style={{ fontWeight: 700 }}>
+                {finished ? (masterId ? 'Master ready' : 'All stages finished')
+                  : stages.find((s) => s.id === video.current_stage)?.label ?? video.status}
+              </div>
+              {video.current_stage && latest[video.current_stage]?.summary && (
+                <div className="small muted clamp2">{latest[video.current_stage].summary}</div>
+              )}
+            </div>
+          )}
+          <div className="card small" style={{ display: 'grid', gap: 6 }}>
+            <div className="row"><span className="muted">Spent</span><span className="grow" /><strong>₹{Number(video.spent_inr).toFixed(2)}</strong></div>
+            {p && <div className="row"><span className="muted">Shots</span><span className="grow" /><strong>{p.shots.length}</strong></div>}
+            <div className="row"><span className="muted">Started</span><span className="grow" />{fmtTime(video.created_at)}</div>
+            {!finished && (
+              <div className="row">
+                <span className="muted">All remaining stages</span><span className="grow" />
+                <ModeSwitch value={modes.default} onChange={(m) => act(() => api.setAllModes(id, m))} />
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <nav className="pipeline" aria-label="Pipeline">
+        {stages.map((s) => {
+          const r = latest[s.id]
+          return (
+            <button key={s.id} className={`pipe ${pipeClass(r?.status)}`} title={r?.summary ?? s.description}
+              onClick={() => { setTab('stages'); window.setTimeout(() => document.getElementById(`stage-${s.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50) }}>
+              <span className="name">{s.label}</span>
+              <span>{r ? (STATUS_TEXT[r.status] ?? r.status) : 'Pending'}</span>
+            </button>
+          )
+        })}
+      </nav>
+
+      <div className="tabs" role="tablist">
+        {p && p.shots.length > 0 && <button className={current === 'storyboard' ? 'on' : ''} onClick={() => setTab('storyboard')}>Storyboard<span className="count">{p.shots.length}</span></button>}
+        {p && (p.script || p.research) && <button className={current === 'story' ? 'on' : ''} onClick={() => setTab('story')}>Story</button>}
+        <button className={current === 'reviews' ? 'on' : ''} onClick={() => setTab('reviews')}>Reviews{reviewCount > 0 && <span className="count">{reviewCount}</span>}</button>
+        <button className={current === 'stages' ? 'on' : ''} onClick={() => setTab('stages')}>Stages</button>
+        <button className={current === 'plan' ? 'on' : ''} onClick={() => setTab('plan')}>Plan &amp; costs</button>
+      </div>
+
+      {current === 'storyboard' && p && <Storyboard id={id} p={p} vertical={vertical} onChange={() => { void refreshProduction(); void refresh() }} />}
+      {current === 'story' && p && (
+        <>
+          {p.animaticAssetId && <AnimaticCard id={id} p={p} onChange={refreshProduction} />}
+          {(p.concept || p.script || p.music) && <StoryCard id={id} p={p} onChange={refreshProduction} />}
+          {p.research && <ResearchCard facts={JSON.parse(p.research.facts) as Fact[]} queries={p.research.queries} />}
+        </>
+      )}
+      {current === 'reviews' && (
+        <>
+          <CreativeCard reports={video.creativeReviews ?? []}
+            canReview={finished && video.stageRuns.some((r) => r.stage === 'KEYFRAMES' && r.status !== 'SKIPPED')}
+            onReview={() => act(() => api.reviewImages(id))} />
+          <section className="card">
+            <div className="card-head"><h2>Inspector</h2><span className="pill">independent checks of every stage</span></div>
+            {stages.filter((s) => (video.inspections ?? []).some((x) => x.stage === s.id)).map((s) => {
+              const report = (video.inspections ?? []).filter((x) => x.stage === s.id).sort((a, b) => b.attempt - a.attempt)[0]
+              return (
+                <div key={s.id} style={{ marginBottom: 10 }}>
+                  <strong className="small">{s.label}</strong> <span className="muted small">attempt {report.attempt}</span>
+                  <InspectorPanel report={report} />
+                </div>
+              )
+            })}
+            {!(video.inspections ?? []).length && <p className="muted small">No inspections yet.</p>}
+          </section>
+        </>
+      )}
+      {current === 'stages' && (
+        <section className="card">
+          <div className="card-head">
+            <h2>Stages</h2>
+            {!finished && (
               <label className="row small muted">
                 Review window
                 <input type="number" min={1} max={1440} defaultValue={video.review_minutes} style={{ width: 70 }}
                   onBlur={(e) => { const m = Number(e.target.value); if (m > 0 && m !== video.review_minutes) void act(() => api.setReviewMinutes(id, m)) }} /> min
               </label>
-            </>
-          )}
-        </div>
-        {actionError && <p className="error">{actionError}</p>}
-      </section>
-
-      <MasterCard video={video} />
-
-      <PlanCard video={video} />
-
-      <ProductionView id={id} />
-
-      <CreativeCard reports={video.creativeReviews ?? []}
-        canReview={finished && video.stageRuns.some((r) => r.stage === 'KEYFRAMES' && r.status !== 'SKIPPED')}
-        onReview={() => act(() => api.reviewImages(id))} />
-
-      <section className="card">
-        <div className="card-head">
-          <h2>Stages</h2>
-          <span className="muted small">Started {fmtTime(video.created_at)}</span>
-        </div>
-        <div className="stages">
-          {stages.map((s, i) => (
-            <StageRow key={s.id} index={i + 1} stage={s} run={latest[s.id]} mode={modeOf(s.id)} stages={stages}
-              inspection={(video.inspections ?? []).find((x) => x.stage === s.id && x.attempt === latest[s.id]?.attempt)}
-              canRedo={finished && s.redoWith.length > 0 && latest[s.id] !== undefined && latest[s.id].status !== 'SKIPPED'}
-              onRedo={() => act(() => api.rerun(id, s.id))}
-              attempts={video.stageRuns.filter((r) => r.stage === s.id && r.attempt > 0).length}
-              locked={finished || (latest[s.id] !== undefined && FINISHED.has(latest[s.id].status))}
-              onMode={(m) => act(() => api.setMode(id, s.id, m))}
-              onApprove={(notes) => act(() => api.approve(id, s.id, notes))}
-              onReject={(notes) => act(() => api.reject(id, s.id, notes))} />
-          ))}
-        </div>
-      </section>
-
-      <CostsCard video={video} />
+            )}
+          </div>
+          <div className="stages">{stages.map((s, i) => <div key={s.id} id={`stage-${s.id}`}>{stageRow(s, i)}</div>)}</div>
+        </section>
+      )}
+      {current === 'plan' && (
+        <>
+          <PlanCard video={video} />
+          <CostsCard video={video} />
+        </>
+      )}
     </>
   )
 }
@@ -219,34 +343,6 @@ function InspectorPanel({ report }: { report: Inspection }) {
         </ul>
       )}
     </div>
-  )
-}
-
-/** The finished edit: watch it, download it, or take it into Premiere for hand fine-tuning. */
-function MasterCard({ video }: { video: Detail }) {
-  if (!video.master_asset_id) return null
-  const vertical = (video.plan_json ?? '').includes('"9:16"')
-  return (
-    <section className="card">
-      <div className="card-head">
-        <h2>Master</h2>
-        <span className="pill">Rough cut: smooth motion and upscaling come in finishing</span>
-      </div>
-      <video key={video.master_asset_id} className="player" src={assetUrl(video.master_asset_id)} controls preload="metadata"
-        style={vertical ? { maxHeight: 640, width: 'auto', margin: '0 auto', display: 'block' } : undefined} />
-      <div className="row" style={{ marginTop: 8 }}>
-        <a className="button" href={assetUrl(video.master_asset_id)} download="master.mp4">Download MP4</a>
-        {video.master_package_asset_id && (
-          <a className="button" href={assetUrl(video.master_package_asset_id)} download="premiere_package.zip"
-            title="Unzip, then in Premiere Pro: File > Import > project.xml (keep the media folder next to it)">
-            Premiere package
-          </a>
-        )}
-        {video.master_captions_asset_id && (
-          <a className="button" href={assetUrl(video.master_captions_asset_id)} download="captions.srt">Captions (SRT)</a>
-        )}
-      </div>
-    </section>
   )
 }
 

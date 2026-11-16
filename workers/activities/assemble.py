@@ -121,8 +121,11 @@ def write_ass(chunks: list[dict], path: Path, w: int, h: int, vertical: bool) ->
     margin_v = round(h * (0.27 if vertical else 0.07))
     style = (f"Style: Main,Segoe UI,{size},&H00FFFFFF,&H00FFFFFF,&H00101010,&H64000000,-1,0,0,0,100,100,0,0,1,"
              f"{max(3, size // 14)},2,2,{round(w * 0.08)},{round(w * 0.08)},{margin_v},1")
-    events = "".join(f"Dialogue: 0,{_ts(c['start'], True)},{_ts(c['end'] + 0.05, True)},Main,,0,0,0,,"
-                     f"{c['text'].replace('{', '(').replace('}', ')')}\n" for c in chunks)
+    # Each caption stays a moment after its last word but never overlaps the next: one caption on screen at a time.
+    ends = [min(c["end"] + 0.25, chunks[i + 1]["start"]) if i + 1 < len(chunks) else c["end"] + 0.25
+            for i, c in enumerate(chunks)]
+    events = "".join(f"Dialogue: 0,{_ts(c['start'], True)},{_ts(ends[i], True)},Main,,0,0,0,,"
+                     f"{c['text'].replace('{', '(').replace('}', ')')}\n" for i, c in enumerate(chunks))
     path.write_text(f"[Script Info]\nScriptType: v4.00+\nPlayResX: {w}\nPlayResY: {h}\nWrapStyle: 0\n\n"
                     "[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, "
                     "BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, "

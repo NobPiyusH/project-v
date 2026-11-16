@@ -202,8 +202,15 @@ public class VideoService {
 
     public List<Map<String, Object>> list() {
         return jdbc.sql("""
-                        SELECT id, title, prompt, status, current_stage, spent_inr, created_at, updated_at
-                        FROM video ORDER BY created_at DESC
+                        SELECT v.id, v.title, v.prompt, v.status, v.current_stage, v.spent_inr, v.created_at, v.updated_at,
+                               v.master_asset_id,
+                               (SELECT s.keyframe_asset_id FROM shot s JOIN scene sc ON sc.id = s.scene_id
+                                WHERE sc.video_id = v.id AND s.keyframe_asset_id IS NOT NULL
+                                ORDER BY s.ord LIMIT 1) AS thumb_asset_id,
+                               (SELECT count(*) FROM shot s JOIN scene sc ON sc.id = s.scene_id WHERE sc.video_id = v.id) AS shots,
+                               (SELECT r.summary FROM stage_run r WHERE r.video_id = v.id AND r.stage = v.current_stage
+                                ORDER BY r.attempt DESC LIMIT 1) AS current_summary
+                        FROM video v ORDER BY v.created_at DESC
                         """)
                 .query().listOfRows();
     }

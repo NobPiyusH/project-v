@@ -71,3 +71,11 @@ def test_a_short_is_assembled_mastered_captioned_and_packaged(local):
         assert sum(n.startswith("media/shot") for n in names) == 3
         xml = z.read("project.xml").decode()
         assert "<xmeml" in xml and "media/shot002.mp4" in xml
+
+
+def test_captions_never_overlap(tmp_path):
+    chunks = [{"text": "one two three", "start": 0.0, "end": 1.0}, {"text": "four five", "start": 1.0, "end": 1.6}]
+    ass = tmp_path / "c.ass"
+    A.write_ass(chunks, ass, 1080, 1920, True)
+    lines = [x for x in ass.read_text(encoding="utf-8").splitlines() if x.startswith("Dialogue")]
+    assert lines[0].split(",")[2] == "0:00:01.00", "the first caption ends when the second begins"

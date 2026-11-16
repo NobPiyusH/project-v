@@ -1,44 +1,8 @@
 import { useState } from 'react'
 import { api, type Mode, type StageInfo } from '../api'
-import { ModeSwitch, StatusBadge } from '../components'
-import { fmtTime, usePoll } from '../hooks'
+import { ModeSwitch } from '../components'
 
-export function VideoList({ stages }: { stages: StageInfo[] }) {
-  const { data: videos, error } = usePoll(api.videos, 3000)
-
-  return (
-    <>
-      <NewVideo stages={stages} />
-      <section className="card">
-        <div className="card-head"><h2>Videos</h2></div>
-        {error && <p className="error">Can't reach the control plane: {error}</p>}
-        {videos && videos.length === 0 && <p className="empty">No videos yet. Write a prompt above to start one.</p>}
-        {videos && videos.length > 0 && (
-          <table>
-            <thead>
-              <tr><th>Title</th><th>Status</th><th className="hide-sm">Stage</th><th className="hide-sm">Created</th></tr>
-            </thead>
-            <tbody>
-              {videos.map((v) => (
-                <tr key={v.id} className="clickable" onClick={() => (window.location.hash = `#/video/${v.id}`)}>
-                  <td>
-                    <a href={`#/video/${v.id}`}>{v.title ?? v.prompt}</a>
-                    {v.title && v.title !== v.prompt && <div className="muted small">{v.prompt}</div>}
-                  </td>
-                  <td><StatusBadge status={v.status} /></td>
-                  <td className="hide-sm">{stages.find((s) => s.id === v.current_stage)?.label ?? ''}</td>
-                  <td className="hide-sm muted small">{fmtTime(v.created_at)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </section>
-    </>
-  )
-}
-
-function NewVideo({ stages }: { stages: StageInfo[] }) {
+export function NewVideo({ stages }: { stages: StageInfo[] }) {
   const [prompt, setPrompt] = useState('')
   const [defaultMode, setDefaultMode] = useState<Mode>('AUTO')
   const [overrides, setOverrides] = useState<Record<string, Mode>>({})

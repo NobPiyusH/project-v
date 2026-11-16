@@ -310,7 +310,8 @@ public class ApiController {
     @GetMapping("/budget")
     public Map<String, Object> budget() {
         return Map.of("geminiCapInr", pricing.geminiMonthlyCapInr(), "geminiSpentInr", budget.geminiSpentThisMonth(),
-                "geminiRemainingInr", budget.geminiRemaining());
+                "geminiRemainingInr", budget.geminiRemaining(), "gpuCapInr", pricing.gpuMonthlyCapInr(),
+                "gpuSpentInr", budget.gpuSpentThisMonth());
     }
 
     @GetMapping("/stages")

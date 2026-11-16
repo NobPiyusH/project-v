@@ -9,7 +9,7 @@ const STATUS_CLASS: Record<string, string> = {
   SKIPPED: 'b-idle', PENDING: 'b-idle',
 }
 
-const STATUS_LABEL: Record<string, string> = {
+export const STATUS_TEXT: Record<string, string> = {
   AUTO_PASSED: 'Done (auto)', AUTO_APPROVED: 'Done (review time ended)', APPROVED: 'Approved', WAITING_APPROVAL: 'Waiting for you',
   WAITING: 'Waiting for you', RUNNING: 'Running', REJECTED: 'Rejected', SKIPPED: 'Skipped',
   COMPLETED: 'Completed', PAUSED: 'Paused', PENDING: 'Pending', CREATED: 'Created', FAILED: 'Failed',
@@ -23,7 +23,7 @@ export const MODE_HELP: Record<Mode, string> = {
 }
 
 export function StatusBadge({ status }: { status: string }) {
-  return <span className={`badge ${STATUS_CLASS[status] ?? 'b-idle'}`}>{STATUS_LABEL[status] ?? status}</span>
+  return <span className={`badge ${STATUS_CLASS[status] ?? 'b-idle'}`}>{STATUS_TEXT[status] ?? status}</span>
 }
 
 export function ModeSwitch({ value, onChange, disabled }: { value: Mode; onChange: (m: Mode) => void; disabled?: boolean }) {
