@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react'
 import { api, assetUrl, type Fact, type ImagePolicy, type Production, type ShotRow, type ShotVersion } from '../api'
 import { usePoll } from '../hooks'
+import { ScriptEditor } from './ScriptEditor'
 
 /** What the stages have actually produced so far: research, concept, script + voice, music, shots, animatic. */
 export function ProductionView({ id }: { id: string }) {
@@ -13,7 +14,7 @@ export function ProductionView({ id }: { id: string }) {
     <>
       {p.animaticAssetId && <AnimaticCard id={id} p={p} onChange={refresh} />}
       {p.shots.length > 0 && <ShotGrid id={id} p={p} onChange={refresh} />}
-      {(p.concept || p.script || p.music) && <StoryCard p={p} />}
+      {(p.concept || p.script || p.music) && <StoryCard id={id} p={p} onChange={refresh} />}
       {p.research && <ResearchCard facts={JSON.parse(p.research.facts) as Fact[]} queries={p.research.queries} />}
     </>
   )
@@ -48,9 +49,9 @@ function AnimaticCard({ id, p, onChange }: { id: string; p: Production; onChange
       </div>
       {p.animaticOutdated && (
         <div className="notice row">
-          <span className="grow">You changed shots since this animatic was made.</span>
-          <button className="primary" disabled={busy || p.redoingShots > 0}
-            title={p.redoingShots > 0 ? 'Wait until shot redos finish' : 'Free: runs on your laptop'}
+          <span className="grow">You changed shots or voice lines since this animatic was made.</span>
+          <button className="primary" disabled={busy || p.redoingShots + p.redoingLines > 0}
+            title={p.redoingShots + p.redoingLines > 0 ? 'Wait until redos finish' : 'Free: runs on your laptop'}
             onClick={() => run(() => api.rerun(id, 'ANIMATIC'))}>
             {busy ? 'Starting…' : 'Rebuild animatic (free)'}
           </button>
@@ -191,7 +192,7 @@ function ShotEditor({ videoId, shot, onChange }: { videoId: string; shot: ShotRo
   )
 }
 
-function StoryCard({ p }: { p: Production }) {
+function StoryCard({ id, p, onChange }: { id: string; p: Production; onChange: () => void }) {
   return (
     <section className="card">
       <div className="card-head"><h2>Story</h2>{p.script && <span className="pill">Voice: {p.script.voiceName}</span>}</div>
@@ -209,19 +210,7 @@ function StoryCard({ p }: { p: Production }) {
         </div>
       )}
       {p.script && (
-        <ol className="script">
-          {p.script.lines.map((l) => (
-            <li key={l.index} className={l.spoken ? '' : 'visual'}>
-              <div>{l.spoken ? l.text : <em>[visual] {l.text}</em>}</div>
-              {l.audioAssetId && (
-                <div className="row small muted">
-                  <audio src={assetUrl(l.audioAssetId)} controls preload="none" />
-                  {l.durationSec != null && <span>{l.durationSec.toFixed(1)}s</span>}
-                </div>
-              )}
-            </li>
-          ))}
-        </ol>
+        <ScriptEditor videoId={id} lines={p.script.lines} linesNeedingVoice={p.linesNeedingVoice} onChange={onChange} />
       )}
     </section>
   )

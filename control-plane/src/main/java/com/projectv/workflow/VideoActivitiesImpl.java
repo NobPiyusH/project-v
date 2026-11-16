@@ -166,6 +166,21 @@ public class VideoActivitiesImpl implements VideoActivities {
     }
 
     @Override
+    public NarrationRequest lineNarrationRequest(String videoId, java.util.List<Integer> lineIndexes, String styleNotes) {
+        return production.lineNarrationRequest(UUID.fromString(videoId), lineIndexes, styleNotes);
+    }
+
+    @Override
+    public StageResult saveLineNarration(String videoId, NarrationResult result, String style) {
+        return production.saveLineNarration(UUID.fromString(videoId), result, style);
+    }
+
+    @Override
+    public void markLines(String videoId, java.util.List<Integer> lineIndexes, String status, String why) {
+        production.markLines(UUID.fromString(videoId), lineIndexes, status, why);
+    }
+
+    @Override
     public AnimaticRequest animaticRequest(String videoId) {
         return production.animaticRequest(UUID.fromString(videoId));
     }

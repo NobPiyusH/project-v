@@ -56,9 +56,71 @@ import java.util.UUID;
 @Service
 public class ProductionService {
 
-    /** One stored script line, enriched with its narration audio once generated. */
+    /** One generated voice take of a line. All takes are kept; the line points at the active one. */
+    /** @param text exactly what this take says (so the system knows whether an edited line still matches it) */
+    public record AudioVersion(UUID assetId, String uri, double durationSec, String createdAt, String check, String style,
+                               String text) {
+    }
+
+    /**
+     * One stored script line, enriched with its narration audio once generated.
+     *
+     * @param voiceStatus  null | REDOING | READY | IMPERFECT (last take still failed the transcript check) | FAILED
+     * @param needsVoice   true when the owner edited the text after it was voiced (the audio no longer matches)
+     * @param originalText the writer's text before the owner's first edit (kept for taste learning)
+     */
     public record StoredLine(int index, String text, String act, String purpose, boolean spoken,
-                             UUID audioAssetId, String audioUri, Double durationSec) {
+                             UUID audioAssetId, String audioUri, Double durationSec,
+                             String voiceStatus, Boolean needsVoice, Boolean edited, String originalText,
+                             List<AudioVersion> audioVersions, String check) {
+
+        public StoredLine(int index, String text, String act, String purpose, boolean spoken) {
+            this(index, text, act, purpose, spoken, null, null, null, null, null, false, null, List.of(), null);
+        }
+
+        List<AudioVersion> versions() {
+            return audioVersions == null ? List.of() : audioVersions;
+        }
+
+        StoredLine withStatus(String status, String why) {
+            return new StoredLine(index, text, act, purpose, spoken, audioAssetId, audioUri, durationSec, status,
+                    needsVoice, edited, originalText, audioVersions, why);
+        }
+
+        StoredLine withNewTake(AudioVersion v, boolean passed) {
+            List<AudioVersion> all = new ArrayList<>(versions());
+            if (all.isEmpty() && audioAssetId != null) {
+                // Lines voiced before versions existed: keep the current take as the first version.
+                all.add(new AudioVersion(audioAssetId, audioUri, durationSec == null ? 0 : durationSec, "", check, null, voicedText()));
+            }
+            all.addFirst(v);
+            return new StoredLine(index, text, act, purpose, spoken, v.assetId(), v.uri(), v.durationSec(),
+                    passed ? "READY" : "IMPERFECT", false, edited, originalText, all, v.check());
+        }
+
+        StoredLine withActive(AudioVersion v) {
+            boolean needs = spoken && v.text() != null && !v.text().equals(text);
+            return new StoredLine(index, text, act, purpose, spoken, v.assetId(), v.uri(), v.durationSec(), "READY",
+                    needs, edited, originalText, audioVersions, v.check());
+        }
+
+        /** The text the active take actually speaks (older data: the text before the owner's first edit). */
+        String voicedText() {
+            if (audioAssetId == null) {
+                return null;
+            }
+            return versions().stream().filter(v -> audioAssetId.equals(v.assetId()) && v.text() != null)
+                    .map(AudioVersion::text).findFirst()
+                    .orElse(originalText != null ? originalText : (Boolean.TRUE.equals(needsVoice) ? null : text));
+        }
+
+        StoredLine withEdit(String newText, boolean newSpoken) {
+            boolean needs = newSpoken && !newText.equals(voicedText());
+            String writers = originalText != null ? originalText : text;   // the writer's version, before any edit
+            boolean differs = !newText.equals(writers);
+            return new StoredLine(index, newText, act, purpose, newSpoken, audioAssetId, audioUri, durationSec,
+                    voiceStatus, needs, differs, differs ? writers : null, audioVersions, check);
+        }
     }
 
     public record StoredScript(int version, List<StoredLine> lines, String voiceName, String voiceStyle, String musicBrief) {
@@ -171,7 +233,7 @@ public class ProductionService {
         int i = 0;
         for (ScriptLine l : s.lines()) {
             boolean spoken = l.spoken() && !"none".equals(plan.narration());
-            lines.add(new StoredLine(i++, l.text(), l.act(), l.purpose(), spoken, null, null, null));
+            lines.add(new StoredLine(i++, l.text(), l.act(), l.purpose(), spoken));
         }
         String voice = WriterAgent.VOICES.contains(s.voiceName()) ? s.voiceName() : defaultVoice;
         StoredScript stored = new StoredScript(nextVersion("script", videoId), lines, voice, s.voiceStyle(), s.musicBrief());
@@ -251,7 +313,51 @@ public class ProductionService {
 
     @Transactional
     public StageResult saveNarration(UUID videoId, NarrationResult r) {
-        StoredScript s = latestScript(videoId).orElseThrow();
+        applyClips(videoId, r, null, "NARRATION");
+
+        int retakes = r.lines().stream().mapToInt(c -> Math.max(0, c.takes() - 1)).sum();
+        List<String> failed = r.lines().stream().filter(c -> !c.passed()).map(c -> "#" + c.index() + " (" + c.check() + ")").toList();
+        double seconds = r.lines().stream().mapToDouble(NarrationClip::durationSec).sum();
+        String summary = "%d lines voiced by %s, %.0fs of speech. Every line checked by transcription: %d re-voiced automatically%s."
+                .formatted(r.lines().size(), r.voiceName(), seconds, retakes,
+                        failed.isEmpty() ? ", all pass" : "; still imperfect after 3 takes: " + String.join(", ", failed));
+        return StageResult.of(summary, json.writeValueAsString(Map.of("lines", r.lines().size(), "retakes", retakes, "failed", failed)));
+    }
+
+    // ================================================================================================ SCRIPT EDITING + PER-LINE VOICE
+
+    /** Reads the latest script with a row lock, so concurrent redos/edits can't overwrite each other. */
+    private StoredScript lockScript(UUID videoId) {
+        return jdbc.sql("""
+                        SELECT beat_sheet_json::text FROM script WHERE video_id = :v
+                        AND version = (SELECT max(version) FROM script WHERE video_id = :v) FOR UPDATE
+                        """)
+                .param("v", videoId).query(String.class).optional()
+                .map(s -> json.readValue(s, StoredScript.class))
+                .orElseThrow(() -> new IllegalStateException("This video has no script yet"));
+    }
+
+    private void writeScript(UUID videoId, StoredScript s) {
+        StringBuilder md = new StringBuilder();
+        for (StoredLine l : s.lines()) {
+            md.append(l.spoken() ? "" : "_[visual]_ ").append(l.text()).append("\n\n");
+        }
+        int words = s.lines().stream().filter(StoredLine::spoken).mapToInt(l -> l.text().split("\\s+").length).sum();
+        jdbc.sql("""
+                        UPDATE script SET beat_sheet_json = CAST(:b AS jsonb), narration_md = :md, word_count = :w, updated_at = now()
+                        WHERE video_id = :v AND version = :ver
+                        """)
+                .param("b", json.writeValueAsString(s)).param("md", md.toString()).param("w", words)
+                .param("v", videoId).param("ver", s.version()).update();
+    }
+
+    private static StoredScript withLines(StoredScript s, List<StoredLine> lines) {
+        return new StoredScript(s.version(), lines, s.voiceName(), s.voiceStyle(), s.musicBrief());
+    }
+
+    /** Stores new voice takes (whole stage or single lines): asset + provenance per take, version kept, cost recorded. */
+    private void applyClips(UUID videoId, NarrationResult r, String style, String purpose) {
+        StoredScript s = lockScript(videoId);
         Map<Integer, NarrationClip> byIndex = new LinkedHashMap<>();
         Usage total = Usage.NONE;
         for (NarrationClip c : r.lines()) {
@@ -261,6 +367,7 @@ public class ProductionService {
                         total.thoughtTokens() + c.usage().thoughtTokens(), total.totalTokens() + c.usage().totalTokens());
             }
         }
+        String now = java.time.Instant.now().toString();
         List<StoredLine> lines = new ArrayList<>();
         for (StoredLine l : s.lines()) {
             NarrationClip c = byIndex.get(l.index());
@@ -270,21 +377,104 @@ public class ProductionService {
             }
             UUID assetId = assets.create(new NewAsset(videoId, "audio", c.uri(), "audio/wav", null, null, c.durationSec(),
                     "gemini_api", r.model(), "[" + r.voiceName() + "] " + l.text(), null, AssetStore.LICENCE_GEMINI, true));
-            lines.add(new StoredLine(l.index(), l.text(), l.act(), l.purpose(), true, assetId, c.uri(), c.durationSec()));
+            lines.add(l.withNewTake(new AudioVersion(assetId, c.uri(), c.durationSec(), now, c.check(), style, l.text()), c.passed()));
         }
+        writeScript(videoId, withLines(s, lines));
         ledger.record(videoId, BudgetGuard.GEMINI, pricing.ttsInr(total), BigDecimal.valueOf(total.totalTokens()), "tokens",
-                true, "NARRATION (" + r.model() + ", " + r.lines().size() + " lines)");
-        StoredScript updated = new StoredScript(s.version(), lines, s.voiceName(), s.voiceStyle(), s.musicBrief());
-        jdbc.sql("UPDATE script SET beat_sheet_json = CAST(:b AS jsonb), updated_at = now() WHERE video_id = :v AND version = :ver")
-                .param("b", json.writeValueAsString(updated)).param("v", videoId).param("ver", s.version()).update();
+                true, purpose + " (" + r.model() + ", " + r.lines().size() + " lines)");
+    }
 
-        int retakes = r.lines().stream().mapToInt(c -> Math.max(0, c.takes() - 1)).sum();
-        List<String> failed = r.lines().stream().filter(c -> !c.passed()).map(c -> "#" + c.index() + " (" + c.check() + ")").toList();
-        double seconds = r.lines().stream().mapToDouble(NarrationClip::durationSec).sum();
-        String summary = "%d lines voiced by %s, %.0fs of speech. Every line checked by transcription: %d re-voiced automatically%s."
-                .formatted(r.lines().size(), r.voiceName(), seconds, retakes,
-                        failed.isEmpty() ? ", all pass" : "; still imperfect after 3 takes: " + String.join(", ", failed));
-        return StageResult.of(summary, json.writeValueAsString(Map.of("lines", r.lines().size(), "retakes", retakes, "failed", failed)));
+    /**
+     * Owner edits a line. The writer's original is kept; a spoken line whose text changed is flagged "needs voice"
+     * (its old audio no longer matches) until it is re-voiced. Recorded as an edit for taste learning.
+     */
+    @Transactional
+    public StoredLine editLine(UUID videoId, int index, String text, Boolean spoken) {
+        String clean = text == null ? "" : text.strip().replaceAll("\\s+", " ");
+        if (clean.isEmpty()) {
+            throw new IllegalStateException("A line can't be empty");
+        }
+        StoredScript s = lockScript(videoId);
+        List<StoredLine> lines = new ArrayList<>();
+        StoredLine updated = null;
+        for (StoredLine l : s.lines()) {
+            if (l.index() == index) {
+                updated = l.withEdit(clean, spoken == null ? l.spoken() : spoken);
+                if (!clean.equals(l.text())) {
+                    jdbc.sql("""
+                                    INSERT INTO preference_event (id, kind, video_id, context_json, chosen, rejected)
+                                    VALUES (:id, 'edit_diff', :v, CAST(:ctx AS jsonb), :chosen, :rejected)
+                                    """)
+                            .param("id", UUID.randomUUID()).param("v", videoId)
+                            .param("ctx", json.writeValueAsString(Map.of("stage", "SCRIPT", "line", index)))
+                            .param("chosen", clean).param("rejected", l.text()).update();
+                }
+                lines.add(updated);
+            } else {
+                lines.add(l);
+            }
+        }
+        if (updated == null) {
+            throw new java.util.NoSuchElementException("No line " + index);
+        }
+        writeScript(videoId, withLines(s, lines));
+        return updated;
+    }
+
+    /** Re-voice only the given lines. {@code styleNotes} (e.g. "slower and more hushed") replaces the reading style. */
+    public NarrationRequest lineNarrationRequest(UUID videoId, List<Integer> indexes, String styleNotes) {
+        NarrationRequest base = narrationRequest(videoId);
+        java.util.Set<Integer> wanted = new java.util.HashSet<>(indexes);
+        List<NarrationLine> lines = base.lines().stream().filter(l -> wanted.contains(l.index())).toList();
+        if (lines.isEmpty()) {
+            throw new IllegalStateException("None of those lines are spoken lines of this video");
+        }
+        String style = base.style();
+        if (styleNotes != null && !styleNotes.isBlank()) {
+            String[] w = styleNotes.strip().replaceAll("[.\\s]+$", "").split("\\s+");
+            // Kept short on purpose: long style text gets read aloud by the TTS model.
+            style = "in a voice that is " + String.join(" ", java.util.Arrays.copyOf(w, Math.min(w.length, 12))).toLowerCase(java.util.Locale.ROOT);
+        }
+        return new NarrationRequest(base.videoId(), base.model(), base.checkModel(), base.voiceName(), style,
+                base.language(), lines);
+    }
+
+    @Transactional
+    public StageResult saveLineNarration(UUID videoId, NarrationResult r, String style) {
+        applyClips(videoId, r, style, "VOICE REDO");
+        long imperfect = r.lines().stream().filter(c -> !c.passed()).count();
+        return StageResult.of("%d line(s) re-voiced%s.".formatted(r.lines().size(),
+                imperfect == 0 ? ", all pass the transcript check" : "; " + imperfect + " still imperfect"), null);
+    }
+
+    @Transactional
+    public void markLines(UUID videoId, List<Integer> indexes, String status, String why) {
+        StoredScript s = lockScript(videoId);
+        java.util.Set<Integer> wanted = new java.util.HashSet<>(indexes);
+        writeScript(videoId, withLines(s, s.lines().stream()
+                .map(l -> wanted.contains(l.index()) ? l.withStatus(status, why) : l).toList()));
+    }
+
+    /** Switch a line back (or forward) to any earlier voice take. Free. */
+    @Transactional
+    public void selectLineVoice(UUID videoId, int index, UUID assetId) {
+        StoredScript s = lockScript(videoId);
+        boolean found = false;
+        List<StoredLine> lines = new ArrayList<>();
+        for (StoredLine l : s.lines()) {
+            if (l.index() == index) {
+                AudioVersion v = l.versions().stream().filter(x -> x.assetId().equals(assetId)).findFirst()
+                        .orElseThrow(() -> new IllegalStateException("That take is not a version of line " + index));
+                lines.add(l.withActive(v));
+                found = true;
+            } else {
+                lines.add(l);
+            }
+        }
+        if (!found) {
+            throw new java.util.NoSuchElementException("No line " + index);
+        }
+        writeScript(videoId, withLines(s, lines));
     }
 
     @Transactional
@@ -602,6 +792,17 @@ public class ProductionService {
                             JOIN asset k ON k.id = s.keyframe_asset_id
                             WHERE v.id = :v AND k.created_at > an.created_at)
                         """).param("v", videoId).query(Boolean.class).single());
+        // Voice takes newer than the animatic also make it outdated; edited-but-not-revoiced lines are counted.
+        List<StoredLine> scriptLines = latestScript(videoId).map(StoredScript::lines).orElse(List.of());
+        List<UUID> activeVoice = scriptLines.stream().map(StoredLine::audioAssetId).filter(java.util.Objects::nonNull).toList();
+        if (!activeVoice.isEmpty() && !Boolean.TRUE.equals(out.get("animaticOutdated"))) {
+            out.put("animaticOutdated", jdbc.sql("""
+                            SELECT EXISTS (SELECT 1 FROM video v JOIN asset an ON an.id = v.animatic_asset_id, asset a
+                                           WHERE v.id = :v AND a.id IN (:ids) AND a.created_at > an.created_at)
+                            """).param("v", videoId).param("ids", activeVoice).query(Boolean.class).single());
+        }
+        out.put("linesNeedingVoice", scriptLines.stream().filter(l -> Boolean.TRUE.equals(l.needsVoice())).count());
+        out.put("redoingLines", scriptLines.stream().filter(l -> "REDOING".equals(l.voiceStatus())).count());
         out.put("redoingShots", jdbc.sql("""
                         SELECT count(*) FROM shot s JOIN scene sc ON sc.id = s.scene_id WHERE sc.video_id = :v AND s.status = 'REDOING'
                         """).param("v", videoId).query(Integer.class).single());

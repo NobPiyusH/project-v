@@ -54,6 +54,13 @@ public interface VideoActivities {
 
     void markShots(String videoId, java.util.List<String> shotIds, String status, String error);
 
+    // ---- per-line voice redo
+    NarrationRequest lineNarrationRequest(String videoId, java.util.List<Integer> lineIndexes, String styleNotes);
+
+    StageResult saveLineNarration(String videoId, NarrationResult result, String style);
+
+    void markLines(String videoId, java.util.List<Integer> lineIndexes, String status, String why);
+
     AnimaticRequest animaticRequest(String videoId);
 
     StageResult saveAnimatic(String videoId, AnimaticResult result);

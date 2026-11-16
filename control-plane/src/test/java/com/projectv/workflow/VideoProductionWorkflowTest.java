@@ -134,6 +134,23 @@ class VideoProductionWorkflowTest {
         }
 
         @Override
+        public NarrationRequest lineNarrationRequest(String videoId, List<Integer> lineIndexes, String styleNotes) {
+            events.add("LINE_REQUEST:" + lineIndexes + ":" + styleNotes);
+            return new NarrationRequest(videoId, "m", "c", "v", "in a voice that is " + styleNotes, "en", List.of());
+        }
+
+        @Override
+        public StageResult saveLineNarration(String videoId, NarrationResult result, String style) {
+            events.add("LINE_SAVED:" + style);
+            return StageResult.of("lines saved", null);
+        }
+
+        @Override
+        public void markLines(String videoId, List<Integer> lineIndexes, String status, String why) {
+            events.add("LINES:" + lineIndexes + ":" + status);
+        }
+
+        @Override
         public AnimaticRequest animaticRequest(String videoId) {
             return new AnimaticRequest(videoId, "t", List.of(), List.of(), null, 1);
         }
@@ -163,6 +180,7 @@ class VideoProductionWorkflowTest {
     static class FakeMedia implements MediaActivities {
         /** When true, keyframe generation throws, to test the failed-stage path. */
         volatile boolean failKeyframes;
+        volatile boolean failVoice;
 
         @Override
         public String toolVersions() {
@@ -176,6 +194,9 @@ class VideoProductionWorkflowTest {
 
         @Override
         public NarrationResult synthesizeNarration(NarrationRequest request) {
+            if (failVoice) {
+                throw ApplicationFailure.newNonRetryableFailure("TTS quota", "Test");
+            }
             return new NarrationResult(List.of(), "m", "v");
         }
 
@@ -207,7 +228,8 @@ class VideoProductionWorkflowTest {
     void setUp() {
         env = TestWorkflowEnvironment.newInstance();
         Worker control = env.newWorker(TaskQueues.CONTROL);
-        control.registerWorkflowImplementationTypes(VideoProductionWorkflowImpl.class, ShotRedoWorkflowImpl.class);
+        control.registerWorkflowImplementationTypes(VideoProductionWorkflowImpl.class, ShotRedoWorkflowImpl.class,
+                VoiceRedoWorkflowImpl.class);
         activities = new FakeActivities();
         control.registerActivitiesImplementations(activities);
         media = new FakeMedia();
@@ -363,6 +385,28 @@ class VideoProductionWorkflowTest {
         assertTrue(r.summary().contains("cap reached"));
         assertEquals(1, activities.shotRequests.get());
         assertEquals("SHOTS:[s1]:FAILED", activities.events.getLast());
+    }
+
+    private StageResult redoVoice(String id, List<Integer> lines, String style) {
+        VoiceRedoWorkflow wf = client.newWorkflowStub(VoiceRedoWorkflow.class,
+                WorkflowOptions.newBuilder().setWorkflowId(id).setTaskQueue(TaskQueues.CONTROL).build());
+        return wf.run(new VoiceRedoWorkflow.VoiceRedoRequest("v", lines, style));
+    }
+
+    @Test
+    void voiceRedoRevoicesOnlyTheChosenLinesWithTheNewStyle() {
+        StageResult r = redoVoice("voice-ok", List.of(7, 9), "slower and more hushed");
+        assertEquals("lines saved", r.summary());
+        assertEquals(List.of("LINES:[7, 9]:REDOING", "LINE_REQUEST:[7, 9]:slower and more hushed",
+                "LINE_SAVED:in a voice that is slower and more hushed"), activities.events);
+    }
+
+    @Test
+    void voiceRedoFailureMarksTheLinesFailed() {
+        media.failVoice = true;
+        StageResult r = redoVoice("voice-fail", List.of(3), null);
+        assertTrue(r.summary().startsWith("Voice redo failed"));
+        assertEquals("LINES:[3]:FAILED", activities.events.getLast());
     }
 
     @Test

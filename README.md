@@ -9,6 +9,8 @@ Music (Lyria, beat-mapped) → Narration (Gemini TTS) + Shot plan (beat-snapped)
 shots, Z-Image on Modal for the rest) → Animatic. Every stage runs Auto or Manual; failed stages wait for you
 (Retry / Continue without it). Finished stages can be redone with only their dependents; single shots can be
 redone with notes (Auto / Premium / Free image model), their prompts edited, and any earlier version restored for free.
+Script lines can be edited directly and re-voiced one by one (optionally in a different reading style); every voice
+take is kept and can be switched back for free.
 Video generation, upscaling and the final edit arrive in M2b/M2c.
 
 Paid Gemini spend is capped by the app at ₹400/month (`config/providers.yaml → pricing.gemini.monthlyCapInr`).

@@ -129,6 +129,25 @@ public class VideoService {
         return workflowId;
     }
 
+    /** Re-voice only the given lines. Blocked while the main run is voicing or building the animatic. */
+    public String redoLines(UUID id, List<Integer> lineIndexes, String styleNotes) {
+        if (lineIndexes == null || lineIndexes.isEmpty()) {
+            throw new IllegalStateException("Pick at least one line");
+        }
+        Map<String, Object> v = jdbc.sql("SELECT status, current_stage FROM video WHERE id = :id").param("id", id)
+                .query().listOfRows().stream().findFirst().orElseThrow(() -> new NoSuchElementException("No video " + id));
+        if ("RUNNING".equals(v.get("status")) && List.of("NARRATION", "ANIMATIC").contains(v.get("current_stage"))) {
+            throw new IllegalStateException("The voice or the animatic is being made right now; wait until that finishes");
+        }
+        String workflowId = "voice-redo-" + id + "-" + UUID.randomUUID();
+        com.projectv.workflow.VoiceRedoWorkflow wf = temporal.newWorkflowStub(com.projectv.workflow.VoiceRedoWorkflow.class,
+                WorkflowOptions.newBuilder().setWorkflowId(workflowId).setTaskQueue(TaskQueues.CONTROL).build());
+        WorkflowClient.start(wf::run, new com.projectv.workflow.VoiceRedoWorkflow.VoiceRedoRequest(id.toString(),
+                List.copyOf(lineIndexes), styleNotes));
+        recordDecision(id, Stage.NARRATION, "voice_redo", (styleNotes == null ? "" : styleNotes) + " " + lineIndexes);
+        return workflowId;
+    }
+
     public List<Map<String, Object>> list() {
         return jdbc.sql("""
                         SELECT id, title, prompt, status, current_stage, spent_inr, created_at, updated_at

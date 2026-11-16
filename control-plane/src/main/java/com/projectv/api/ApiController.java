@@ -82,6 +82,12 @@ public class ApiController {
     public record SelectBody(UUID assetId) {
     }
 
+    public record LineEditBody(@NotBlank @Size(max = 2000) String text, Boolean spoken) {
+    }
+
+    public record LineRedoBody(List<Integer> lines, String style) {
+    }
+
     public record NotesRequest(String notes) {
     }
 
@@ -154,6 +160,21 @@ public class ApiController {
     @PutMapping("/shots/{shotId}/keyframe")
     public void selectKeyframe(@PathVariable UUID shotId, @RequestBody SelectBody body) {
         production.selectKeyframe(shotId, body.assetId());
+    }
+
+    @PutMapping("/videos/{id}/script/lines/{index}")
+    public Object editLine(@PathVariable UUID id, @PathVariable int index, @Valid @RequestBody LineEditBody body) {
+        return production.editLine(id, index, body.text(), body.spoken());
+    }
+
+    @PostMapping("/videos/{id}/script/lines/redo")
+    public Map<String, Object> redoLines(@PathVariable UUID id, @RequestBody LineRedoBody body) {
+        return Map.of("workflowId", videos.redoLines(id, body.lines(), body.style()));
+    }
+
+    @PutMapping("/videos/{id}/script/lines/{index}/voice")
+    public void selectLineVoice(@PathVariable UUID id, @PathVariable int index, @RequestBody SelectBody body) {
+        production.selectLineVoice(id, index, body.assetId());
     }
 
     @PutMapping("/videos/{id}/review-minutes")

@@ -61,9 +61,13 @@ export interface StylePreset { id: string; name: string; description: string; de
 export interface Source { title: string; uri: string }
 export interface Fact { text: string; sources: Source[] }
 
+export interface AudioVersion { assetId: string; uri: string; durationSec: number; createdAt: string; check: string | null; style: string | null }
+
 export interface ScriptLine {
   index: number; text: string; act: string | null; purpose: string | null; spoken: boolean
   audioAssetId: string | null; audioUri: string | null; durationSec: number | null
+  voiceStatus: string | null; needsVoice: boolean | null; edited: boolean | null; originalText: string | null
+  audioVersions: AudioVersion[] | null; check: string | null
 }
 
 export interface ShotRow {
@@ -82,6 +86,8 @@ export interface Production {
   animaticAssetId: string | null
   animaticOutdated: boolean
   redoingShots: number
+  redoingLines: number
+  linesNeedingVoice: number
 }
 
 export type ImagePolicy = 'AUTO' | 'PREMIUM' | 'FREE'
@@ -128,6 +134,12 @@ export const api = {
   editShotPrompt: (shotId: string, keyframePrompt: string) => call<void>('PUT', `/shots/${shotId}/prompt`, { keyframePrompt }),
   shotVersions: (shotId: string) => call<ShotVersion[]>('GET', `/shots/${shotId}/versions`),
   selectKeyframe: (shotId: string, assetId: string) => call<void>('PUT', `/shots/${shotId}/keyframe`, { assetId }),
+  editLine: (id: string, index: number, text: string, spoken?: boolean) =>
+    call<ScriptLine>('PUT', `/videos/${id}/script/lines/${index}`, { text, spoken: spoken ?? null }),
+  redoLines: (id: string, lines: number[], style: string) =>
+    call<{ workflowId: string }>('POST', `/videos/${id}/script/lines/redo`, { lines, style: style || null }),
+  selectLineVoice: (id: string, index: number, assetId: string) =>
+    call<void>('PUT', `/videos/${id}/script/lines/${index}/voice`, { assetId }),
   pause: (id: string) => call<void>('POST', `/videos/${id}/pause`),
   resume: (id: string) => call<void>('POST', `/videos/${id}/resume`),
 }

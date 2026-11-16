@@ -36,7 +36,8 @@ public class TemporalConfig {
     public WorkerFactory workerFactory(WorkflowClient client, VideoActivitiesImpl activities) {
         WorkerFactory factory = WorkerFactory.newInstance(client);
         Worker worker = factory.newWorker(TaskQueues.CONTROL);
-        worker.registerWorkflowImplementationTypes(VideoProductionWorkflowImpl.class, com.projectv.workflow.ShotRedoWorkflowImpl.class);
+        worker.registerWorkflowImplementationTypes(VideoProductionWorkflowImpl.class, com.projectv.workflow.ShotRedoWorkflowImpl.class,
+                com.projectv.workflow.VoiceRedoWorkflowImpl.class);
         worker.registerActivitiesImplementations(activities);
         return factory;
     }

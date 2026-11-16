@@ -161,3 +161,5 @@ audio { max-width: 100%; }
 .version.active { border-color: var(--accent); }
 .version img { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; display: block; }
 select { font: inherit; color: var(--text); background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; max-width: 100%; }
+.takes { display: grid; gap: 4px; margin-top: 6px; padding-left: 8px; border-left: 2px solid var(--border); }
+input[type=text] { min-width: 0; }
