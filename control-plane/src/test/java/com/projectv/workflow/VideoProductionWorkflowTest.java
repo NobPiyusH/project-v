@@ -1,6 +1,18 @@
 package com.projectv.workflow;
 
+import com.projectv.media.MediaTypes.AnimaticRequest;
+import com.projectv.media.MediaTypes.AnimaticResult;
+import com.projectv.media.MediaTypes.KeyframeRequest;
+import com.projectv.media.MediaTypes.KeyframeResult;
+import com.projectv.media.MediaTypes.MusicRequest;
+import com.projectv.media.MediaTypes.MusicResult;
+import com.projectv.media.MediaTypes.NarrationRequest;
+import com.projectv.media.MediaTypes.NarrationResult;
+import com.projectv.media.MediaTypes.ResearchRequest;
+import com.projectv.media.MediaTypes.ResearchResult;
+import com.projectv.media.MediaTypes.Usage;
 import com.projectv.workflow.WorkflowTypes.StageResult;
+import io.temporal.failure.ApplicationFailure;
 import com.projectv.workflow.WorkflowTypes.VideoRequest;
 import io.temporal.client.WorkflowClient;
 import io.temporal.client.WorkflowOptions;
@@ -44,9 +56,84 @@ class VideoProductionWorkflowTest {
         }
 
         @Override
+        public ResearchRequest researchRequest(String videoId, String ownerNotes) {
+            return new ResearchRequest("t", "s", List.of(), "en", 5, "m", ownerNotes);
+        }
+
+        @Override
+        public StageResult saveResearch(String videoId, ResearchResult result) {
+            return StageResult.of("research saved", "{}");
+        }
+
+        @Override
+        public StageResult concept(String videoId, String ownerNotes) {
+            return StageResult.of("concept", "{}");
+        }
+
+        @Override
+        public StageResult script(String videoId, String ownerNotes) {
+            return StageResult.of("script", "{}");
+        }
+
+        @Override
+        public MusicRequest musicRequest(String videoId, String ownerNotes) {
+            return new MusicRequest(videoId, "m", "p", 60, 1);
+        }
+
+        @Override
+        public StageResult saveMusic(String videoId, MusicResult result) {
+            return StageResult.of("music", "{}");
+        }
+
+        @Override
+        public NarrationRequest narrationRequest(String videoId) {
+            return new NarrationRequest(videoId, "m", "c", "v", "s", "en", List.of());
+        }
+
+        @Override
+        public StageResult saveNarration(String videoId, NarrationResult result) {
+            return StageResult.of("voice", "{}");
+        }
+
+        @Override
+        public int lastAttempt(String videoId, Stage stage) {
+            return 2;
+        }
+
+        @Override
+        public StageResult shotPlan(String videoId, String ownerNotes) {
+            return StageResult.of("shots", "{}");
+        }
+
+        @Override
+        public KeyframeRequest keyframeRequest(String videoId, String ownerNotes) {
+            return new KeyframeRequest(videoId, "m", "a", "c", List.of());
+        }
+
+        @Override
+        public StageResult saveKeyframes(String videoId, KeyframeRequest request, KeyframeResult result) {
+            return StageResult.of("keyframes", "{}");
+        }
+
+        @Override
+        public AnimaticRequest animaticRequest(String videoId) {
+            return new AnimaticRequest(videoId, "t", List.of(), List.of(), null, 1);
+        }
+
+        @Override
+        public StageResult saveAnimatic(String videoId, AnimaticResult result) {
+            return StageResult.of("animatic", "{}");
+        }
+
+        @Override
         public void recordStage(String videoId, Stage stage, int attempt, StageMode mode, String status, String summary,
                                 String artifactJson, String ownerNotes) {
             events.add(stage + ":" + attempt + ":" + status);
+        }
+
+        @Override
+        public void setReviewDeadline(String videoId, Stage stage, int attempt, String deadlineIso) {
+            events.add("DEADLINE:" + stage + ":" + (deadlineIso == null ? "cleared" : "set"));
         }
 
         @Override
@@ -56,14 +143,46 @@ class VideoProductionWorkflowTest {
     }
 
     static class FakeMedia implements MediaActivities {
+        /** When true, keyframe generation throws, to test the failed-stage path. */
+        volatile boolean failKeyframes;
+
         @Override
         public String toolVersions() {
             return "ffmpeg: test";
+        }
+
+        @Override
+        public ResearchResult researchTopic(ResearchRequest request) {
+            return new ResearchResult(List.of(), List.of(), List.of(), "m", Usage.NONE);
+        }
+
+        @Override
+        public NarrationResult synthesizeNarration(NarrationRequest request) {
+            return new NarrationResult(List.of(), "m", "v");
+        }
+
+        @Override
+        public MusicResult generateMusic(MusicRequest request) {
+            return new MusicResult("s3://b/m.wav", 60, 90, List.of(), List.of(), 1, "m", List.of());
+        }
+
+        @Override
+        public KeyframeResult generateKeyframes(KeyframeRequest request) {
+            if (failKeyframes) {
+                throw ApplicationFailure.newNonRetryableFailure("GPU unavailable", "Test");
+            }
+            return new KeyframeResult(List.of(), 0);
+        }
+
+        @Override
+        public AnimaticResult renderAnimatic(AnimaticRequest request) {
+            return new AnimaticResult("s3://b/a.mp4", 1);
         }
     }
 
     private TestWorkflowEnvironment env;
     private FakeActivities activities;
+    private FakeMedia media;
     private WorkflowClient client;
 
     @BeforeEach
@@ -73,7 +192,8 @@ class VideoProductionWorkflowTest {
         control.registerWorkflowImplementationTypes(VideoProductionWorkflowImpl.class);
         activities = new FakeActivities();
         control.registerActivitiesImplementations(activities);
-        env.newWorker(TaskQueues.MEDIA).registerActivitiesImplementations(new FakeMedia());
+        media = new FakeMedia();
+        env.newWorker(TaskQueues.MEDIA).registerActivitiesImplementations(media);
         env.start();
         client = env.getWorkflowClient();
     }
@@ -136,6 +256,65 @@ class VideoProductionWorkflowTest {
 
         assertTrue(activities.events.contains("PLAN:1:AUTO_PASSED"));
         assertEquals("VIDEO:COMPLETED", activities.events.getLast());
+    }
+
+    @Test
+    void failedStageWaitsForOwnerThenRetriesOrSkips() {
+        media.failKeyframes = true;
+        VideoProductionWorkflow wf = start("fail", StageMode.AUTO, Map.of());
+        awaitWaiting(wf, Stage.KEYFRAMES);                       // failed, even though the stage is AUTO
+        assertTrue(activities.events.contains("KEYFRAMES:1:FAILED"));
+        wf.reject(Stage.KEYFRAMES, "try again");                  // reject = retry
+        awaitWaiting(wf, Stage.KEYFRAMES);
+        assertTrue(activities.events.contains("KEYFRAMES:2:FAILED"));
+        media.failKeyframes = false;
+        wf.approve(Stage.KEYFRAMES, null);                        // approve = continue without it
+        WorkflowStub.fromTyped(wf).getResult(Void.class);
+        assertTrue(activities.events.contains("KEYFRAMES:2:SKIPPED"));
+        assertEquals("VIDEO:COMPLETED", activities.events.getLast());
+    }
+
+    @Test
+    void rerunRunsOnlyTheRequestedStagesWithContinuingAttemptNumbers() {
+        VideoProductionWorkflow wf = client.newWorkflowStub(VideoProductionWorkflow.class,
+                WorkflowOptions.newBuilder().setWorkflowId("rerun").setTaskQueue(TaskQueues.CONTROL).build());
+        WorkflowClient.start(wf::run, new VideoRequest("rerun", "p", StageMode.AUTO, Map.of(),
+                List.of(Stage.ANIMATIC, Stage.NARRATION)));
+        WorkflowStub.fromTyped(wf).getResult(Void.class);
+        List<String> stageEvents = activities.events.stream().filter(e -> !e.startsWith("VIDEO")).toList();
+        assertEquals(List.of("NARRATION:3:RUNNING", "NARRATION:3:AUTO_PASSED", "ANIMATIC:3:RUNNING", "ANIMATIC:3:AUTO_PASSED"),
+                stageEvents);
+    }
+
+    @Test
+    void reviewModeContinuesByItselfWhenTheWindowEnds() {
+        VideoProductionWorkflow wf = client.newWorkflowStub(VideoProductionWorkflow.class,
+                WorkflowOptions.newBuilder().setWorkflowId("review").setTaskQueue(TaskQueues.CONTROL).build());
+        WorkflowClient.start(wf::run, new VideoRequest("review", "p", StageMode.AUTO,
+                Map.of(Stage.SCRIPT, StageMode.REVIEW), null, 10));
+        WorkflowStub.fromTyped(wf).getResult(Void.class);   // test server skips the 10 minutes
+        assertTrue(activities.events.contains("DEADLINE:SCRIPT:set"));
+        assertTrue(activities.events.contains("SCRIPT:1:AUTO_APPROVED"));
+        assertEquals("VIDEO:COMPLETED", activities.events.getLast());
+    }
+
+    @Test
+    void reviewModeCanBeApprovedEarlyOrHeld() {
+        VideoProductionWorkflow wf = client.newWorkflowStub(VideoProductionWorkflow.class,
+                WorkflowOptions.newBuilder().setWorkflowId("review2").setTaskQueue(TaskQueues.CONTROL).build());
+        WorkflowClient.start(wf::run, new VideoRequest("review2", "p", StageMode.AUTO,
+                Map.of(Stage.CONCEPT, StageMode.REVIEW, Stage.SCRIPT, StageMode.REVIEW), null, 10));
+        awaitWaiting(wf, Stage.CONCEPT);
+        wf.approve(Stage.CONCEPT, null);                       // approve early
+        awaitWaiting(wf, Stage.SCRIPT);
+        wf.setMode(Stage.SCRIPT, StageMode.MANUAL);            // hold: the timer must not auto-approve any more
+        env.sleep(Duration.ofMinutes(30));
+        assertEquals(Stage.SCRIPT, wf.status().currentStage());
+        assertTrue(activities.events.contains("DEADLINE:SCRIPT:cleared"));
+        wf.approve(Stage.SCRIPT, "ok");
+        WorkflowStub.fromTyped(wf).getResult(Void.class);
+        assertTrue(activities.events.contains("CONCEPT:1:APPROVED"));
+        assertTrue(activities.events.contains("SCRIPT:1:APPROVED"));
     }
 
     @Test

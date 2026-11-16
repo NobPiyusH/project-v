@@ -10,7 +10,20 @@ public final class WorkflowTypes {
     }
 
     /** Workflow input. {@code modes} holds per-stage overrides; stages not listed use {@code defaultMode}. */
-    public record VideoRequest(String videoId, String prompt, StageMode defaultMode, Map<Stage, StageMode> modes) {
+    /**
+     * @param onlyStages null for a normal production run; for a re-run, exactly the stages to run again (in stage
+     *                   order). Other stages keep their earlier output and are not touched.
+     */
+    public record VideoRequest(String videoId, String prompt, StageMode defaultMode, Map<Stage, StageMode> modes,
+                               List<Stage> onlyStages, Integer reviewMinutes) {
+        public VideoRequest(String videoId, String prompt, StageMode defaultMode, Map<Stage, StageMode> modes) {
+            this(videoId, prompt, defaultMode, modes, null, null);
+        }
+
+        public VideoRequest(String videoId, String prompt, StageMode defaultMode, Map<Stage, StageMode> modes,
+                            List<Stage> onlyStages) {
+            this(videoId, prompt, defaultMode, modes, onlyStages, null);
+        }
     }
 
     /**

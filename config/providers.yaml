@@ -65,3 +65,20 @@ providers:
     kind: local
     capabilities: [tts.kokoro, asr.whisper, ffmpeg, otio]
     enabled: true
+
+# ---------------------------------------------------------------------------------------------------------------
+# Pricing and budgets (M2a). Prices from Google's Gemini API pricing page, 16 Nov 2026: VERIFY before relying on them
+# (CLAUDE.md rule 7). Used to estimate every CostEntry and to enforce the hard monthly cap.
+pricing:
+  fxInrPerUsd: 88
+  gemini:
+    monthlyCapInr: 400          # owner's cap; the app stops paid Gemini calls at this amount (Google budgets only alert)
+    reserveInr: 20              # keep this much back for voice/music when deciding hero images
+    text:  { inputPerMTokUsd: 0.50, outputPerMTokUsd: 3.00 }        # gemini-3.6-flash (verify)
+    tts:   { inputPerMTokUsd: 0.50, outputPerMTokUsd: 9.00 }        # gemini-3.8-flash-tts, audio out (verify; doubles 1 Jan 2027)
+    image: { perImageUsd: { "1K": 0.0336, "2K": 0.0504, "4K": 0.113 } }  # gemini-nano-banana-2.1 (verify)
+    music: { perSongUsd: 0.08 }                                     # lyria-3.5 per generated song (verify)
+    groundingPerQueryUsd: 0.014                                     # Google Search grounding (verify)
+  modal:
+    monthlyFreeUsd: 30
+    gpuPerSecondUsd: { L40S: 0.000542 }                             # ~$1.95/h (verify)

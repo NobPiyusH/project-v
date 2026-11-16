@@ -17,6 +17,7 @@ This is a serious, long-horizon project. Read this whole document before writing
 - *Auto:* the system does the stage and continues.
 - *Manual:* the system prepares drafts, options, prompts or task cards and waits; the owner decides, edits or does the work (e.g. generates a clip in Flow), then the workflow continues.
 - Mode is set per stage and per video, and can be switched mid-production. Manual actions are recorded as preference events (§18). This replaces the old "auto_approve" flags (§5.1, §5.3).
+- *Review* (added 16 Nov 2026 at the owner's request): semi-auto. The stage runs, then waits a review window (default 10 minutes, set per video) for the owner to approve early, reject with notes, or hold (switch to Manual). If nobody responds, it continues automatically ("Done (review time ended)").
 
 **v1 video types** (chosen by Claude on the owner's delegation): cinematic documentary, explainer, ambient/visual film (little or no narration), and Shorts/Reels. Character-driven dialogue with lip-sync stays out of v1.
 

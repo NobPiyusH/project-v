@@ -7,6 +7,7 @@ export default defineConfig({
   server: {
     host: '127.0.0.1',
     port: 5173,
-    proxy: { '/api': 'http://localhost:8080' },
+    // 127.0.0.1, not localhost: the control plane runs with preferIPv4Stack and Node would try ::1 first.
+    proxy: { '/api': 'http://127.0.0.1:8080' },
   },
 })

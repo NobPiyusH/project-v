@@ -6,6 +6,7 @@ import com.projectv.workflow.WorkflowTypes.VideoRequest;
 import com.projectv.workflow.WorkflowTypes.WorkflowStatus;
 import io.temporal.activity.ActivityOptions;
 import io.temporal.common.RetryOptions;
+import io.temporal.failure.ActivityFailure;
 import io.temporal.workflow.Workflow;
 import org.slf4j.Logger;
 
@@ -42,12 +43,31 @@ public class VideoProductionWorkflowImpl implements VideoProductionWorkflow {
                             .build())
                     .build());
 
-    // Runs on the Python worker. Long schedule-to-close so the stage simply waits if the worker is offline.
+    private static final String BUDGET_ERROR = "com.projectv.ledger.BudgetGuard$BudgetExceededException";
+
+    // Activities that call paid LLMs: few retries (each retry costs money), never retry a budget refusal.
+    private final VideoActivities agents = Workflow.newActivityStub(VideoActivities.class,
+            ActivityOptions.newBuilder()
+                    .setStartToCloseTimeout(Duration.ofMinutes(6))
+                    .setRetryOptions(RetryOptions.newBuilder()
+                            .setInitialInterval(Duration.ofSeconds(10))
+                            .setMaximumAttempts(3)
+                            .setDoNotRetry(BUDGET_ERROR)
+                            .build())
+                    .build());
+
+    // Python media worker. Long schedule-to-close so a stage simply waits if the worker is offline;
+    // heartbeats detect a worker that died mid-job. Paid calls inside, so few retries.
     private final MediaActivities media = Workflow.newActivityStub(MediaActivities.class,
             ActivityOptions.newBuilder()
                     .setTaskQueue(TaskQueues.MEDIA)
-                    .setStartToCloseTimeout(Duration.ofMinutes(2))
+                    .setStartToCloseTimeout(Duration.ofMinutes(60))
+                    .setHeartbeatTimeout(Duration.ofMinutes(10))
                     .setScheduleToCloseTimeout(Duration.ofHours(24))
+                    .setRetryOptions(RetryOptions.newBuilder()
+                            .setInitialInterval(Duration.ofSeconds(15))
+                            .setMaximumAttempts(3)
+                            .build())
                     .build());
 
     private record Decision(Stage stage, boolean approve, String notes) {
@@ -61,16 +81,35 @@ public class VideoProductionWorkflowImpl implements VideoProductionWorkflow {
     private Stage waitingStage;
     private Decision decision;
     private boolean paused;
+    private int reviewMinutes = DEFAULT_REVIEW_MINUTES;
+
+    public static final int DEFAULT_REVIEW_MINUTES = 10;
 
     @Override
     public void run(VideoRequest request) {
         defaultMode = request.defaultMode() == null ? StageMode.AUTO : request.defaultMode();
+        if (request.reviewMinutes() != null && request.reviewMinutes() > 0) {
+            reviewMinutes = request.reviewMinutes();
+        }
         if (request.modes() != null) {
             modes.putAll(request.modes());
         }
         String videoId = request.videoId();
         phase = "RUNNING";
         activities.setVideoStatus(videoId, "RUNNING");
+
+        if (request.onlyStages() != null) {
+            // Re-run: only the requested stages, in production order; everything else keeps its earlier output.
+            for (Stage stage : Stage.values()) {
+                if (request.onlyStages().contains(stage)) {
+                    execute(videoId, stage, request.prompt(), activities.lastAttempt(videoId, stage));
+                }
+            }
+            phase = "COMPLETED";
+            currentStage = null;
+            activities.setVideoStatus(videoId, "COMPLETED");
+            return;
+        }
 
         StageResult planResult = execute(videoId, Stage.PLAN, request.prompt());
         List<Stage> planned = planResult.plannedStages() == null ? List.of(Stage.values()) : planResult.plannedStages();
@@ -94,8 +133,12 @@ public class VideoProductionWorkflowImpl implements VideoProductionWorkflow {
     }
 
     private StageResult execute(String videoId, Stage stage, String prompt) {
+        return execute(videoId, stage, prompt, 0);
+    }
+
+    private StageResult execute(String videoId, Stage stage, String prompt, int previousAttempts) {
         String notes = null;
-        int attempt = 0;
+        int attempt = previousAttempts;
         while (true) {
             attempt++;
             if (paused) {
@@ -108,11 +151,71 @@ public class VideoProductionWorkflowImpl implements VideoProductionWorkflow {
             views.put(stage, new StageView(stage, startMode, "RUNNING", attempt, null));
             activities.recordStage(videoId, stage, attempt, startMode, "RUNNING", null, null, notes);
 
-            StageResult result = runStageActivity(videoId, stage, prompt, notes, attempt);
+            StageResult result;
+            try {
+                result = runStageActivity(videoId, stage, prompt, notes, attempt);
+            } catch (ActivityFailure failure) {
+                // A failed stage never kills the video: it waits for the owner, whatever the stage's mode.
+                // Approve = continue without this stage's output; reject (with notes) = run it again.
+                String reason = rootMessage(failure);
+                views.put(stage, new StageView(stage, modeOf(stage), "FAILED", attempt, reason));
+                activities.recordStage(videoId, stage, attempt, modeOf(stage), "FAILED",
+                        "Failed: " + reason + " Approve to continue without it, or Reject to retry.", null, notes);
+                phase = "WAITING";
+                waitingStage = stage;
+                decision = null;
+                Workflow.await(() -> decision != null);
+                waitingStage = null;
+                phase = "RUNNING";
+                Decision d = decision;
+                decision = null;
+                if (d.approve()) {
+                    StageResult skipped = StageResult.of("Skipped by owner after failure: " + reason, null);
+                    finish(videoId, stage, attempt, "SKIPPED", skipped, notes);
+                    return skipped;
+                }
+                notes = d.notes();
+                continue;
+            }
 
             if (modeOf(stage) == StageMode.AUTO) {
                 finish(videoId, stage, attempt, "AUTO_PASSED", result, notes);
                 return result;
+            }
+
+            if (modeOf(stage) == StageMode.REVIEW) {
+                // Semi-auto: wait a review window for the owner; continue automatically if nobody responds.
+                // Switching the stage to MANUAL during the window holds it until the owner decides.
+                Duration window = Duration.ofMinutes(reviewMinutes);
+                String deadline = java.time.Instant.ofEpochMilli(Workflow.currentTimeMillis()).plus(window).toString();
+                views.put(stage, new StageView(stage, StageMode.REVIEW, "WAITING_APPROVAL", attempt, result.summary()));
+                activities.recordStage(videoId, stage, attempt, StageMode.REVIEW, "WAITING_APPROVAL",
+                        result.summary(), result.artifactJson(), notes);
+                activities.setReviewDeadline(videoId, stage, attempt, deadline);
+                phase = "WAITING";
+                waitingStage = stage;
+                decision = null;
+                Workflow.await(window, () -> decision != null || modeOf(stage) != StageMode.REVIEW);
+                if (decision == null && modeOf(stage) == StageMode.MANUAL) {
+                    activities.setReviewDeadline(videoId, stage, attempt, null); // held: no timer any more
+                    Workflow.await(() -> decision != null || modeOf(stage) == StageMode.AUTO);
+                }
+                waitingStage = null;
+                phase = "RUNNING";
+                Decision rd = decision;
+                decision = null;
+                if (rd == null) {
+                    String how = modeOf(stage) == StageMode.REVIEW ? "AUTO_APPROVED" : "AUTO_PASSED";
+                    finish(videoId, stage, attempt, how, result, notes);
+                    return result;
+                }
+                if (rd.approve()) {
+                    finish(videoId, stage, attempt, "APPROVED", result, notes);
+                    return result;
+                }
+                finish(videoId, stage, attempt, "REJECTED", result, notes);
+                notes = rd.notes();
+                continue;
             }
 
             // MANUAL: wait for the owner, or for the stage to be switched to AUTO.
@@ -143,8 +246,30 @@ public class VideoProductionWorkflowImpl implements VideoProductionWorkflow {
     }
 
     private StageResult runStageActivity(String videoId, Stage stage, String prompt, String notes, int attempt) {
-        if (stage == Stage.PLAN) {
-            return activities.plan(videoId, prompt, notes, attempt);
+        switch (stage) {
+            case PLAN:
+                return activities.plan(videoId, prompt, notes, attempt);
+            case RESEARCH:
+                return activities.saveResearch(videoId, media.researchTopic(agents.researchRequest(videoId, notes)));
+            case CONCEPT:
+                return agents.concept(videoId, notes);
+            case SCRIPT:
+                return agents.script(videoId, notes);
+            case MUSIC:
+                return activities.saveMusic(videoId, media.generateMusic(agents.musicRequest(videoId, notes)));
+            case NARRATION:
+                // Voiced before the shot plan so every shot is timed against the real narration length.
+                return activities.saveNarration(videoId, media.synthesizeNarration(agents.narrationRequest(videoId)));
+            case SHOT_PLAN:
+                return agents.shotPlan(videoId, notes);
+            case KEYFRAMES: {
+                var request = activities.keyframeRequest(videoId, notes);
+                return activities.saveKeyframes(videoId, request, media.generateKeyframes(request));
+            }
+            case ANIMATIC:
+                return activities.saveAnimatic(videoId, media.renderAnimatic(activities.animaticRequest(videoId)));
+            default:
+                break;
         }
         StageResult result = activities.runStage(videoId, stage, notes, attempt);
         if (stage == Stage.ASSEMBLY) {
@@ -154,6 +279,16 @@ public class VideoProductionWorkflowImpl implements VideoProductionWorkflow {
                     result.plannedStages());
         }
         return result;
+    }
+
+    private static String rootMessage(Throwable t) {
+        Throwable c = t;
+        while (c.getCause() != null) {
+            c = c.getCause();
+        }
+        String m = c.getMessage() == null ? c.getClass().getSimpleName() : c.getMessage();
+        // ApplicationFailure messages look like "message='...', type='...'"; keep them readable and short.
+        return m.length() > 400 ? m.substring(0, 400) + "…" : m;
     }
 
     private void finish(String videoId, Stage stage, int attempt, String status, StageResult result, String notes) {
@@ -189,6 +324,13 @@ public class VideoProductionWorkflowImpl implements VideoProductionWorkflow {
     public void setAllModes(StageMode mode) {
         defaultMode = mode;
         modes.clear();
+    }
+
+    @Override
+    public void setReviewMinutes(int minutes) {
+        if (minutes > 0) {
+            reviewMinutes = minutes;
+        }
     }
 
     @Override

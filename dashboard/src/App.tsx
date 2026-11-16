@@ -8,6 +8,7 @@ export default function App() {
   const route = useHashRoute()
   const { data: stages, error } = usePoll(api.stages, 60000)
   const { data: system } = usePoll(api.system, 15000)
+  const { data: budget } = usePoll(api.budget, 10000)
   const videoMatch = route.match(/^#\/video\/([0-9a-f-]{36})/)
 
   return (
@@ -19,7 +20,12 @@ export default function App() {
           <a href="#/providers" className={route.startsWith('#/providers') ? 'active' : ''}>Providers</a>
         </nav>
         <span className="spacer" />
-        {system && <span className="pill">Planner: {system.planner}</span>}
+        {budget && (
+          <span className="pill" title="Paid Gemini spend this month (app's own hard cap)">
+            Gemini ₹{Number(budget.geminiSpentInr).toFixed(2)} / ₹{Number(budget.geminiCapInr).toFixed(0)}
+          </span>
+        )}
+        {system && <span className="pill hide-sm">Planner: {system.planner}</span>}
       </header>
       <main>
         {error && !stages && <p className="error">Can't reach the control plane at /api. Is it running? ({error})</p>}

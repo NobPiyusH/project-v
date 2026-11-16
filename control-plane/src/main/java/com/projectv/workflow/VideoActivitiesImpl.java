@@ -1,7 +1,21 @@
 package com.projectv.workflow;
 
+import com.projectv.ledger.BudgetGuard;
 import com.projectv.ledger.CostLedger;
+import com.projectv.ledger.Pricing;
+import com.projectv.media.MediaTypes.AnimaticRequest;
+import com.projectv.media.MediaTypes.AnimaticResult;
+import com.projectv.media.MediaTypes.KeyframeRequest;
+import com.projectv.media.MediaTypes.KeyframeResult;
+import com.projectv.media.MediaTypes.MusicRequest;
+import com.projectv.media.MediaTypes.MusicResult;
+import com.projectv.media.MediaTypes.NarrationRequest;
+import com.projectv.media.MediaTypes.NarrationResult;
+import com.projectv.media.MediaTypes.ResearchRequest;
+import com.projectv.media.MediaTypes.ResearchResult;
+import com.projectv.media.MediaTypes.Usage;
 import com.projectv.planner.Planner;
+import com.projectv.production.ProductionService;
 import com.projectv.workflow.WorkflowTypes.StageResult;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Component;
@@ -20,12 +34,17 @@ public class VideoActivitiesImpl implements VideoActivities {
     private final Planner planner;
     private final CostLedger ledger;
     private final ObjectMapper json;
+    private final ProductionService production;
+    private final Pricing pricing;
 
-    public VideoActivitiesImpl(JdbcClient jdbc, Planner planner, CostLedger ledger, ObjectMapper json) {
+    public VideoActivitiesImpl(JdbcClient jdbc, Planner planner, CostLedger ledger, ObjectMapper json,
+                               ProductionService production, Pricing pricing) {
         this.jdbc = jdbc;
         this.planner = planner;
         this.ledger = ledger;
         this.json = json;
+        this.production = production;
+        this.pricing = pricing;
     }
 
     @Override
@@ -45,10 +64,10 @@ public class VideoActivitiesImpl implements VideoActivities {
                 .param("id", UUID.fromString(videoId))
                 .update();
         if (outcome.source().startsWith("gemini")) {
-            // Free tier today; logged at ₹0 so usage is visible and pricing can be applied later.
-            ledger.record(UUID.fromString(videoId), "gemini_api", BigDecimal.ZERO,
-                    outcome.totalTokens() == null ? null : BigDecimal.valueOf(outcome.totalTokens()), "tokens", true,
-                    "PLAN attempt " + attempt);
+            // Planner only reports the total; price it all as output tokens (an upper bound).
+            long tokens = outcome.totalTokens() == null ? 0 : outcome.totalTokens();
+            ledger.record(UUID.fromString(videoId), BudgetGuard.GEMINI, pricing.textInr(new Usage(0, tokens, 0, tokens)),
+                    BigDecimal.valueOf(tokens), "tokens", true, "PLAN attempt " + attempt);
         }
         var p = outcome.plan();
         String summary = "%s: %s, %ds, %s, preset %s, narration %s, music %s, research %s (planned by %s)".formatted(
@@ -72,6 +91,79 @@ public class VideoActivitiesImpl implements VideoActivities {
         return StageResult.of(summary, json.writeValueAsString(artifact));
     }
 
+    // ---- M2a stages: thin adapters over ProductionService (all logic and persistence live there)
+
+    @Override
+    public ResearchRequest researchRequest(String videoId, String ownerNotes) {
+        return production.researchRequest(UUID.fromString(videoId), ownerNotes);
+    }
+
+    @Override
+    public StageResult saveResearch(String videoId, ResearchResult result) {
+        return production.saveResearch(UUID.fromString(videoId), result);
+    }
+
+    @Override
+    public StageResult concept(String videoId, String ownerNotes) {
+        return production.concept(UUID.fromString(videoId), ownerNotes);
+    }
+
+    @Override
+    public StageResult script(String videoId, String ownerNotes) {
+        return production.script(UUID.fromString(videoId), ownerNotes);
+    }
+
+    @Override
+    public MusicRequest musicRequest(String videoId, String ownerNotes) {
+        return production.musicRequest(UUID.fromString(videoId), ownerNotes);
+    }
+
+    @Override
+    public StageResult saveMusic(String videoId, MusicResult result) {
+        return production.saveMusic(UUID.fromString(videoId), result);
+    }
+
+    @Override
+    public NarrationRequest narrationRequest(String videoId) {
+        return production.narrationRequest(UUID.fromString(videoId));
+    }
+
+    @Override
+    public StageResult saveNarration(String videoId, NarrationResult result) {
+        return production.saveNarration(UUID.fromString(videoId), result);
+    }
+
+    @Override
+    public int lastAttempt(String videoId, Stage stage) {
+        return jdbc.sql("SELECT COALESCE(max(attempt), 0) FROM stage_run WHERE video_id = :v AND stage = :s")
+                .param("v", UUID.fromString(videoId)).param("s", stage.name()).query(Integer.class).single();
+    }
+
+    @Override
+    public StageResult shotPlan(String videoId, String ownerNotes) {
+        return production.shotPlan(UUID.fromString(videoId), ownerNotes);
+    }
+
+    @Override
+    public KeyframeRequest keyframeRequest(String videoId, String ownerNotes) {
+        return production.keyframeRequest(UUID.fromString(videoId), ownerNotes);
+    }
+
+    @Override
+    public StageResult saveKeyframes(String videoId, KeyframeRequest request, KeyframeResult result) {
+        return production.saveKeyframes(UUID.fromString(videoId), request, result);
+    }
+
+    @Override
+    public AnimaticRequest animaticRequest(String videoId) {
+        return production.animaticRequest(UUID.fromString(videoId));
+    }
+
+    @Override
+    public StageResult saveAnimatic(String videoId, AnimaticResult result) {
+        return production.saveAnimatic(UUID.fromString(videoId), result);
+    }
+
     @Override
     public void recordStage(String videoId, Stage stage, int attempt, StageMode mode, String status, String summary,
                             String artifactJson, String ownerNotes) {
@@ -86,7 +178,8 @@ public class VideoActivitiesImpl implements VideoActivities {
                             summary = COALESCE(EXCLUDED.summary, stage_run.summary),
                             artifact_json = COALESCE(EXCLUDED.artifact_json, stage_run.artifact_json),
                             owner_notes = COALESCE(EXCLUDED.owner_notes, stage_run.owner_notes),
-                            finished_at = EXCLUDED.finished_at
+                            finished_at = EXCLUDED.finished_at,
+                            review_deadline = CASE WHEN EXCLUDED.status = 'WAITING_APPROVAL' THEN stage_run.review_deadline END
                         """)
                 .param("rid", UUID.randomUUID())
                 .param("vid", id)
@@ -107,6 +200,13 @@ public class VideoActivitiesImpl implements VideoActivities {
                 .param("status", videoStatus)
                 .param("stage", stage.name())
                 .param("id", id)
+                .update();
+    }
+
+    @Override
+    public void setReviewDeadline(String videoId, Stage stage, int attempt, String deadlineIso) {
+        jdbc.sql("UPDATE stage_run SET review_deadline = CAST(:d AS timestamptz) WHERE video_id = :v AND stage = :s AND attempt = :a")
+                .param("d", deadlineIso).param("v", UUID.fromString(videoId)).param("s", stage.name()).param("a", attempt)
                 .update();
     }
 

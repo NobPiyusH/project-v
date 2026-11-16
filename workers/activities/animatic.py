@@ -1,0 +1,95 @@
+"""Animatic: keyframes + narration + music on the real timeline, to judge story and pacing BEFORE any video money is
+spent. It is clearly marked as a draft (a storyboard), never as final output (CLAUDE.md rule 10)."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from temporalio import activity
+
+from workers.common import download, media_duration, put_file, run_ffmpeg, workdir
+
+W, H, FPS = 1920, 1080, 30
+FONT = "C\\:/Windows/Fonts/segoeui.ttf"
+
+
+def _esc(text: str) -> str:
+    return text.replace("\\", "\\\\").replace(":", "\\:").replace("'", "’").replace("%", "\\%")
+
+
+@activity.defn(name="render_animatic")
+def render_animatic(req: dict) -> dict:
+    """req: {videoId, title, shots:[{index, startSec, durationSec, imageUri, overlayText}],
+             narration:[{uri, startSec}], musicUri, totalSec}
+    -> {uri, durationSec}"""
+    with workdir("animatic") as tmp:
+        tmp = Path(tmp)
+        shots = sorted(req["shots"], key=lambda s: s["startSec"])
+
+        # 1. One short clip per shot: the still with a slow push-in, a shot label and any on-screen overlay.
+        clips = []
+        for n, shot in enumerate(shots):
+            img = download(shot["imageUri"], tmp / f"k{n}{Path(shot['imageUri']).suffix}")
+            dur = max(0.5, float(shot["durationSec"]))
+            frames = int(round(dur * FPS))
+            label = _esc(f"ANIMATIC DRAFT  |  shot {shot['index']}  |  {dur:.1f}s")
+            vf = (
+                f"scale={W * 2}:{H * 2}:force_original_aspect_ratio=increase,crop={W * 2}:{H * 2},"
+                f"zoompan=z='min(1+0.06*on/{frames},1.06)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={frames}:s={W}x{H}:fps={FPS},"
+                f"drawbox=x=0:y=ih-56:w=iw:h=56:color=black@0.55:t=fill,"
+                f"drawtext=fontfile='{FONT}':text='{label}':x=24:y=h-40:fontsize=24:fontcolor=white@0.85"
+            )
+            if shot.get("overlayText"):
+                vf += (f",drawtext=fontfile='{FONT}':text='{_esc(shot['overlayText'])}':x=(w-text_w)/2:y=h*0.12:"
+                       "fontsize=56:fontcolor=white:shadowcolor=black@0.7:shadowx=2:shadowy=2")
+            clip = tmp / f"c{n}.mp4"
+            run_ffmpeg(["-loop", "1", "-framerate", str(FPS), "-i", str(img), "-vf", vf, "-frames:v", str(frames),
+                        "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", str(clip)])
+            clips.append(clip)
+            activity.heartbeat(f"shot {n + 1}/{len(shots)}")
+
+        concat_list = tmp / "clips.txt"
+        concat_list.write_text("".join(f"file '{c.as_posix()}'\n" for c in clips), encoding="utf-8")
+        picture = tmp / "picture.mp4"
+        run_ffmpeg(["-f", "concat", "-safe", "0", "-i", str(concat_list), "-c", "copy", str(picture)])
+        total = media_duration(picture)
+
+        # 2. Audio: narration lines placed at their start times; music ducked under the voice.
+        inputs, filters, labels = [], [], []
+        for i, line in enumerate(req.get("narration") or []):
+            p = download(line["uri"], tmp / f"n{i}.wav")
+            inputs += ["-i", str(p)]
+            ms = int(float(line["startSec"]) * 1000)
+            filters.append(f"[{i}:a]aresample=48000,aformat=channel_layouts=stereo,adelay={ms}|{ms}[n{i}]")
+            labels.append(f"[n{i}]")
+        n_voice = len(labels)
+        audio = tmp / "audio.wav"
+        music_uri = req.get("musicUri")
+        if n_voice:
+            filters.append(f"{''.join(labels)}amix=inputs={n_voice}:normalize=0,apad,atrim=0:{total:.3f}[voice]")
+        if music_uri:
+            m = download(music_uri, tmp / "music.wav")
+            inputs += ["-i", str(m)]
+            mi = n_voice
+            if n_voice:
+                filters.append("[voice]asplit=2[v1][v2]")
+                filters.append(f"[{mi}:a]aresample=48000,apad,atrim=0:{total:.3f},volume=0.9[mus]")
+                filters.append("[mus][v2]sidechaincompress=threshold=0.03:ratio=8:attack=20:release=400[ducked]")
+                filters.append("[ducked][v1]amix=inputs=2:normalize=0[mix]")
+            else:
+                filters.append(f"[{mi}:a]aresample=48000,apad,atrim=0:{total:.3f}[mix]")
+            out_label = "[mix]"
+        else:
+            out_label = "[voice]" if n_voice else None
+
+        if out_label:
+            filters.append(f"{out_label}loudnorm=I=-16:TP=-1.5:LRA=11[out]")
+            run_ffmpeg([*inputs, "-filter_complex", ";".join(filters), "-map", "[out]", "-ar", "48000", str(audio)])
+            final = tmp / "animatic.mp4"
+            run_ffmpeg(["-i", str(picture), "-i", str(audio), "-map", "0:v", "-map", "1:a", "-c:v", "copy",
+                        "-c:a", "aac", "-b:a", "192k", "-shortest", "-movflags", "+faststart", str(final)])
+        else:
+            final = picture
+
+        uri = put_file(f"videos/{req['videoId']}/animatic/animatic.mp4", final, "video/mp4")
+        return {"uri": uri, "durationSec": round(media_duration(final), 3)}

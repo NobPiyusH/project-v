@@ -15,7 +15,8 @@ import java.util.Map;
 @Component
 public class StylePresets {
 
-    public record Preset(String id, String name, String description, Map<String, Object> defaults) {
+    /** @param visualStyle appended to every image/video prompt so all shots share one look */
+    public record Preset(String id, String name, String description, String visualStyle, Map<String, Object> defaults) {
     }
 
     private final List<Preset> presets;
@@ -36,8 +37,10 @@ public class StylePresets {
     @SuppressWarnings("unchecked")
     private static Preset toPreset(Map<String, Object> m) {
         Object defaults = m.getOrDefault("defaults", Map.of());
+        Object visual = m.get("visualStyle");
         return new Preset((String) m.get("id"), (String) m.get("name"),
-                String.valueOf(m.get("description")).trim(), (Map<String, Object>) defaults);
+                String.valueOf(m.get("description")).trim(), visual == null ? "" : String.valueOf(visual).trim(),
+                (Map<String, Object>) defaults);
     }
 
     public List<Preset> all() {

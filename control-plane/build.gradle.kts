@@ -31,6 +31,8 @@ dependencies {
 	// Plain Temporal SDK, wired by hand in TemporalConfig: the Temporal Spring Boot starter targets older Boot lines.
 	implementation("io.temporal:temporal-sdk:${property("temporalVersion")}")
 	implementation("org.yaml:snakeyaml")
+	implementation(platform("software.amazon.awssdk:bom:2.59.1"))
+	implementation("software.amazon.awssdk:s3")
 	runtimeOnly("org.postgresql:postgresql")
 
 	testImplementation("org.springframework.boot:spring-boot-starter-webmvc-test")

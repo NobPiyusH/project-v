@@ -1,8 +1,8 @@
 // Typed client for the control-plane REST API (/api, proxied by Vite in dev).
 
-export type Mode = 'AUTO' | 'MANUAL'
+export type Mode = 'AUTO' | 'REVIEW' | 'MANUAL'
 
-export interface StageInfo { id: string; label: string; description: string }
+export interface StageInfo { id: string; label: string; description: string; redoWith: string[] }
 
 export interface VideoSummary {
   id: string
@@ -25,6 +25,7 @@ export interface StageRun {
   owner_notes: string | null
   started_at: string
   finished_at: string | null
+  review_deadline: string | null
 }
 
 export interface CostRow {
@@ -41,6 +42,7 @@ export interface VideoDetail extends VideoSummary {
   workflow_id: string
   plan_json: string | null
   modes_json: string
+  review_minutes: number
   stageRuns: StageRun[]
   costs: CostRow[]
 }
@@ -55,6 +57,32 @@ export interface Provider {
 }
 
 export interface StylePreset { id: string; name: string; description: string; defaults: Record<string, unknown> }
+
+export interface Source { title: string; uri: string }
+export interface Fact { text: string; sources: Source[] }
+
+export interface ScriptLine {
+  index: number; text: string; act: string | null; purpose: string | null; spoken: boolean
+  audioAssetId: string | null; audioUri: string | null; durationSec: number | null
+}
+
+export interface ShotRow {
+  id: string; ord: number; duration_target_sec: number; shot_type: string | null; camera_move: string | null
+  description: string | null; priority: string; overlay_text: string | null; keyframe_asset_id: string | null
+  keyframe_provider: string | null; scene_title: string
+  prompt_json: { keyframePrompt?: string; motionPrompt?: string; lineIndex?: number | null; startSec?: number }
+}
+
+export interface Production {
+  research: { facts: string; queries: string[]; version: number } | null
+  concept: { logline: string; bigIdea: string; clockLabel: string; acts: { title: string; purpose: string; approxSec: number }[]; emotionalArc: string } | null
+  script: { version: number; lines: ScriptLine[]; voiceName: string; voiceStyle: string; musicBrief: string } | null
+  music: { asset_id: string; bpm: number } | null
+  shots: ShotRow[]
+  animaticAssetId: string | null
+}
+
+export const assetUrl = (id: string) => `/api/assets/${id}/content`
 
 async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(`/api${path}`, {
@@ -78,14 +106,18 @@ export const api = {
   ledger: () => call<Record<string, unknown>[]>('GET', '/ledger'),
   videos: () => call<VideoSummary[]>('GET', '/videos'),
   video: (id: string) => call<VideoDetail>('GET', `/videos/${id}`),
-  createVideo: (prompt: string, defaultMode: Mode, modes: Record<string, Mode>) =>
-    call<{ id: string }>('POST', '/videos', { prompt, defaultMode, modes }),
+  production: (id: string) => call<Production>('GET', `/videos/${id}/production`),
+  budget: () => call<{ geminiCapInr: number; geminiSpentInr: number; geminiRemainingInr: number }>('GET', '/budget'),
+  createVideo: (prompt: string, defaultMode: Mode, modes: Record<string, Mode>, reviewMinutes: number) =>
+    call<{ id: string }>('POST', '/videos', { prompt, defaultMode, modes, reviewMinutes }),
+  setReviewMinutes: (id: string, minutes: number) => call<void>('PUT', `/videos/${id}/review-minutes`, { minutes }),
   approve: (id: string, stage: string, notes?: string) =>
     call<void>('POST', `/videos/${id}/stages/${stage}/approve`, { notes: notes ?? null }),
   reject: (id: string, stage: string, notes: string) =>
     call<void>('POST', `/videos/${id}/stages/${stage}/reject`, { notes }),
   setMode: (id: string, stage: string, mode: Mode) => call<void>('PUT', `/videos/${id}/modes/${stage}`, { mode }),
   setAllModes: (id: string, mode: Mode) => call<void>('PUT', `/videos/${id}/modes`, { mode }),
+  rerun: (id: string, stage: string) => call<{ stages: string[] }>('POST', `/videos/${id}/stages/${stage}/rerun`),
   pause: (id: string) => call<void>('POST', `/videos/${id}/pause`),
   resume: (id: string) => call<void>('POST', `/videos/${id}/resume`),
 }

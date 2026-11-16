@@ -1,6 +1,13 @@
 package com.projectv.api;
 
+import com.projectv.assets.AssetStore;
+import com.projectv.assets.MediaUrls;
+import com.projectv.ledger.BudgetGuard;
 import com.projectv.ledger.CostLedger;
+import com.projectv.ledger.Pricing;
+import com.projectv.production.ProductionService;
+import java.net.URI;
+import java.time.Duration;
 import com.projectv.planner.Planner;
 import com.projectv.planner.StylePresets;
 import com.projectv.provider.ProviderRegistry;
@@ -38,18 +45,32 @@ public class ApiController {
     private final StylePresets presets;
     private final CostLedger ledger;
     private final Planner planner;
+    private final ProductionService production;
+    private final AssetStore assets;
+    private final MediaUrls mediaUrls;
+    private final BudgetGuard budget;
+    private final Pricing pricing;
 
     public ApiController(VideoService videos, ProviderRegistry providers, StylePresets presets, CostLedger ledger,
-                         Planner planner) {
+                         Planner planner, ProductionService production, AssetStore assets, MediaUrls mediaUrls,
+                         BudgetGuard budget, Pricing pricing) {
         this.videos = videos;
         this.providers = providers;
         this.presets = presets;
         this.ledger = ledger;
         this.planner = planner;
+        this.production = production;
+        this.assets = assets;
+        this.mediaUrls = mediaUrls;
+        this.budget = budget;
+        this.pricing = pricing;
     }
 
     public record CreateVideoRequest(@NotBlank @Size(max = 4000) String prompt, StageMode defaultMode,
-                                     Map<Stage, StageMode> modes) {
+                                     Map<Stage, StageMode> modes, Integer reviewMinutes) {
+    }
+
+    public record ReviewRequest(int minutes) {
     }
 
     public record NotesRequest(String notes) {
@@ -60,7 +81,7 @@ public class ApiController {
 
     @PostMapping("/videos")
     public ResponseEntity<Map<String, Object>> create(@Valid @RequestBody CreateVideoRequest req) {
-        UUID id = videos.create(new VideoService.CreateVideo(req.prompt(), req.defaultMode(), req.modes()));
+        UUID id = videos.create(new VideoService.CreateVideo(req.prompt(), req.defaultMode(), req.modes(), req.reviewMinutes()));
         return ResponseEntity.status(HttpStatus.CREATED).body(Map.of("id", id));
     }
 
@@ -86,6 +107,16 @@ public class ApiController {
         videos.reject(id, stage, body == null ? null : body.notes());
     }
 
+    @PostMapping("/videos/{id}/stages/{stage}/rerun")
+    public Map<String, Object> rerun(@PathVariable UUID id, @PathVariable Stage stage) {
+        return Map.of("stages", videos.rerun(id, stage));
+    }
+
+    @ExceptionHandler(IllegalStateException.class)
+    public ResponseEntity<Map<String, String>> conflict(IllegalStateException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", e.getMessage()));
+    }
+
     @PutMapping("/videos/{id}/modes/{stage}")
     public void setMode(@PathVariable UUID id, @PathVariable Stage stage, @RequestBody ModeRequest body) {
         videos.setMode(id, stage, body.mode());
@@ -94,6 +125,11 @@ public class ApiController {
     @PutMapping("/videos/{id}/modes")
     public void setAllModes(@PathVariable UUID id, @RequestBody ModeRequest body) {
         videos.setAllModes(id, body.mode());
+    }
+
+    @PutMapping("/videos/{id}/review-minutes")
+    public void setReviewMinutes(@PathVariable UUID id, @RequestBody ReviewRequest body) {
+        videos.setReviewMinutes(id, body.minutes());
     }
 
     @PostMapping("/videos/{id}/pause")
@@ -106,10 +142,34 @@ public class ApiController {
         videos.resume(id);
     }
 
+    @GetMapping("/videos/{id}/production")
+    public Map<String, Object> production(@PathVariable UUID id) {
+        return production.production(id);
+    }
+
+    /** Redirects to a short-lived URL on the local S3 store (supports range requests for video seeking). */
+    @GetMapping("/assets/{id}/content")
+    public ResponseEntity<Void> assetContent(@PathVariable UUID id) {
+        String url = mediaUrls.presign(assets.uriOf(id), Duration.ofMinutes(30));
+        return ResponseEntity.status(HttpStatus.FOUND).location(URI.create(url)).build();
+    }
+
+    @GetMapping("/assets/{id}")
+    public Map<String, Object> asset(@PathVariable UUID id) {
+        return assets.describe(id);
+    }
+
+    @GetMapping("/budget")
+    public Map<String, Object> budget() {
+        return Map.of("geminiCapInr", pricing.geminiMonthlyCapInr(), "geminiSpentInr", budget.geminiSpentThisMonth(),
+                "geminiRemainingInr", budget.geminiRemaining());
+    }
+
     @GetMapping("/stages")
-    public List<Map<String, String>> stages() {
+    public List<Map<String, Object>> stages() {
         return Arrays.stream(Stage.values())
-                .map(s -> Map.of("id", s.name(), "label", s.label(), "description", s.description()))
+                .map(s -> Map.<String, Object>of("id", s.name(), "label", s.label(), "description", s.description(),
+                        "redoWith", VideoService.REDO_WITH.getOrDefault(s, List.of())))
                 .toList();
     }
 

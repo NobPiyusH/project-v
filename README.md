@@ -4,14 +4,18 @@ A personal AI video studio: **text prompt → complete, publish-ready video**. E
 **Auto** (default) or **Manual** mode. See [docs/HANDOVER.md](docs/HANDOVER.md) (start with "Revision R1") and
 [CLAUDE.md](CLAUDE.md).
 
-**Current milestone: M1 (backbone).** The workflow engine, Auto/Manual modes on every stage, approvals, restart
-safety, planner, provider registry, cost ledger, Python worker and dashboard are real. The stages after Plan are
-placeholders that record what they will do; real research, script, music, video and editing arrive in M2.
+**Current milestone: M2a (story pipeline).** Plan → Research (Google Search, sourced facts) → Concept → Script →
+Music (Lyria, beat-mapped) → Narration (Gemini TTS) + Shot plan (beat-snapped) → Keyframes (Nano Banana for hero
+shots, Z-Image on Modal for the rest) → Animatic. Every stage runs Auto or Manual; failed stages wait for you
+(Retry / Continue without it). Video generation, upscaling and the final edit arrive in M2b/M2c.
+
+Paid Gemini spend is capped by the app at ₹400/month (`config/providers.yaml → pricing.gemini.monthlyCapInr`).
 
 ## Run it (Windows, from `C:\dev\project-v`)
 
-One-time: copy `.env.example` to `.env` (already done) and put your Gemini key in `GEMINI_API_KEY`.
-Without a key the Planner uses a simple rule-based plan.
+One-time setup:
+- copy `.env.example` to `.env` (already done) and put your Gemini key in `GEMINI_API_KEY` (billing enabled);
+- link Modal (`uv run modal token new`) and deploy the keyframe model: `uv run modal deploy workers/modal_apps/zimage.py`.
 
 Open four terminals:
 

@@ -9,7 +9,13 @@ from dotenv import load_dotenv
 from temporalio.client import Client
 from temporalio.worker import Worker
 
+from workers.activities.animatic import render_animatic
+from workers.activities.keyframes import generate_keyframes
 from workers.activities.media import tool_versions
+from workers.activities.music import generate_music
+from workers.activities.research import research_topic
+from workers.activities.voice import synthesize_narration
+from workers.common import ensure_bucket
 
 # Must match com.projectv.workflow.TaskQueues.MEDIA
 MEDIA_TASK_QUEUE = "projectv-media"
@@ -18,17 +24,20 @@ MEDIA_TASK_QUEUE = "projectv-media"
 async def main() -> None:
     load_dotenv()  # reads .env in the repo root; values are never logged
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    ensure_bucket()
     target = os.getenv("TEMPORAL_TARGET", "localhost:7233")
     namespace = os.getenv("TEMPORAL_NAMESPACE", "default")
     client = await Client.connect(target, namespace=namespace)
 
-    # Media activities are blocking (subprocess / CPU), so they run in a thread pool.
-    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+    # Media activities are blocking (network, subprocess, CPU), so they run in a thread pool.
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
         worker = Worker(
             client,
             task_queue=MEDIA_TASK_QUEUE,
-            activities=[tool_versions],
+            activities=[tool_versions, research_topic, synthesize_narration, generate_music,
+                        generate_keyframes, render_animatic],
             activity_executor=pool,
+            max_concurrent_activities=8,
         )
         logging.info("Media worker listening on task queue %s (%s)", MEDIA_TASK_QUEUE, target)
         await worker.run()

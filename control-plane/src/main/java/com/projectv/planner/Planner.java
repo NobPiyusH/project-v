@@ -176,6 +176,9 @@ public class Planner {
         if ("none".equals(plan.music())) {
             stages.remove(Stage.MUSIC);
         }
+        if ("none".equals(plan.narration())) {
+            stages.remove(Stage.NARRATION);
+        }
         return stages;
     }
 

@@ -1,7 +1,8 @@
 import { Fragment, useState } from 'react'
 import { api, type Mode, type StageInfo, type StageRun, type VideoDetail as Detail } from '../api'
-import { ModeSwitch, StatusBadge } from '../components'
+import { Countdown, ModeSwitch, StatusBadge } from '../components'
 import { fmtTime, usePoll } from '../hooks'
+import { ProductionView } from './ProductionView'
 
 interface Modes { default: Mode; stages: Record<string, Mode> }
 
@@ -49,7 +50,13 @@ export function VideoDetail({ id, stages }: { id: string; stages: StageInfo[] })
             <>
               <span className="muted small">Set all remaining stages</span>
               <button onClick={() => act(() => api.setAllModes(id, 'AUTO'))}>All Auto</button>
+              <button onClick={() => act(() => api.setAllModes(id, 'REVIEW'))}>All Review</button>
               <button onClick={() => act(() => api.setAllModes(id, 'MANUAL'))}>All Manual</button>
+              <label className="row small muted">
+                Review window
+                <input type="number" min={1} max={1440} defaultValue={video.review_minutes} style={{ width: 70 }}
+                  onBlur={(e) => { const m = Number(e.target.value); if (m > 0 && m !== video.review_minutes) void act(() => api.setReviewMinutes(id, m)) }} /> min
+              </label>
             </>
           )}
         </div>
@@ -58,6 +65,8 @@ export function VideoDetail({ id, stages }: { id: string; stages: StageInfo[] })
 
       <PlanCard video={video} />
 
+      <ProductionView id={id} />
+
       <section className="card">
         <div className="card-head">
           <h2>Stages</h2>
@@ -65,7 +74,9 @@ export function VideoDetail({ id, stages }: { id: string; stages: StageInfo[] })
         </div>
         <div className="stages">
           {stages.map((s, i) => (
-            <StageRow key={s.id} index={i + 1} stage={s} run={latest[s.id]} mode={modeOf(s.id)}
+            <StageRow key={s.id} index={i + 1} stage={s} run={latest[s.id]} mode={modeOf(s.id)} stages={stages}
+              canRedo={finished && s.redoWith.length > 0 && latest[s.id] !== undefined && latest[s.id].status !== 'SKIPPED'}
+              onRedo={() => act(() => api.rerun(id, s.id))}
               attempts={video.stageRuns.filter((r) => r.stage === s.id && r.attempt > 0).length}
               locked={finished || (latest[s.id] !== undefined && FINISHED.has(latest[s.id].status))}
               onMode={(m) => act(() => api.setMode(id, s.id, m))}
@@ -91,13 +102,15 @@ function latestRuns(runs: StageRun[]): Record<string, StageRun> {
 
 function StageRow(props: {
   index: number; stage: StageInfo; run?: StageRun; mode: Mode; attempts: number; locked: boolean
+  stages: StageInfo[]; canRedo: boolean; onRedo: () => void
   onMode: (m: Mode) => void; onApprove: (notes?: string) => void; onReject: (notes: string) => void
 }) {
   const { index, stage, run, mode, attempts, locked } = props
   const [notes, setNotes] = useState('')
   const [showArtifact, setShowArtifact] = useState(false)
   const status = run?.status ?? 'PENDING'
-  const waiting = status === 'WAITING_APPROVAL'
+  const failed = status === 'FAILED'
+  const waiting = status === 'WAITING_APPROVAL' || failed
 
   return (
     <div className={`stage ${waiting ? 'waiting' : ''} ${status === 'SKIPPED' ? 'skipped' : ''}`}>
@@ -107,14 +120,27 @@ function StageRow(props: {
           <span className="title">{stage.label}</span>
           <StatusBadge status={status} />
           {attempts > 1 && <span className="muted small">attempt {run?.attempt}</span>}
+          {waiting && run?.review_deadline && <Countdown deadline={run.review_deadline} />}
         </div>
         <div className="muted small">{run?.summary ?? stage.description}</div>
         {run?.owner_notes && <div className="small">Your notes: “{run.owner_notes}”</div>}
-        {run?.artifact_json && (
-          <button className="small" style={{ marginTop: 6, padding: '2px 8px' }} onClick={() => setShowArtifact((s) => !s)}>
-            {showArtifact ? 'Hide output' : 'Show output'}
-          </button>
-        )}
+        <div className="row" style={{ marginTop: 6 }}>
+          {run?.artifact_json && (
+            <button className="small" style={{ padding: '2px 8px' }} onClick={() => setShowArtifact((s) => !s)}>
+              {showArtifact ? 'Hide output' : 'Show output'}
+            </button>
+          )}
+          {props.canRedo && (
+            <button className="small" style={{ padding: '2px 8px' }}
+              title={'Redoes: ' + stage.redoWith.map((r) => props.stages.find((x) => x.id === r)?.label ?? r).join(' → ')}
+              onClick={() => {
+                const names = stage.redoWith.map((r) => props.stages.find((x) => x.id === r)?.label ?? r).join(' → ')
+                if (window.confirm(`Redo ${names}? Everything else is kept. This may use paid Gemini credits.`)) props.onRedo()
+              }}>
+              Redo
+            </button>
+          )}
+        </div>
         {showArtifact && run?.artifact_json && (
           <pre className="card" style={{ marginTop: 8, overflow: 'auto', maxHeight: 320 }}>
             {JSON.stringify(JSON.parse(run.artifact_json), null, 2)}
@@ -123,12 +149,23 @@ function StageRow(props: {
         {waiting && (
           <div className="actions">
             <textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)}
-              placeholder="Notes (required to reject: tell the system what to change)" />
+              placeholder={failed ? 'Optional notes for the retry' : 'Notes (required to reject: tell the system what to change)'} />
             <div className="row">
-              <button className="primary" onClick={() => { props.onApprove(notes || undefined); setNotes('') }}>Approve</button>
-              <button className="danger" disabled={notes.trim() === ''}
-                onClick={() => { props.onReject(notes); setNotes('') }}>Reject & redo</button>
-              <span className="muted small">Or switch this stage to Auto to let it continue.</span>
+              {failed ? (
+                <>
+                  <button className="primary" onClick={() => { props.onReject(notes || 'Retry'); setNotes('') }}>Retry</button>
+                  <button onClick={() => { props.onApprove(notes || undefined); setNotes('') }}>Continue without it</button>
+                </>
+              ) : (
+                <>
+                  <button className="primary" onClick={() => { props.onApprove(notes || undefined); setNotes('') }}>Approve</button>
+                  <button className="danger" disabled={notes.trim() === ''}
+                    onClick={() => { props.onReject(notes); setNotes('') }}>Reject & redo</button>
+                  <span className="muted small">
+                    {run?.review_deadline ? 'Or switch to Manual to hold it, or do nothing and it continues by itself.' : 'Or switch this stage to Auto to let it continue.'}
+                  </span>
+                </>
+              )}
             </div>
           </div>
         )}

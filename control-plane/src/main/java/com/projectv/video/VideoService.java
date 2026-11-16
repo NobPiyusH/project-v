@@ -27,6 +27,20 @@ import java.util.UUID;
 @Service
 public class VideoService {
 
+    /**
+     * What must be redone together, so outputs never go stale: e.g. a new script needs a new voice, new shots,
+     * new keyframes and a new animatic; a new voice only needs a new animatic.
+     */
+    public static final Map<Stage, List<Stage>> REDO_WITH = Map.of(
+            Stage.RESEARCH, List.of(Stage.RESEARCH),
+            Stage.CONCEPT, List.of(Stage.CONCEPT),
+            Stage.SCRIPT, List.of(Stage.SCRIPT, Stage.NARRATION, Stage.SHOT_PLAN, Stage.KEYFRAMES, Stage.ANIMATIC),
+            Stage.MUSIC, List.of(Stage.MUSIC, Stage.ANIMATIC),
+            Stage.NARRATION, List.of(Stage.NARRATION, Stage.ANIMATIC),
+            Stage.SHOT_PLAN, List.of(Stage.SHOT_PLAN, Stage.KEYFRAMES, Stage.ANIMATIC),
+            Stage.KEYFRAMES, List.of(Stage.KEYFRAMES, Stage.ANIMATIC),
+            Stage.ANIMATIC, List.of(Stage.ANIMATIC));
+
     private final JdbcClient jdbc;
     private final WorkflowClient temporal;
     private final ObjectMapper json;
@@ -37,7 +51,7 @@ public class VideoService {
         this.json = json;
     }
 
-    public record CreateVideo(String prompt, StageMode defaultMode, Map<Stage, StageMode> modes) {
+    public record CreateVideo(String prompt, StageMode defaultMode, Map<Stage, StageMode> modes, Integer reviewMinutes) {
     }
 
     /** Not transactional on purpose: the row must be committed before the workflow's first activity reads it. */
@@ -45,11 +59,13 @@ public class VideoService {
         UUID id = UUID.randomUUID();
         String workflowId = "video-" + id;
         StageMode defaultMode = req.defaultMode() == null ? StageMode.AUTO : req.defaultMode();
-        Map<Stage, StageMode> modes = req.modes() == null ? new EnumMap<>(Stage.class) : new EnumMap<>(req.modes());
+        Map<Stage, StageMode> modes = req.modes() == null || req.modes().isEmpty() ? new EnumMap<>(Stage.class) : new EnumMap<>(req.modes());
+        int reviewMinutes = req.reviewMinutes() == null || req.reviewMinutes() < 1 ? 10 : Math.min(req.reviewMinutes(), 24 * 60);
         jdbc.sql("""
-                        INSERT INTO video (id, prompt, status, modes_json, workflow_id)
-                        VALUES (:id, :prompt, 'CREATED', CAST(:modes AS jsonb), :wf)
+                        INSERT INTO video (id, prompt, status, modes_json, workflow_id, review_minutes)
+                        VALUES (:id, :prompt, 'CREATED', CAST(:modes AS jsonb), :wf, :review)
                         """)
+                .param("review", reviewMinutes)
                 .param("id", id)
                 .param("prompt", req.prompt().strip())
                 .param("modes", modesJson(defaultMode, modes))
@@ -57,8 +73,37 @@ public class VideoService {
                 .update();
         VideoProductionWorkflow wf = temporal.newWorkflowStub(VideoProductionWorkflow.class,
                 WorkflowOptions.newBuilder().setWorkflowId(workflowId).setTaskQueue(TaskQueues.CONTROL).build());
-        WorkflowClient.start(wf::run, new VideoRequest(id.toString(), req.prompt().strip(), defaultMode, modes));
+        WorkflowClient.start(wf::run, new VideoRequest(id.toString(), req.prompt().strip(), defaultMode, modes, null, reviewMinutes));
         return id;
+    }
+
+    /**
+     * Redo one stage of a finished video, reusing everything else. Stages before the animatic also rebuild the
+     * animatic so the owner can watch the change. The workflow id is reused (allowed once the previous run closed).
+     */
+    public List<Stage> rerun(UUID id, Stage stage) {
+        Map<String, Object> v = jdbc.sql("SELECT prompt, status, modes_json::text AS modes, review_minutes FROM video WHERE id = :id")
+                .param("id", id).query().listOfRows().stream().findFirst()
+                .orElseThrow(() -> new NoSuchElementException("No video " + id));
+        String status = (String) v.get("status");
+        if (List.of("RUNNING", "WAITING", "PAUSED", "CREATED").contains(status)) {
+            throw new IllegalStateException("The video is still in production (" + status + "); finish or let it complete first");
+        }
+        List<Stage> stages = REDO_WITH.get(stage);
+        if (stages == null) {
+            throw new IllegalStateException(stage.label() + " can't be redone yet (it isn't built until a later milestone)");
+        }
+        Map<String, Object> modes = json.readValue((String) v.get("modes"), new tools.jackson.core.type.TypeReference<>() {
+        });
+        StageMode defaultMode = StageMode.parse(String.valueOf(modes.getOrDefault("default", "AUTO")));
+        VideoProductionWorkflow wf = temporal.newWorkflowStub(VideoProductionWorkflow.class,
+                WorkflowOptions.newBuilder().setWorkflowId("video-" + id).setTaskQueue(TaskQueues.CONTROL).build());
+        WorkflowClient.start(wf::run, new VideoRequest(id.toString(), (String) v.get("prompt"), defaultMode,
+                new EnumMap<>(Stage.class), stages, ((Number) v.get("review_minutes")).intValue()));
+        jdbc.sql("UPDATE video SET status = 'RUNNING', current_stage = :s, updated_at = now() WHERE id = :id")
+                .param("s", stage.name()).param("id", id).update();
+        recordDecision(id, stage, "rerun", stages.toString());
+        return stages;
     }
 
     public List<Map<String, Object>> list() {
@@ -72,14 +117,14 @@ public class VideoService {
     public Map<String, Object> detail(UUID id) {
         Map<String, Object> video = jdbc.sql("""
                         SELECT id, title, prompt, status, current_stage, spent_inr, workflow_id, created_at, updated_at,
-                               plan_json::text AS plan_json, modes_json::text AS modes_json
+                               plan_json::text AS plan_json, modes_json::text AS modes_json, review_minutes
                         FROM video WHERE id = :id
                         """)
                 .param("id", id).query().listOfRows().stream().findFirst()
                 .orElseThrow(() -> new NoSuchElementException("No video " + id));
         List<Map<String, Object>> runs = jdbc.sql("""
                         SELECT stage, attempt, mode, status, summary, artifact_json::text AS artifact_json, owner_notes,
-                               started_at, finished_at
+                               started_at, finished_at, review_deadline
                         FROM stage_run WHERE video_id = :id ORDER BY started_at, attempt
                         """)
                 .param("id", id).query().listOfRows();
@@ -116,6 +161,12 @@ public class VideoService {
         jdbc.sql("UPDATE video SET modes_json = CAST(:modes AS jsonb), updated_at = now() WHERE id = :id")
                 .param("modes", modesJson(mode, Map.of())).param("id", id).update();
         recordDecision(id, null, "mode_change", "ALL:" + mode.name());
+    }
+
+    public void setReviewMinutes(UUID id, int minutes) {
+        int m = Math.max(1, Math.min(minutes, 24 * 60));
+        stub(id).setReviewMinutes(m);
+        jdbc.sql("UPDATE video SET review_minutes = :m, updated_at = now() WHERE id = :id").param("m", m).param("id", id).update();
     }
 
     public void pause(UUID id) {

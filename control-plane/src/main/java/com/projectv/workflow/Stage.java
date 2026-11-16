@@ -10,6 +10,7 @@ public enum Stage {
     CONCEPT("Concept", "Big idea, structure, the 'clock'"),
     SCRIPT("Script", "Narration text and beat sheet (or a visual beat sheet when there is no narration)"),
     MUSIC("Music", "Choose or generate the score and map its beats"),
+    NARRATION("Voice", "Narration voiced line by line; every line is transcribed and re-voiced if it is wrong"),
     SHOT_PLAN("Shot plan", "Scenes and shots timed to the beats, with prompts per model"),
     KEYFRAMES("Keyframes", "One still per shot, before any video spend"),
     ANIMATIC("Animatic", "Stills + scratch voice + music cut together to lock story and pacing"),

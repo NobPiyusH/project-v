@@ -30,6 +30,10 @@ public interface VideoProductionWorkflow {
     @SignalMethod
     void setAllModes(StageMode mode);
 
+    /** Review window for stages in REVIEW mode (applies from the next stage that starts waiting). */
+    @SignalMethod
+    void setReviewMinutes(int minutes);
+
     @SignalMethod
     void pause();
 

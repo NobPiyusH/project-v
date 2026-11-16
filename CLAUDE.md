@@ -5,10 +5,14 @@ Read `docs/HANDOVER.md` fully before any work, starting with "Revision R1" at th
 ## Project in one line
 A personal AI video studio: text prompt → complete, fully moving 4K video (narration, music, sound, visuals, edit, captions, publishing kit) + Shorts. Every stage runs in Auto (default) or Manual mode; the owner (Gendu) can direct any step. MelodySheep-style documentary is one style preset, not the only target. Java 21 / Spring Boot 3.5 / Temporal / Embabel control plane, Python workers, ComfyUI on rented or free GPUs, Postgres+pgvector, MinIO + Google Drive, React dashboard, OTIO → FCP7 XML for Premiere.
 
+## Positioning (owner, 16 Nov 2026)
+A serious, premium, privately owned studio: not a hobby prototype and not a product for sale. Build it to production-grade engineering standards (durability, tests, observability, clean architecture) and premium output quality.
+
 ## Rules
 1. Work milestone by milestone (HANDOVER §23). Demo each one and get the owner's approval before starting the next. **Order (R1): M1 backbone first, GPU benchmarks (M0) later** when the owner approves spending.
 2. Ask the owner before anything irreversible, anything that spends money, or anything that touches his accounts. **Don't assume: ask when a decision is the owner's.** Remaining open decisions are listed in HANDOVER §26.
-2a. Every stage supports **Auto and Manual** modes, switchable per video and mid-run. Never build a stage that can only run one way.
+2a. Every stage supports **Auto, Review and Manual** modes, switchable per video and mid-run. Review = semi-auto: the stage waits a review window (default 10 min, per video) for the owner, then continues by itself; switching to Manual holds it. Never build a stage that can only run one way.
+2b. A failed stage never kills a video: it waits for the owner (Retry / Continue without it). Finished stages can be redone with `REDO_WITH` dependencies (VideoService) so outputs never go stale.
 3. Secrets only in `.env` (git-ignored). Commit `.env.example`. Never log or print keys.
 4. Respect every provider's ToS: one account per provider, no free-tier farming, **no unofficial automation of Google Flow** (it's a manual provider via drop folder).
 5. Temporal workflow code must be deterministic; all I/O in activities; pass asset IDs, never media bytes, through workflows.
@@ -28,5 +32,7 @@ Spring Boot **4.1** / Spring AI **2.0** (not 3.5/1.1 as the book says), plain Te
 - `docker compose -f infra/docker-compose.yml up -d`: local services (Postgres 5433, Temporal 7233 + UI 8233, SeaweedFS S3 8333)
 - `./gradlew :control-plane:bootRun`: control plane on :8080 (set `JAVA_HOME` to the JDK 21 at `C:\Program Files\Eclipse Adoptium\jdk-21.0.13.9-hotspot`; Gradle needs `GRADLE_OPTS=-Djava.net.preferIPv4Stack=true` on this machine)
 - `./gradlew :control-plane:test`: workflow tests
-- `uv run python -m workers.main`: local Python worker
+- `uv run python -m workers.main`: local Python worker (needs FFmpeg on PATH)
+- `uv run modal deploy workers/modal_apps/zimage.py`: deploy the Z-Image keyframe app to the owner's Modal account
+- Models are set in `application.properties` (`projectv.models.*`), overridable via `.env`; prices and the ₹400 Gemini cap live in `config/providers.yaml`. Gemini media models need the `v1beta` API.
 - `npm --prefix dashboard run dev`: dashboard on 127.0.0.1:5173
