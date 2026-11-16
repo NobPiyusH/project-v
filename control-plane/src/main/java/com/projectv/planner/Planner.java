@@ -42,8 +42,12 @@ public class Planner {
     private final String modelName;
     private final long timeoutSeconds;
     private final String fallbacks;
+    private final com.projectv.agents.NvidiaChat nvidia;
 
-    public Planner(ObjectProvider<ChatModel> chatModel, StylePresets presets,
+    private record Out(VideoPlan plan, Long tokens) {
+    }
+
+    public Planner(ObjectProvider<ChatModel> chatModel, StylePresets presets, com.projectv.agents.NvidiaChat nvidia,
                    @Value("${spring.ai.google.genai.api-key:}") String apiKey,
                    @Value("${spring.ai.google.genai.chat.options.model:}") String modelName,
                    @Value("${projectv.planner.timeout-seconds:90}") long timeoutSeconds,
@@ -54,6 +58,7 @@ public class Planner {
         this.modelName = modelName;
         this.timeoutSeconds = timeoutSeconds;
         this.fallbacks = fallbacks;
+        this.nvidia = nvidia;
     }
 
     public boolean llmConfigured() {
@@ -71,25 +76,31 @@ public class Planner {
         try {
             // Hard time limit per model plus the ordered fallback list (Work X): a hung or retired model moves on to
             // the next one instead of blocking or failing the video; the rule-based plan is the last resort.
-            com.projectv.agents.ModelFallback.Attempt<ResponseEntity<ChatResponse, VideoPlan>> attempt = com.projectv.agents.ModelFallback.run(
-                    com.projectv.agents.ModelFallback.models(modelName, fallbacks), timeoutSeconds, "PLAN",
-                    m -> ChatClient.create(chatModel.getObject())
-                            .prompt()
-                            .options(org.springframework.ai.chat.prompt.ChatOptions.builder().model(m))
-                            .system(systemPrompt())
-                            .user(userPrompt(prompt, ownerNotes))
-                            .call()
-                            .responseEntity(VideoPlan.class));
-            ResponseEntity<ChatResponse, VideoPlan> response = attempt.value();
+            com.projectv.agents.ModelFallback.Attempt<Out> attempt = com.projectv.agents.ModelFallback.run(
+                    com.projectv.agents.ModelFallback.models(modelName, fallbacks), timeoutSeconds, "PLAN", m -> {
+                        if (com.projectv.agents.NvidiaChat.handles(m)) {
+                            var n = nvidia.call(m, systemPrompt(), userPrompt(prompt, ownerNotes), VideoPlan.class);
+                            return new Out(n.entity(), n.totalTokens());
+                        }
+                        ResponseEntity<ChatResponse, VideoPlan> response = ChatClient.create(chatModel.getObject())
+                                .prompt()
+                                .options(org.springframework.ai.chat.prompt.ChatOptions.builder().model(m))
+                                .system(systemPrompt())
+                                .user(userPrompt(prompt, ownerNotes))
+                                .call()
+                                .responseEntity(VideoPlan.class);
+                        Long tokens = null;
+                        if (response.response() != null && response.response().getMetadata() != null
+                                && response.response().getMetadata().getUsage() != null) {
+                            Integer total = response.response().getMetadata().getUsage().getTotalTokens();
+                            tokens = total == null ? null : total.longValue();
+                        }
+                        return new Out(response.entity(), tokens);
+                    });
             String usedModel = attempt.model();
-            VideoPlan plan = normalise(response.entity(), prompt);
-            Long tokens = null;
-            if (response.response() != null && response.response().getMetadata() != null
-                    && response.response().getMetadata().getUsage() != null) {
-                Integer total = response.response().getMetadata().getUsage().getTotalTokens();
-                tokens = total == null ? null : total.longValue();
-            }
-            return new Outcome(plan, stagesFor(plan), "gemini:" + usedModel, tokens, null);
+            VideoPlan plan = normalise(attempt.value().plan(), prompt);
+            String source = com.projectv.agents.NvidiaChat.handles(usedModel) ? usedModel : "gemini:" + usedModel;
+            return new Outcome(plan, stagesFor(plan), source, attempt.value().tokens(), null);
         } catch (TimeoutException e) {
             log.warn("Gemini planning timed out after {}s, using rule-based fallback", timeoutSeconds);
             return fallback(prompt, "No Gemini model answered within " + timeoutSeconds + "s");

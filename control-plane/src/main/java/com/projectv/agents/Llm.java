@@ -32,8 +32,12 @@ public class Llm {
     private final long timeoutSeconds;
     private final String model;
     private final String fallbacks;
+    private final NvidiaChat nvidia;
 
-    public Llm(ObjectProvider<ChatModel> chatModel, CostLedger ledger, Pricing pricing, BudgetGuard budget,
+    private record Out<T>(T entity, com.projectv.media.MediaTypes.Usage usage) {
+    }
+
+    public Llm(ObjectProvider<ChatModel> chatModel, CostLedger ledger, Pricing pricing, BudgetGuard budget, NvidiaChat nvidia,
                @Value("${projectv.agents.timeout-seconds:150}") long timeoutSeconds,
                @Value("${projectv.models.text}") String model,
                @Value("${projectv.models.text-fallbacks:}") String fallbacks) {
@@ -44,6 +48,7 @@ public class Llm {
         this.timeoutSeconds = timeoutSeconds;
         this.model = model;
         this.fallbacks = fallbacks;
+        this.nvidia = nvidia;
     }
 
     public String model() {
@@ -59,14 +64,27 @@ public class Llm {
         budget.require(BigDecimal.ONE, purpose); // a text call costs well under ₹1; refuse only when the cap is hit
         List<String> models = ModelFallback.models(model, fallbacks);
         try {
-            ModelFallback.Attempt<ResponseEntity<ChatResponse, T>> a = ModelFallback.run(models, timeoutSeconds, purpose,
-                    m -> ChatClient.create(cm).prompt()
-                            .options(ChatOptions.builder().model(m))
-                            .system(system).user(user).call().responseEntity(type));
-            ResponseEntity<ChatResponse, T> r = a.value();
-            com.projectv.media.MediaTypes.Usage usage = toUsage(r.response());
-            ledger.record(videoId, BudgetGuard.GEMINI, pricing.textInr(usage), BigDecimal.valueOf(usage.totalTokens()),
-                    "tokens", true, purpose + " (" + a.model() + ")");
+            ModelFallback.Attempt<Out<T>> a = ModelFallback.run(models, timeoutSeconds, purpose, m -> {
+                if (NvidiaChat.handles(m)) {
+                    NvidiaChat.Result<T> n = nvidia.call(m, system, user, type);
+                    return new Out<>(n.entity(), new com.projectv.media.MediaTypes.Usage(
+                            n.promptTokens(), n.completionTokens(), 0, n.totalTokens()));
+                }
+                ResponseEntity<ChatResponse, T> g = ChatClient.create(cm).prompt()
+                        .options(ChatOptions.builder().model(m))
+                        .system(system).user(user).call().responseEntity(type);
+                return new Out<>(g.entity(), toUsage(g.response()));
+            });
+            Out<T> r = a.value();
+            com.projectv.media.MediaTypes.Usage usage = r.usage();
+            if (NvidiaChat.handles(a.model())) {
+                // NVIDIA's hosted catalog is free: record the call (₹0) so every call stays in the ledger.
+                ledger.record(videoId, "nvidia", BigDecimal.ZERO, BigDecimal.valueOf(usage.totalTokens()),
+                        "tokens", true, purpose + " (" + a.model() + ")");
+            } else {
+                ledger.record(videoId, BudgetGuard.GEMINI, pricing.textInr(usage), BigDecimal.valueOf(usage.totalTokens()),
+                        "tokens", true, purpose + " (" + a.model() + ")");
+            }
             if (r.entity() == null) {
                 throw new IllegalStateException(purpose + ": the model returned no parsable result");
             }
