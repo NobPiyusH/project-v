@@ -13,7 +13,8 @@
 - Wan 2.2 I2V A14B + lightx2v 4-step LoRAs (Apache-2.0) deployed as Modal app `projectv-wan`; weights cached in volume `projectv-hf-cache` (~160 GB incl. Z-Image).
 - Benchmark 1 (star video `8fb917af-…`, shots 1/14/16/41, 720p 81 frames @16fps): **fast ≈ 115 s/clip, standard (30 steps) ≈ 1141 s/clip**, model load 77 s, total ≈ $1.9 Modal credit.
 - Owner verdict: **"needs better quality."** Diagnosis: fast mode softens/mushes detail late in clip; encoding was 1.5 Mbps (fixed → CRF 12); 16 fps stutter (fix in finishing: RIFE → 24 fps, SeedVR2-class 4K upscale).
-- Benchmark 2 was running at hand-off: shots 1 & 14 in `fast` (HQ encode) and new `hybrid` (full model + CFG on high-noise expert, LoRA only on low-noise, 12 steps). Output dir was the scratchpad (`…/scratchpad/wanbench2`) — likely lost; re-run:
+- Benchmark 2 RESULT: fast(HQ) ≈ 120 s/clip, **hybrid ≈ 483 s/clip (~4× fast, ~2.4× cheaper than standard)**; total ≈ $1.4. Reel was sent to the owner — get their verdict on hybrid vs fast vs standard.
+- (Benchmark 2 setup, for re-runs:) shots 1 & 14 in `fast` (HQ encode) and new `hybrid` (full model + CFG on high-noise expert, LoRA only on low-noise, 12 steps). Output dir was the scratchpad (`…/scratchpad/wanbench2`) — likely lost; re-run:
   `uv run python -m workers.bench.wan_benchmark 8fb917af-8033-4581-9ec0-042652cbfed0 <outDir> 1,14 fast,hybrid`
   then show the owner the reel side by side with the earlier standard clip.
 - Projected cost (fast, 1 take/shot): 4-min ≈ $7, 10-min ≈ $16 on H100. Planned speedups: no CPU offload on H100, parallel containers, per-clip jobs.
