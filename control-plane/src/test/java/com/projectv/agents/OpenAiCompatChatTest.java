@@ -31,4 +31,12 @@ class OpenAiCompatChatTest {
         }
         throw new AssertionError("expected an error");
     }
+
+    @Test
+    void cutOffOrBrokenAnswersCountAsModelProblems() {
+        assertTrue(ModelFallback.isModelProblem(
+                new IllegalStateException("unavailable: groq:x answer was cut off (token limit)")));
+        assertTrue(ModelFallback.isModelProblem(
+                new IllegalStateException("unavailable: groq:x returned an unreadable answer (X)")));
+    }
 }
