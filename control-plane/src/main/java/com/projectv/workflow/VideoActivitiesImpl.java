@@ -41,13 +41,15 @@ public class VideoActivitiesImpl implements VideoActivities {
     private final com.projectv.production.VideoStage video;
     private final com.projectv.video.ClipProgress clipProgress;
     private final com.projectv.production.FootageStage footage;
+    private final com.projectv.production.AssemblyStage assembly;
 
     public VideoActivitiesImpl(JdbcClient jdbc, Planner planner, CostLedger ledger, ObjectMapper json,
                                ProductionService production, Pricing pricing,
                                com.projectv.production.Inspector inspector,
                                com.projectv.production.CreativeDirector creative,
                                com.projectv.production.VideoStage video, com.projectv.video.ClipProgress clipProgress,
-                               com.projectv.production.FootageStage footage) {
+                               com.projectv.production.FootageStage footage,
+                               com.projectv.production.AssemblyStage assembly) {
         this.jdbc = jdbc;
         this.planner = planner;
         this.ledger = ledger;
@@ -59,6 +61,17 @@ public class VideoActivitiesImpl implements VideoActivities {
         this.video = video;
         this.clipProgress = clipProgress;
         this.footage = footage;
+        this.assembly = assembly;
+    }
+
+    @Override
+    public com.projectv.media.MediaTypes.AssemblyRequest assemblyRequest(String videoId) {
+        return assembly.assemblyRequest(UUID.fromString(videoId));
+    }
+
+    @Override
+    public StageResult saveMaster(String videoId, com.projectv.media.MediaTypes.AssemblyResult result) {
+        return assembly.saveMaster(UUID.fromString(videoId), result);
     }
 
     @Override

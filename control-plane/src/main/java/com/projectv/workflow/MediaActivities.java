@@ -53,6 +53,10 @@ public interface MediaActivities {
     @ActivityMethod(name = "fetch_footage")
     com.projectv.media.MediaTypes.FootageFetchResult fetchFootage(com.projectv.media.MediaTypes.FootageFetchRequest request);
 
+    /** M2c part 1: the edit, mix, captions and Premiere package (local CPU, free). */
+    @ActivityMethod(name = "assemble_video")
+    com.projectv.media.MediaTypes.AssemblyResult assembleVideo(com.projectv.media.MediaTypes.AssemblyRequest request);
+
     /** Inspector file checks (Whisper, FFmpeg, image statistics). Free to run; reports findings, changes nothing. */
     @ActivityMethod(name = "inspect_media")
     com.projectv.media.MediaTypes.MediaInspectResult inspectMedia(com.projectv.media.MediaTypes.MediaInspectRequest request);

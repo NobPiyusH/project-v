@@ -282,7 +282,7 @@ def check_clips(req: dict, tmp: Path) -> tuple[list[dict], list[str]]:
 
 
 CHECKS = {"NARRATION": [check_narration], "MUSIC": [check_music], "KEYFRAMES": [check_images],
-          "ANIMATIC": [check_video], "DRAFT_GEN": [check_clips], "FINAL_GEN": [check_clips]}
+          "ANIMATIC": [check_video], "ASSEMBLY": [check_video], "DRAFT_GEN": [check_clips], "FINAL_GEN": [check_clips]}
 
 
 @activity.defn(name="inspect_media")

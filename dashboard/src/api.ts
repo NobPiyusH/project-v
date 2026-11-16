@@ -71,6 +71,9 @@ export interface VideoDetail extends VideoSummary {
   stageRuns: StageRun[]
   costs: CostRow[]
   inspections: Inspection[]
+  master_asset_id: string | null
+  master_package_asset_id: string | null
+  master_captions_asset_id: string | null
   creativeReviews: CreativeReport[]
 }
 

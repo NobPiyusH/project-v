@@ -84,11 +84,13 @@ textarea, input[type=text] {
 }
 textarea:focus, input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
 
-button {
+button, a.button {
   font: inherit; font-weight: 600; cursor: pointer; border-radius: 8px; padding: 7px 14px;
   border: 1px solid var(--border); background: var(--surface-2); color: var(--text);
 }
 button:hover:not(:disabled) { filter: brightness(0.97); }
+a.button { display: inline-block; text-decoration: none; }
+a.button:hover { filter: brightness(0.97); }
 button:disabled { opacity: 0.5; cursor: default; }
 button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
 button.danger { color: var(--bad); }

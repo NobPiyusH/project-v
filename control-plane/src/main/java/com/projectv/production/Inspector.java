@@ -33,7 +33,7 @@ public class Inspector extends StageSupport {
 
     /** Stages the Inspector looks at. PLAN and CONCEPT have no hard rules yet; finishing stages arrive with M2c. */
     public static final Set<Stage> INSPECTED = EnumSet.of(Stage.RESEARCH, Stage.SCRIPT, Stage.MUSIC, Stage.NARRATION,
-            Stage.SHOT_PLAN, Stage.KEYFRAMES, Stage.ANIMATIC, Stage.DRAFT_GEN, Stage.FINAL_GEN);
+            Stage.SHOT_PLAN, Stage.KEYFRAMES, Stage.ANIMATIC, Stage.DRAFT_GEN, Stage.FINAL_GEN, Stage.ASSEMBLY);
 
     /** Stages whose findings name shots, so a FAIL can be fixed by redoing only those shots. */
     public static final Set<Stage> PER_SHOT = EnumSet.of(Stage.KEYFRAMES, Stage.DRAFT_GEN, Stage.FINAL_GEN);
@@ -42,7 +42,7 @@ public class Inspector extends StageSupport {
     static final double MAX_GAP_SEC = 2.5;
 
     private static final Set<Stage> MEDIA = EnumSet.of(Stage.NARRATION, Stage.MUSIC, Stage.KEYFRAMES, Stage.ANIMATIC,
-            Stage.DRAFT_GEN, Stage.FINAL_GEN);
+            Stage.DRAFT_GEN, Stage.FINAL_GEN, Stage.ASSEMBLY);
 
     public Inspector(ProductionDeps d) {
         super(d);
@@ -82,6 +82,12 @@ public class Inspector extends StageSupport {
             case ANIMATIC -> {
                 videoUri = jdbc.sql("""
                                 SELECT a.uri_hot FROM video v JOIN asset a ON a.id = v.animatic_asset_id WHERE v.id = :v
+                                """).param("v", videoId).query(String.class).optional().orElse(null);
+                speechEnd = script == null ? null : speechEnd(script);
+            }
+            case ASSEMBLY -> {
+                videoUri = jdbc.sql("""
+                                SELECT a.uri_hot FROM video v JOIN asset a ON a.id = v.master_asset_id WHERE v.id = :v
                                 """).param("v", videoId).query(String.class).optional().orElse(null);
                 speechEnd = script == null ? null : speechEnd(script);
             }
@@ -189,6 +195,8 @@ public class Inspector extends StageSupport {
             case SHOT_PLAN -> shotPlan(plan, script, shots(videoId));
             case KEYFRAMES -> keyframes(shots(videoId));
             case ANIMATIC -> animatic(videoId, script);
+            case ASSEMBLY -> jdbc.sql("SELECT master_asset_id IS NOT NULL FROM video WHERE id = :v").param("v", videoId)
+                    .query(Boolean.class).single() ? List.of() : List.of(fail("NO_MASTER", "No master was stored.", "video"));
             case DRAFT_GEN -> missingClips(clipShots(videoId), true);
             case FINAL_GEN -> missingClips(clipShots(videoId), false);
             default -> List.of();

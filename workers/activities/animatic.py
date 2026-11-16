@@ -7,6 +7,7 @@ from pathlib import Path
 
 from temporalio import activity
 
+from workers.activities.mixing import mix_audio
 from workers.common import download, media_duration, put_file, run_ffmpeg, workdir
 
 FPS = 30
@@ -57,39 +58,9 @@ def render_animatic(req: dict) -> dict:
         run_ffmpeg(["-f", "concat", "-safe", "0", "-i", str(concat_list), "-c", "copy", str(picture)])
         total = media_duration(picture)
 
-        # 2. Audio: narration lines placed at their start times; music ducked under the voice.
-        inputs, filters, labels = [], [], []
-        for i, line in enumerate(req.get("narration") or []):
-            p = download(line["uri"], tmp / f"n{i}.wav")
-            inputs += ["-i", str(p)]
-            ms = int(float(line["startSec"]) * 1000)
-            tempo = float(line.get("tempo") or 1.0)
-            speed = f",atempo={tempo:.3f}" if abs(tempo - 1.0) > 1e-3 else ""
-            filters.append(f"[{i}:a]aresample=48000,aformat=channel_layouts=stereo{speed},adelay={ms}|{ms}[n{i}]")
-            labels.append(f"[n{i}]")
-        n_voice = len(labels)
-        audio = tmp / "audio.wav"
-        music_uri = req.get("musicUri")
-        if n_voice:
-            filters.append(f"{''.join(labels)}amix=inputs={n_voice}:normalize=0,apad,atrim=0:{total:.3f}[voice]")
-        if music_uri:
-            m = download(music_uri, tmp / "music.wav")
-            inputs += ["-i", str(m)]
-            mi = n_voice
-            if n_voice:
-                filters.append("[voice]asplit=2[v1][v2]")
-                filters.append(f"[{mi}:a]aresample=48000,apad,atrim=0:{total:.3f},volume=0.9[mus]")
-                filters.append("[mus][v2]sidechaincompress=threshold=0.03:ratio=8:attack=20:release=400[ducked]")
-                filters.append("[ducked][v1]amix=inputs=2:normalize=0[mix]")
-            else:
-                filters.append(f"[{mi}:a]aresample=48000,apad,atrim=0:{total:.3f}[mix]")
-            out_label = "[mix]"
-        else:
-            out_label = "[voice]" if n_voice else None
-
-        if out_label:
-            filters.append(f"{out_label}loudnorm=I=-16:TP=-1.5:LRA=11[out]")
-            run_ffmpeg([*inputs, "-filter_complex", ";".join(filters), "-map", "[out]", "-ar", "48000", str(audio)])
+        # 2. Audio: narration at its start times, music ducked under the voice (shared with the master).
+        audio = mix_audio(req.get("narration") or [], req.get("musicUri"), total, tmp, tmp / "audio.wav")
+        if audio is not None:
             final = tmp / "animatic.mp4"
             run_ffmpeg(["-i", str(picture), "-i", str(audio), "-map", "0:v", "-map", "1:a", "-c:v", "copy",
                         "-c:a", "aac", "-b:a", "192k", "-shortest", "-movflags", "+faststart", str(final)])

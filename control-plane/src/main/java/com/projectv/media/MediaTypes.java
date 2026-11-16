@@ -1,6 +1,7 @@
 package com.projectv.media;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * Requests/results exchanged with the Python media worker. Field names are the JSON contract with
@@ -185,5 +186,24 @@ public final class MediaTypes {
     /** @param upscale how much the cropped source had to be enlarged to fill the frame (1.0 = native, >1.5 = soft) */
     public record FootageFetchResult(String uri, int width, int height, double durationSec, int sourceWidth,
                                      int sourceHeight, Double upscale, double startSec, String sourceUrl) {
+    }
+
+    // ---- M2c part 1: assembly (the edit)
+
+    /** @param kind footage | final | draft (which clip the shot uses) */
+    public record AssemblyShot(int n, String uri, String kind, double startSec, double durationSec, String overlayText) {
+    }
+
+    public record AssemblyLine(String uri, double startSec, double tempo, String text, double durationSec) {
+    }
+
+    public record AssemblyRequest(String videoId, String title, String aspectRatio, String language, boolean captions,
+                                  List<AssemblyShot> shots, List<AssemblyLine> narration, String musicUri, double totalSec) {
+    }
+
+    /** @param fits per shot: which clip, its length, how it was fitted (trimmed / slowed) */
+    public record AssemblyResult(String masterUri, String packageUri, String srtUri, double durationSec, int width,
+                                 int height, int fps, List<Map<String, Object>> fits, int captionChunks,
+                                 int linesTimedByWhisper) {
     }
 }

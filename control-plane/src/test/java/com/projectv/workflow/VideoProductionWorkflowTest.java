@@ -207,6 +207,19 @@ class VideoProductionWorkflowTest {
             events.add("CLIPS:" + shotIds + ":" + status);
         }
 
+        // ---- M2c assembly
+        @Override
+        public com.projectv.media.MediaTypes.AssemblyRequest assemblyRequest(String videoId) {
+            return new com.projectv.media.MediaTypes.AssemblyRequest(videoId, "t", "9:16", "en", true, List.of(),
+                    List.of(), null, 1);
+        }
+
+        @Override
+        public StageResult saveMaster(String videoId, com.projectv.media.MediaTypes.AssemblyResult result) {
+            events.add("MASTER:" + result.masterUri());
+            return StageResult.of("master", "{}");
+        }
+
         // ---- NASA footage
         volatile int footageQueries;
 
@@ -313,6 +326,12 @@ class VideoProductionWorkflowTest {
         volatile boolean failVoice;
 
         volatile boolean failInspector;
+
+        @Override
+        public com.projectv.media.MediaTypes.AssemblyResult assembleVideo(com.projectv.media.MediaTypes.AssemblyRequest request) {
+            return new com.projectv.media.MediaTypes.AssemblyResult("s3://b/master.mp4", "s3://b/p.zip", null, 1, 1080, 1920,
+                    30, List.of(), 0, 0);
+        }
 
         @Override
         public com.projectv.media.MediaTypes.FootageSearchResponse searchFootage(
@@ -434,6 +453,7 @@ class VideoProductionWorkflowTest {
         assertTrue(activities.events.contains("RESEARCH:0:SKIPPED"));
         assertTrue(activities.events.contains("MUSIC:0:SKIPPED"));
         assertTrue(activities.events.contains("PUBLISH:1:AUTO_PASSED"));
+        assertTrue(activities.events.contains("MASTER:s3://b/master.mp4"), "assembly renders the master");
         assertEquals("VIDEO:COMPLETED", activities.events.getLast());
     }
 

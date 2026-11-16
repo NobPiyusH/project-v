@@ -417,6 +417,9 @@ public class VideoProductionWorkflowImpl implements VideoProductionWorkflow {
             default:
                 break;
         }
+        if (stage == Stage.ASSEMBLY && assemblyEnabled()) {
+            return activities.saveMaster(videoId, media.assembleVideo(activities.assemblyRequest(videoId)));
+        }
         StageResult result = activities.runStage(videoId, stage, notes, attempt);
         if (stage == Stage.ASSEMBLY) {
             // M1: prove the polyglot path (Java workflow -> Python activity). Real assembly arrives in M2.
@@ -471,6 +474,11 @@ public class VideoProductionWorkflowImpl implements VideoProductionWorkflow {
         List<Finding> findings = new ArrayList<>(files == null || files.findings() == null ? List.of() : files.findings());
         findings.addAll(more);
         return new MediaInspectResult(findings, files == null || files.checked() == null ? List.of() : files.checked());
+    }
+
+    /** Workflows started before M2c replay the old placeholder Assembly (Temporal determinism). */
+    private boolean assemblyEnabled() {
+        return Workflow.getVersion("assembly", Workflow.DEFAULT_VERSION, 1) != Workflow.DEFAULT_VERSION;
     }
 
     /** Workflows started before real footage existed replay the old placeholder Library match (determinism). */

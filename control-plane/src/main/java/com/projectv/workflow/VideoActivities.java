@@ -114,6 +114,13 @@ public interface VideoActivities {
     StageResult saveFootage(String videoId, com.projectv.media.MediaTypes.FootageFetchRequest request,
                             com.projectv.media.MediaTypes.FootageFetchResult result);
 
+    // ---- M2c part 1: assembly
+
+    /** Fails (non-retryable for the owner to act on) when a shot has no moving video yet. */
+    com.projectv.media.MediaTypes.AssemblyRequest assemblyRequest(String videoId);
+
+    StageResult saveMaster(String videoId, com.projectv.media.MediaTypes.AssemblyResult result);
+
     /** Upsert the stage_run row and the video's status / current stage. */
     void recordStage(String videoId, Stage stage, int attempt, StageMode mode, String status,
                      String summary, String artifactJson, String ownerNotes);

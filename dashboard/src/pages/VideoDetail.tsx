@@ -1,5 +1,5 @@
 import { Fragment, useState } from 'react'
-import { api, type Inspection, type Mode, type StageInfo, type StageRun, type VideoDetail as Detail } from '../api'
+import { api, assetUrl, type Inspection, type Mode, type StageInfo, type StageRun, type VideoDetail as Detail } from '../api'
 import { Countdown, ModeSwitch, StatusBadge } from '../components'
 import { fmtTime, usePoll } from '../hooks'
 import { CreativeCard } from './CreativeCard'
@@ -63,6 +63,8 @@ export function VideoDetail({ id, stages }: { id: string; stages: StageInfo[] })
         </div>
         {actionError && <p className="error">{actionError}</p>}
       </section>
+
+      <MasterCard video={video} />
 
       <PlanCard video={video} />
 
@@ -217,6 +219,34 @@ function InspectorPanel({ report }: { report: Inspection }) {
         </ul>
       )}
     </div>
+  )
+}
+
+/** The finished edit: watch it, download it, or take it into Premiere for hand fine-tuning. */
+function MasterCard({ video }: { video: Detail }) {
+  if (!video.master_asset_id) return null
+  const vertical = (video.plan_json ?? '').includes('"9:16"')
+  return (
+    <section className="card">
+      <div className="card-head">
+        <h2>Master</h2>
+        <span className="pill">Rough cut: smooth motion and upscaling come in finishing</span>
+      </div>
+      <video key={video.master_asset_id} className="player" src={assetUrl(video.master_asset_id)} controls preload="metadata"
+        style={vertical ? { maxHeight: 640, width: 'auto', margin: '0 auto', display: 'block' } : undefined} />
+      <div className="row" style={{ marginTop: 8 }}>
+        <a className="button" href={assetUrl(video.master_asset_id)} download="master.mp4">Download MP4</a>
+        {video.master_package_asset_id && (
+          <a className="button" href={assetUrl(video.master_package_asset_id)} download="premiere_package.zip"
+            title="Unzip, then in Premiere Pro: File > Import > project.xml (keep the media folder next to it)">
+            Premiere package
+          </a>
+        )}
+        {video.master_captions_asset_id && (
+          <a className="button" href={assetUrl(video.master_captions_asset_id)} download="captions.srt">Captions (SRT)</a>
+        )}
+      </div>
+    </section>
   )
 }
 

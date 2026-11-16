@@ -31,18 +31,19 @@ public class VideoService {
      * What must be redone together, so outputs never go stale: e.g. a new script needs a new voice, new shots,
      * new keyframes and a new animatic; a new voice only needs a new animatic.
      */
-    public static final Map<Stage, List<Stage>> REDO_WITH = Map.of(
-            Stage.RESEARCH, List.of(Stage.RESEARCH),
-            Stage.CONCEPT, List.of(Stage.CONCEPT),
-            Stage.SCRIPT, List.of(Stage.SCRIPT, Stage.NARRATION, Stage.SHOT_PLAN, Stage.KEYFRAMES, Stage.ANIMATIC),
-            Stage.MUSIC, List.of(Stage.MUSIC, Stage.ANIMATIC),
-            Stage.NARRATION, List.of(Stage.NARRATION, Stage.ANIMATIC),
-            Stage.SHOT_PLAN, List.of(Stage.SHOT_PLAN, Stage.KEYFRAMES, Stage.ANIMATIC),
-            Stage.KEYFRAMES, List.of(Stage.KEYFRAMES, Stage.ANIMATIC),
-            Stage.ANIMATIC, List.of(Stage.ANIMATIC),
+    public static final Map<Stage, List<Stage>> REDO_WITH = Map.ofEntries(
+            Map.entry(Stage.RESEARCH, List.of(Stage.RESEARCH)),
+            Map.entry(Stage.CONCEPT, List.of(Stage.CONCEPT)),
+            Map.entry(Stage.SCRIPT, List.of(Stage.SCRIPT, Stage.NARRATION, Stage.SHOT_PLAN, Stage.KEYFRAMES, Stage.ANIMATIC)),
+            Map.entry(Stage.MUSIC, List.of(Stage.MUSIC, Stage.ANIMATIC)),
+            Map.entry(Stage.NARRATION, List.of(Stage.NARRATION, Stage.ANIMATIC)),
+            Map.entry(Stage.SHOT_PLAN, List.of(Stage.SHOT_PLAN, Stage.KEYFRAMES, Stage.ANIMATIC)),
+            Map.entry(Stage.KEYFRAMES, List.of(Stage.KEYFRAMES, Stage.ANIMATIC)),
+            Map.entry(Stage.ANIMATIC, List.of(Stage.ANIMATIC)),
             // Clips cost GPU money: each runs alone, after showing its estimate (finals follow drafts on request).
-            Stage.DRAFT_GEN, List.of(Stage.DRAFT_GEN),
-            Stage.FINAL_GEN, List.of(Stage.FINAL_GEN));
+            Map.entry(Stage.DRAFT_GEN, List.of(Stage.DRAFT_GEN)),
+            Map.entry(Stage.FINAL_GEN, List.of(Stage.FINAL_GEN)),
+            Map.entry(Stage.ASSEMBLY, List.of(Stage.ASSEMBLY)));
 
     private final JdbcClient jdbc;
     private final WorkflowClient temporal;
@@ -210,7 +211,8 @@ public class VideoService {
     public Map<String, Object> detail(UUID id) {
         Map<String, Object> video = jdbc.sql("""
                         SELECT id, title, prompt, status, current_stage, spent_inr, workflow_id, created_at, updated_at,
-                               plan_json::text AS plan_json, modes_json::text AS modes_json, review_minutes
+                               plan_json::text AS plan_json, modes_json::text AS modes_json, review_minutes,
+                               master_asset_id, master_package_asset_id, master_captions_asset_id
                         FROM video WHERE id = :id
                         """)
                 .param("id", id).query().listOfRows().stream().findFirst()

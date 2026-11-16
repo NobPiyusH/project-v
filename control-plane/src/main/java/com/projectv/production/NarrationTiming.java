@@ -43,6 +43,37 @@ public final class NarrationTiming {
     /** Breath lengths a Short may fall back to (before speeding the voice up any further). */
     private static final double[] SHORT_GAPS = {GAP, 0.35, 0.25};
 
+    /** A voiced line and where it is heard on the timeline. */
+    public record Placed(ProductionService.StoredLine line, double startSec, double endSec) {
+    }
+
+    /**
+     * Where each voiced line is heard (animatic and master use the same rule): the shot plan's planned start, pushed
+     * later only when the line before it (re-voiced longer since) is still speaking. Lines without a planned start
+     * use {@code fallback} (e.g. their first shot's start).
+     */
+    public static java.util.List<Placed> place(ProductionService.StoredScript script, Map<Integer, Double> fallback) {
+        java.util.List<Placed> out = new java.util.ArrayList<>();
+        if (script == null) {
+            return out;
+        }
+        Map<String, Double> planned = script.lineStarts() == null ? Map.of() : script.lineStarts();
+        double tempo = script.tempo() == null ? 1.0 : script.tempo();
+        double prevEnd = 0;
+        for (ProductionService.StoredLine l : script.lines()) {
+            if (!l.spoken() || l.audioUri() == null) {
+                continue;
+            }
+            Double want = planned.get(String.valueOf(l.index()));
+            double start = want != null ? Math.max(want, prevEnd + 0.15)
+                    : Math.max(fallback.getOrDefault(l.index(), prevEnd + 0.4), prevEnd + 0.25);
+            double end = start + (l.durationSec() == null ? 0 : l.durationSec() / tempo);
+            out.add(new Placed(l, Math.round(start * 1000) / 1000.0, end));
+            prevEnd = end;
+        }
+        return out;
+    }
+
     public static Result plan(List<Line> lines, double targetSec, boolean isShort) {
         double tempo = 1.0;
         Layout layout = layout(lines, tempo, GAP);

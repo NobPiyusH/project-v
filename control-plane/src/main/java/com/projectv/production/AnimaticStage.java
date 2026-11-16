@@ -56,19 +56,11 @@ public class AnimaticStage extends StageSupport {
         }
         List<AnimaticLine> narration = new ArrayList<>();
         StoredScript script = latestScript(videoId).orElse(null);
-        Map<String, Double> planned = script == null || script.lineStarts() == null ? Map.of() : script.lineStarts();
         double tempo = script == null || script.tempo() == null ? 1.0 : script.tempo();
         double prevEnd = 0;
-        for (StoredLine l : script == null ? List.<StoredLine>of() : script.lines()) {
-            if (!l.spoken() || l.audioUri() == null) {
-                continue;
-            }
-            // Planned start from the shot plan; only a line re-voiced longer since then can push the next one.
-            Double want = planned.get(String.valueOf(l.index()));
-            double start = want != null ? Math.max(want, prevEnd + 0.15)
-                    : Math.max(lineStart.getOrDefault(l.index(), prevEnd + 0.4), prevEnd + 0.25);
-            narration.add(new AnimaticLine(l.audioUri(), round(start), tempo));
-            prevEnd = start + (l.durationSec() == null ? 0 : l.durationSec() / tempo);
+        for (NarrationTiming.Placed p : NarrationTiming.place(script, lineStart)) {
+            narration.add(new AnimaticLine(p.line().audioUri(), round(p.startSec()), tempo));
+            prevEnd = p.endSec();
         }
         // Never cut words: if the voice runs past the pictures, hold the last shot longer.
         double needed = prevEnd + NarrationTiming.TAIL;

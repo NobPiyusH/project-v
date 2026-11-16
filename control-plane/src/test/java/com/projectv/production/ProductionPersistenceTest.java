@@ -52,6 +52,7 @@ class ProductionPersistenceTest {
     static CreativeDirector creative;
     static VideoStage clips;
     static FootageStage footage;
+    static AssemblyStage assembly;
     static BudgetGuard budget;
 
     UUID video;
@@ -72,6 +73,7 @@ class ProductionPersistenceTest {
         creative = new CreativeDirector(deps, null, "gemini-3.6-flash");
         clips = new VideoStage(deps, "projectv-wan", "Wan", "http://127.0.0.1:8080", BigDecimal.ZERO, 2);
         footage = new FootageStage(deps);
+        assembly = new AssemblyStage(deps);
     }
 
     @BeforeEach
@@ -123,7 +125,7 @@ class ProductionPersistenceTest {
     @Test
     void allMigrationsApplyAndLicencesAreSeeded() {
         assertEquals(5, jdbc.sql("SELECT count(*) FROM licence").query(Integer.class).single());
-        assertEquals(8, jdbc.sql("SELECT count(*) FROM flyway_schema_history WHERE success").query(Integer.class).single());
+        assertEquals(9, jdbc.sql("SELECT count(*) FROM flyway_schema_history WHERE success").query(Integer.class).single());
     }
 
     @Test
@@ -300,6 +302,46 @@ class ProductionPersistenceTest {
         assertEquals("s3://b/h2.mp4", jdbc.sql("SELECT uri_hot FROM asset WHERE id = :a").param("a", inUse)
                 .query(String.class).single(), "take 1 failed, so take 2 is the one in use");
         assertEquals(1, clips.estimate(video, VideoStage.FINAL, null).clips() - 1, "finals: one per shot, not per take");
+    }
+
+    private UUID videoAsset(UUID shot, String kind, String uri) {
+        UUID a = UUID.randomUUID();
+        jdbc.sql("INSERT INTO asset (id, video_id, kind, uri_hot, shot_id, clip_kind) VALUES (:a, :v, 'video', :u, :s, :k)")
+                .param("a", a).param("v", video).param("u", uri).param("s", shot).param("k", kind).update();
+        return a;
+    }
+
+    @Test
+    void theMasterUsesFootageThenFinalThenDraftAndRefusesShotsWithoutVideo() {
+        UUID s1 = shotWithKeyframe(0, 3.0);
+        UUID s2 = shotWithKeyframe(1, 3.0);
+        jdbc.sql("UPDATE shot SET prompt_json = CAST('{\"startSec\": 3.0, \"lineIndex\": 0}' AS jsonb) WHERE id = :s")
+                .param("s", s2).update();
+        UUID draft1 = videoAsset(s1, "draft", "s3://b/d1.mp4");
+        jdbc.sql("UPDATE shot SET draft_clip_asset_id = :a WHERE id = :s").param("a", draft1).param("s", s1).update();
+        var refused = assertThrows(IllegalStateException.class, () -> assembly.assemblyRequest(video));
+        assertTrue(refused.getMessage().startsWith("1 shot has no moving video yet (shot 2)"), refused.getMessage());
+
+        UUID draft2 = videoAsset(s2, "draft", "s3://b/d2.mp4");
+        UUID final2 = videoAsset(s2, "final", "s3://b/f2.mp4");
+        UUID nasa1 = videoAsset(s1, "footage", "s3://b/nasa1.mp4");
+        jdbc.sql("UPDATE shot SET draft_clip_asset_id = :d, final_clip_asset_id = :f WHERE id = :s")
+                .param("d", draft2).param("f", final2).param("s", s2).update();
+        jdbc.sql("UPDATE shot SET footage_asset_id = :a WHERE id = :s").param("a", nasa1).param("s", s1).update();
+        var req = assembly.assemblyRequest(video);
+        assertEquals(List.of("footage:s3://b/nasa1.mp4", "final:s3://b/f2.mp4"),
+                req.shots().stream().map(x -> x.kind() + ":" + x.uri()).toList());
+        assertEquals("9:16", req.aspectRatio());
+
+        var saved = assembly.saveMaster(video, new com.projectv.media.MediaTypes.AssemblyResult("s3://b/master.mp4",
+                "s3://b/pkg.zip", "s3://b/c.srt", 6.0, 1080, 1920, 30,
+                List.of(Map.of("shot", 1, "fit", "trimmed"), Map.of("shot", 2, "fit", "slowed 1.80x (looks slow-motion)")), 4, 1));
+        assertTrue(saved.summary().contains("1 shot slowed to fill its slot (1 noticeably)"), saved.summary());
+        assertEquals(1, jdbc.sql("""
+                        SELECT count(*) FROM video v JOIN asset m ON m.id = v.master_asset_id
+                        JOIN asset p ON p.id = v.master_package_asset_id JOIN asset c ON c.id = v.master_captions_asset_id
+                        WHERE v.id = :v AND p.kind = 'timeline' AND c.kind = 'subtitle'
+                        """).param("v", video).query(Integer.class).single());
     }
 
     @Test
