@@ -127,7 +127,7 @@ function ClipTile({ shot: s, selected, onToggle, busy, onKeepDraft, showTakes, o
             : s.final_clip_asset_id ? <span className="badge b-ok">final</span> : s.draft_clip_asset_id ? <span className="badge b-info">draft</span> : null}
           {s.priority === 'hero' && <span className="badge b-warn">hero</span>}
           {(s.draft_clip_asset_id || s.final_clip_asset_id) && (
-            <button className="small" style={{ padding: '1px 6px' }} onClick={onTakes}>{showTakes ? 'Hide takes' : 'Takes'}</button>
+            <button className="small" style={{ padding: '1px 6px' }} onClick={onTakes}>{showTakes ? 'Hide takes' : s.priority === 'hero' ? 'Compare takes' : 'Takes'}</button>
           )}
         </div>
         {s.clip_status === 'FAILED' && <div className="small error">Clip failed: {s.clip_error}</div>}
@@ -144,20 +144,34 @@ function ClipTile({ shot: s, selected, onToggle, busy, onKeepDraft, showTakes, o
   )
 }
 
+/**
+ * Every take of a shot side by side, all playing together, so motion can be compared at a glance (hero shots get
+ * two draft takes by default). Picking one is free: nothing is regenerated.
+ */
 function Takes({ shotId, onSelect }: { shotId: string; onSelect: (assetId: string) => void }) {
   const { data } = usePoll<ClipVersion[]>(() => api.clipVersions(shotId), 10000, [shotId])
   if (!data) return <div className="muted small">Loading takes…</div>
+  const playAll = () => document.querySelectorAll<HTMLVideoElement>(`[data-takes="${shotId}"] video`).forEach((v) => {
+    v.currentTime = 0
+    void v.play()
+  })
   return (
-    <div style={{ display: 'grid', gap: 6, marginTop: 6 }}>
-      {data.map((v) => (
-        <div key={v.id} className="row small">
-          <video src={assetUrl(v.id)} muted playsInline preload="metadata" style={{ width: 96 }} controls />
-          <span>{v.kind}</span>
-          <span className="muted">{new Date(v.created_at).toLocaleString()}</span>
-          {v.active ? <span className="badge b-ok">in use</span>
-            : <button className="small" style={{ padding: '1px 6px' }} onClick={() => onSelect(v.id)}>Use this</button>}
-        </div>
-      ))}
+    <div style={{ marginTop: 6 }}>
+      {data.length > 1 && (
+        <button className="small" style={{ padding: '1px 6px', marginBottom: 6 }} onClick={playAll}>Play all together</button>
+      )}
+      <div data-takes={shotId} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 8 }}>
+        {data.map((v, i) => (
+          <div key={v.id} className="small" style={{ display: 'grid', gap: 4 }}>
+            <video src={assetUrl(v.id)} muted loop playsInline preload="metadata" controls style={{ width: '100%' }} />
+            <div className="row">
+              <span>{v.kind} {data.length - i}</span>
+              {v.active ? <span className="badge b-ok">in use</span>
+                : <button className="small" style={{ padding: '1px 6px' }} onClick={() => onSelect(v.id)}>Use this</button>}
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }

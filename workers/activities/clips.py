@@ -87,7 +87,7 @@ def _report(base: str, video_id: str, waiting: list, clips: list[dict], progress
 
 def _parallel(wan, progress, base: str, video_id: str, jobs: list) -> tuple[list[dict], bool]:
     """One Modal call per clip on up to 4 GPUs."""
-    pending = {j["shotId"]: (j, key, wan.generate_one.spawn(payload)) for j, key, payload in jobs}
+    pending = {key: (j, key, wan.generate_one.spawn(payload)) for j, key, payload in jobs}  # one entry per take
     clips: list[dict] = []
     try:
         while pending:
@@ -99,14 +99,14 @@ def _parallel(wan, progress, base: str, video_id: str, jobs: list) -> tuple[list
                         log.warning("cancel %s failed: %s", key, e)
                     clips.append(_stopped(j))
                 return clips, True
-            for shot_id, (j, key, call) in list(pending.items()):
+            for pkey, (j, key, call) in list(pending.items()):
                 try:
                     r = call.get(timeout=0)
                 except Exception as e:  # noqa: BLE001
                     if _not_ready(e):
                         continue
                     r = {"mp4": None, "seconds": 0, "error": f"{type(e).__name__}: {e}"[:600]}
-                del pending[shot_id]
+                del pending[pkey]
                 clips.append(_clip(video_id, j, r))
             _report(base, video_id, [(j, key) for j, key, _ in pending.values()], clips, progress, len(jobs))
             if pending:

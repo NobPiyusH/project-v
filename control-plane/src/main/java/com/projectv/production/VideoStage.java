@@ -49,17 +49,20 @@ public class VideoStage extends StageSupport {
     private final String wanClass;
     private final String publicUrl;
     private final BigDecimal autoApproveInr;
+    private final int heroTakes;
 
     public VideoStage(ProductionDeps d,
                       @Value("${projectv.video.modal-app:projectv-wan}") String wanApp,
                       @Value("${projectv.video.modal-class:Wan}") String wanClass,
                       @Value("${projectv.public-url:http://127.0.0.1:8080}") String publicUrl,
-                      @Value("${projectv.video.auto-approve-inr:0}") BigDecimal autoApproveInr) {
+                      @Value("${projectv.video.auto-approve-inr:0}") BigDecimal autoApproveInr,
+                      @Value("${projectv.video.hero-draft-takes:2}") int heroTakes) {
         super(d);
         this.wanApp = wanApp;
         this.wanClass = wanClass;
         this.publicUrl = publicUrl;
         this.autoApproveInr = autoApproveInr;
+        this.heroTakes = Math.max(1, Math.min(4, heroTakes));
     }
 
     // ------------------------------------------------------------------------------------------- estimate & request
@@ -119,10 +122,15 @@ public class VideoStage extends StageSupport {
                     java.util.Objects.toString(p.get("motionPrompt"), "").strip(),
                     java.util.Objects.toString(s.get("description"), "").strip(),
                     "Visual style: " + preset.visualStyle())).replaceAll("^(\\. )+", "");
-            int take = ((Number) s.get(draft ? "draft_takes" : "final_takes")).intValue() + 1;
-            jobs.add(new ClipJob(id, ((Number) s.get("ord")).intValue() + 1, take, kind, draft ? "fast" : "hybrid",
-                    (String) s.get("keyframe_uri"), prompt, vertical ? shortSide : longSide, vertical ? longSide : shortSide,
-                    frames(num(s.get("duration_target_sec"))), Math.abs((long) id.hashCode()) + take));
+            int first = ((Number) s.get(draft ? "draft_takes" : "final_takes")).intValue() + 1;
+            // Renders vary like seeds (owner, 17 Nov: one FA3 render "had better motion"): hero shots get several draft
+            // takes with different seeds, so the best motion can be picked. Finals render the chosen draft once.
+            int takes = draft && "hero".equals(s.get("priority")) ? heroTakes : 1;
+            for (int take = first; take < first + takes; take++) {
+                jobs.add(new ClipJob(id, ((Number) s.get("ord")).intValue() + 1, take, kind, draft ? "fast" : "hybrid",
+                        (String) s.get("keyframe_uri"), prompt, vertical ? shortSide : longSide, vertical ? longSide : shortSide,
+                        frames(num(s.get("duration_target_sec"))), Math.abs((long) id.hashCode()) + take));
+            }
         }
         return jobs;
     }
@@ -163,13 +171,14 @@ public class VideoStage extends StageSupport {
     @Transactional
     public StageResult saveClips(UUID videoId, ClipRequest request, ClipResult r) {
         Map<String, ClipJob> jobs = new LinkedHashMap<>();
-        request.jobs().forEach(j -> jobs.put(j.shotId(), j));
+        request.jobs().forEach(j -> jobs.put(j.shotId() + ":" + j.take(), j));
+        java.util.Set<String> activated = new HashSet<>(); // first good take of each shot becomes the one in use
         int ok = 0;
         double gpu = 0;
         List<String> errors = new ArrayList<>();
         int stopped = 0;
         for (ClipOutput o : r.clips()) {
-            ClipJob job = jobs.get(o.shotId());
+            ClipJob job = jobs.get(o.shotId() + ":" + o.take());
             if (job == null) {
                 continue;
             }
@@ -196,9 +205,11 @@ public class VideoStage extends StageSupport {
                     job.prompt(), job.seed(), AssetStore.LICENCE_WAN, true));
             jdbc.sql("UPDATE asset SET shot_id = :s, clip_kind = :k WHERE id = :a")
                     .param("s", shotId).param("k", job.kind()).param("a", assetId).update();
-            jdbc.sql("UPDATE shot SET " + (DRAFT.equals(job.kind()) ? "draft_clip_asset_id" : "final_clip_asset_id")
-                            + " = :a, clip_status = 'READY', clip_error = NULL, updated_at = now() WHERE id = :s")
-                    .param("a", assetId).param("s", shotId).update();
+            if (activated.add(o.shotId())) {
+                jdbc.sql("UPDATE shot SET " + (DRAFT.equals(job.kind()) ? "draft_clip_asset_id" : "final_clip_asset_id")
+                                + " = :a, clip_status = 'READY', clip_error = NULL, updated_at = now() WHERE id = :s")
+                        .param("a", assetId).param("s", shotId).update();
+            }
             ok++;
         }
         if (r.containers() > 0) {
@@ -211,10 +222,14 @@ public class VideoStage extends StageSupport {
         if (ok == 0 && stopped == 0) {
             throw new IllegalStateException("No " + kind + " clips were made: " + String.join(" | ", errors));
         }
-        String summary = "%d/%d %s clips (%s) in %.0f s of GPU render time%s%s.".formatted(ok, jobs.size(), kind,
+        long multiTake = request.jobs().stream().collect(java.util.stream.Collectors.groupingBy(ClipJob::shotId,
+                java.util.stream.Collectors.counting())).values().stream().filter(n -> n > 1).count();
+        String takesNote = multiTake > 0 ? "; %d hero shot%s ha%s takes to compare".formatted(multiTake,
+                multiTake == 1 ? "" : "s", multiTake == 1 ? "s" : "ve") : "";
+        String summary = "%d/%d %s clips (%s) in %.0f s of GPU render time%s%s%s.".formatted(ok, jobs.size(), kind,
                 DRAFT.equals(kind) ? "fast, 480p" : "hybrid, 720p", gpu,
                 stopped > 0 ? "; stopped by owner before " + stopped + " finished" : "",
-                errors.isEmpty() ? "" : "; " + errors.size() + " failed: " + errors.getFirst());
+                errors.isEmpty() ? "" : "; " + errors.size() + " failed: " + errors.getFirst(), takesNote);
         return StageResult.of(summary, json.writeValueAsString(Map.of("ok", ok, "failed", errors, "stopped", stopped,
                 "gpuSeconds", Math.round(gpu))));
     }
@@ -248,7 +263,7 @@ public class VideoStage extends StageSupport {
 
     private List<Map<String, Object>> clipShots(UUID videoId) {
         return jdbc.sql("""
-                        SELECT s.id, s.ord, s.duration_target_sec, s.description, s.prompt_json::text AS prompt_json,
+                        SELECT s.id, s.ord, s.duration_target_sec, s.description, s.prompt_json::text AS prompt_json, s.priority,
                                s.draft_clip_asset_id, s.final_clip_asset_id, s.final_wanted, s.footage_asset_id,
                                a.uri_hot AS keyframe_uri,
                                (SELECT count(*) FROM asset x WHERE x.shot_id = s.id AND x.kind = 'video' AND x.clip_kind = 'draft') AS draft_takes,

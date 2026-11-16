@@ -121,3 +121,20 @@ def test_stop_in_one_container_mode_keeps_finished_clips(fake, monkeypatch):
     assert by_shot["shot-1"]["uri"] is not None
     assert by_shot["shot-2"]["error"] == "stopped" and by_shot["shot-3"]["error"] == "stopped"
     assert out["stopped"] is True and seen["stop_key"].startswith("stop-")
+
+
+def test_two_takes_of_one_shot_in_parallel_are_both_saved(fake, monkeypatch):
+    calls = []
+
+    def spawn(job):
+        calls.append(FakeCall(job, ready_after=1))
+        return calls[-1]
+
+    wan = SimpleNamespace(generate_one=SimpleNamespace(spawn=spawn))
+    monkeypatch.setattr(C.modal.Cls, "from_name", lambda app, cls: (lambda: wan))
+    req = _req(1)
+    second = {**req["jobs"][0], "take": 2, "seed": 99}
+    out = C.generate_clips({**req, "jobs": [req["jobs"][0], second], "containers": 4})
+    assert sorted(c["take"] for c in out["clips"]) == [1, 2]
+    assert all(c["uri"] for c in out["clips"]), "neither take overwrote the other"
+    assert len(fake.saved) == 2

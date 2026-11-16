@@ -70,7 +70,7 @@ class ProductionPersistenceTest {
         shots = new ShotStage(deps);
         inspector = new Inspector(deps);
         creative = new CreativeDirector(deps, null, "gemini-3.6-flash");
-        clips = new VideoStage(deps, "projectv-wan", "Wan", "http://127.0.0.1:8080", BigDecimal.ZERO);
+        clips = new VideoStage(deps, "projectv-wan", "Wan", "http://127.0.0.1:8080", BigDecimal.ZERO, 2);
         footage = new FootageStage(deps);
     }
 
@@ -278,6 +278,28 @@ class ProductionPersistenceTest {
         assertEquals(List.of(other.toString()), jobs.stream().map(j -> j.shotId()).toList(), "no GPU clip for the footage shot");
         footage.clearFootage(sun);
         assertEquals(2, clips.clipRequest(video, VideoStage.DRAFT, null).jobs().size(), "back to a generated clip");
+    }
+
+    @Test
+    void heroShotsGetTwoDraftTakesAndTheFirstGoodOneIsUsed() {
+        UUID hero = shotWithKeyframe(0, 3.0);
+        UUID plain = shotWithKeyframe(1, 3.0);
+        jdbc.sql("UPDATE shot SET priority = 'hero' WHERE id = :s").param("s", hero).update();
+        var request = clips.clipRequest(video, VideoStage.DRAFT, null);
+        assertEquals(List.of(hero + ":1", hero + ":2", plain + ":1"),
+                request.jobs().stream().map(j -> j.shotId() + ":" + j.take()).toList());
+        assertTrue(request.jobs().get(0).seed() != request.jobs().get(1).seed(), "different seeds per take");
+
+        var result = new com.projectv.media.MediaTypes.ClipResult(List.of(
+                new com.projectv.media.MediaTypes.ClipOutput(hero.toString(), 1, "draft", null, 10, 0, 0, "fast", "CUDA error"),
+                new com.projectv.media.MediaTypes.ClipOutput(hero.toString(), 2, "draft", "s3://b/h2.mp4", 12, 49, 16, "fast", null),
+                new com.projectv.media.MediaTypes.ClipOutput(plain.toString(), 1, "draft", "s3://b/p1.mp4", 12, 49, 16, "fast", null)), 1, false);
+        var saved = clips.saveClips(video, request, result);
+        assertTrue(saved.summary().contains("1 hero shot has takes to compare"), saved.summary());
+        UUID inUse = jdbc.sql("SELECT draft_clip_asset_id FROM shot WHERE id = :s").param("s", hero).query(UUID.class).single();
+        assertEquals("s3://b/h2.mp4", jdbc.sql("SELECT uri_hot FROM asset WHERE id = :a").param("a", inUse)
+                .query(String.class).single(), "take 1 failed, so take 2 is the one in use");
+        assertEquals(1, clips.estimate(video, VideoStage.FINAL, null).clips() - 1, "finals: one per shot, not per take");
     }
 
     @Test
