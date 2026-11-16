@@ -7,7 +7,9 @@ A personal AI video studio: **text prompt → complete, publish-ready video**. E
 **Current milestone: M2a (story pipeline).** Plan → Research (Google Search, sourced facts) → Concept → Script →
 Music (Lyria, beat-mapped) → Narration (Gemini TTS) + Shot plan (beat-snapped) → Keyframes (Nano Banana for hero
 shots, Z-Image on Modal for the rest) → Animatic. Every stage runs Auto or Manual; failed stages wait for you
-(Retry / Continue without it). Video generation, upscaling and the final edit arrive in M2b/M2c.
+(Retry / Continue without it). Finished stages can be redone with only their dependents; single shots can be
+redone with notes (Auto / Premium / Free image model), their prompts edited, and any earlier version restored for free.
+Video generation, upscaling and the final edit arrive in M2b/M2c.
 
 Paid Gemini spend is capped by the app at ₹400/month (`config/providers.yaml → pricing.gemini.monthlyCapInr`).
 

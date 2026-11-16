@@ -155,6 +155,17 @@ public class VideoActivitiesImpl implements VideoActivities {
     }
 
     @Override
+    public KeyframeRequest shotKeyframeRequest(String videoId, java.util.List<String> shotIds, String ownerNotes, String policy) {
+        return production.shotKeyframeRequest(UUID.fromString(videoId), shotIds.stream().map(UUID::fromString).toList(),
+                ownerNotes, ProductionService.ImagePolicy.valueOf(policy == null ? "AUTO" : policy));
+    }
+
+    @Override
+    public void markShots(String videoId, java.util.List<String> shotIds, String status, String error) {
+        production.markShots(UUID.fromString(videoId), shotIds.stream().map(UUID::fromString).toList(), status, error);
+    }
+
+    @Override
     public AnimaticRequest animaticRequest(String videoId) {
         return production.animaticRequest(UUID.fromString(videoId));
     }

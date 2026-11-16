@@ -49,6 +49,11 @@ public interface VideoActivities {
 
     StageResult saveKeyframes(String videoId, KeyframeRequest request, KeyframeResult result);
 
+    // ---- per-shot redo
+    KeyframeRequest shotKeyframeRequest(String videoId, java.util.List<String> shotIds, String ownerNotes, String policy);
+
+    void markShots(String videoId, java.util.List<String> shotIds, String status, String error);
+
     AnimaticRequest animaticRequest(String videoId);
 
     StageResult saveAnimatic(String videoId, AnimaticResult result);

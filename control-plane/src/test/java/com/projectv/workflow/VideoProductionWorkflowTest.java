@@ -115,6 +115,24 @@ class VideoProductionWorkflowTest {
             return StageResult.of("keyframes", "{}");
         }
 
+        volatile boolean budgetRefusal;
+        final java.util.concurrent.atomic.AtomicInteger shotRequests = new java.util.concurrent.atomic.AtomicInteger();
+
+        @Override
+        public KeyframeRequest shotKeyframeRequest(String videoId, List<String> shotIds, String ownerNotes, String policy) {
+            shotRequests.incrementAndGet();
+            if (budgetRefusal) {
+                throw new com.projectv.ledger.BudgetGuard.BudgetExceededException("cap reached");
+            }
+            events.add("SHOT_REQUEST:" + shotIds + ":" + policy + ":" + ownerNotes);
+            return new KeyframeRequest(videoId, "m", "a", "c", List.of());
+        }
+
+        @Override
+        public void markShots(String videoId, List<String> shotIds, String status, String error) {
+            events.add("SHOTS:" + shotIds + ":" + status);
+        }
+
         @Override
         public AnimaticRequest animaticRequest(String videoId) {
             return new AnimaticRequest(videoId, "t", List.of(), List.of(), null, 1);
@@ -189,7 +207,7 @@ class VideoProductionWorkflowTest {
     void setUp() {
         env = TestWorkflowEnvironment.newInstance();
         Worker control = env.newWorker(TaskQueues.CONTROL);
-        control.registerWorkflowImplementationTypes(VideoProductionWorkflowImpl.class);
+        control.registerWorkflowImplementationTypes(VideoProductionWorkflowImpl.class, ShotRedoWorkflowImpl.class);
         activities = new FakeActivities();
         control.registerActivitiesImplementations(activities);
         media = new FakeMedia();
@@ -315,6 +333,36 @@ class VideoProductionWorkflowTest {
         WorkflowStub.fromTyped(wf).getResult(Void.class);
         assertTrue(activities.events.contains("CONCEPT:1:APPROVED"));
         assertTrue(activities.events.contains("SCRIPT:1:APPROVED"));
+    }
+
+    private StageResult redo(String id, List<String> shots, String notes, String policy) {
+        ShotRedoWorkflow wf = client.newWorkflowStub(ShotRedoWorkflow.class,
+                WorkflowOptions.newBuilder().setWorkflowId(id).setTaskQueue(TaskQueues.CONTROL).build());
+        return wf.run(new ShotRedoWorkflow.ShotRedoRequest("v", shots, notes, policy));
+    }
+
+    @Test
+    void shotRedoRegeneratesOnlyTheChosenShots() {
+        StageResult r = redo("redo-ok", List.of("s14"), "less cartoonish", "PREMIUM");
+        assertEquals("keyframes", r.summary());
+        assertEquals(List.of("SHOTS:[s14]:REDOING", "SHOT_REQUEST:[s14]:PREMIUM:less cartoonish"), activities.events);
+    }
+
+    @Test
+    void shotRedoFailureMarksTheShotsFailed() {
+        media.failKeyframes = true;
+        StageResult r = redo("redo-fail", List.of("s1", "s2"), null, "FREE");
+        assertTrue(r.summary().startsWith("Shot redo failed"));
+        assertEquals("SHOTS:[s1, s2]:FAILED", activities.events.getLast());
+    }
+
+    @Test
+    void shotRedoBudgetRefusalIsNotRetried() {
+        activities.budgetRefusal = true;
+        StageResult r = redo("redo-budget", List.of("s1"), null, "PREMIUM");
+        assertTrue(r.summary().contains("cap reached"));
+        assertEquals(1, activities.shotRequests.get());
+        assertEquals("SHOTS:[s1]:FAILED", activities.events.getLast());
     }
 
     @Test

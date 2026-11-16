@@ -362,7 +362,22 @@ public class ProductionService {
 
     // ================================================================================================ KEYFRAMES
 
+    /** Which image model a (re)render may use. AUTO: hero shots premium while the budget allows, the rest free. */
+    public enum ImagePolicy { AUTO, PREMIUM, FREE }
+
     public KeyframeRequest keyframeRequest(UUID videoId, String ownerNotes) {
+        return buildKeyframeRequest(videoId, null, ownerNotes, ImagePolicy.AUTO);
+    }
+
+    /** Per-shot redo: only the given shots, with the owner's notes and image policy. */
+    public KeyframeRequest shotKeyframeRequest(UUID videoId, List<UUID> shotIds, String ownerNotes, ImagePolicy policy) {
+        KeyframeRequest r = buildKeyframeRequest(videoId, new java.util.HashSet<>(shotIds), ownerNotes, policy);
+        long premium = r.jobs().stream().filter(j -> "gemini_api".equals(j.provider())).count();
+        budget.require(pricing.imageInr("1K").multiply(BigDecimal.valueOf(premium)), "SHOT REDO (" + premium + " premium images)");
+        return r;
+    }
+
+    private KeyframeRequest buildKeyframeRequest(UUID videoId, java.util.Set<UUID> only, String ownerNotes, ImagePolicy policy) {
         VideoPlan plan = plan(videoId);
         StylePresets.Preset preset = presets.byIdOrDefault(plan.stylePreset());
         boolean vertical = "9:16".equals(plan.aspectRatio());
@@ -373,24 +388,82 @@ public class ProductionService {
         List<KeyframeJob> jobs = new ArrayList<>();
         int attempt = nextKeyframeAttempt(videoId);
         for (Map<String, Object> shot : shots(videoId)) {
+            UUID id = (UUID) shot.get("id");
+            if (only != null && !only.contains(id)) {
+                continue;
+            }
             Map<String, Object> p = json.readValue((String) shot.get("prompt_json"), new TypeReference<>() {
             });
             String prompt = p.get("keyframePrompt") + ". Visual style: " + preset.visualStyle()
                     + (ownerNotes == null || ownerNotes.isBlank() ? "" : ". Director's notes: " + ownerNotes);
-            boolean hero = "hero".equals(shot.get("priority"));
+            boolean wantPremium = switch (policy) {
+                case PREMIUM -> true;
+                case FREE -> false;
+                case AUTO -> "hero".equals(shot.get("priority"));
+            };
             String provider = "modal_zimage";
-            if (hero && available.compareTo(perImage) >= 0) {
+            if (wantPremium && (policy == ImagePolicy.PREMIUM || available.compareTo(perImage) >= 0)) {
                 provider = "gemini_api";
                 available = available.subtract(perImage);
             }
-            String shotId = shot.get("id").toString();
+            String shotId = id.toString();
             jobs.add(new KeyframeJob(shotId, attempt, provider, prompt, width, height, plan.aspectRatio(), "1K",
                     Math.abs((long) shotId.hashCode()) + attempt));
         }
         if (jobs.isEmpty()) {
-            throw new IllegalStateException("No shots to render; run the shot plan first");
+            throw new IllegalStateException(only == null ? "No shots to render; run the shot plan first" : "None of those shots belong to this video");
         }
         return new KeyframeRequest(videoId.toString(), imageModel, modalApp, modalClass, jobs);
+    }
+
+    /** Status shown on each shot card while a redo runs (REDOING / READY / FAILED). */
+    @Transactional
+    public void markShots(UUID videoId, List<UUID> shotIds, String status, String error) {
+        for (UUID s : shotIds) {
+            jdbc.sql("""
+                            UPDATE shot SET status = :st, error = :err, updated_at = now()
+                            WHERE id = :s AND scene_id IN (SELECT id FROM scene WHERE video_id = :v)
+                            """)
+                    .param("st", status).param("err", error).param("s", s).param("v", videoId).update();
+        }
+    }
+
+    /** Owner edits a shot's image prompt directly; the next redo uses it (no AI rewrite involved). */
+    @Transactional
+    public void editShotPrompt(UUID shotId, String keyframePrompt) {
+        String current = jdbc.sql("SELECT prompt_json::text FROM shot WHERE id = :s").param("s", shotId)
+                .query(String.class).optional().orElseThrow(() -> new java.util.NoSuchElementException("No shot " + shotId));
+        Map<String, Object> p = json.readValue(current, new TypeReference<>() {
+        });
+        p.put("keyframePrompt", keyframePrompt.strip());
+        p.put("editedByOwner", true);
+        jdbc.sql("UPDATE shot SET prompt_json = CAST(:p AS jsonb), updated_at = now() WHERE id = :s")
+                .param("p", json.writeValueAsString(p)).param("s", shotId).update();
+    }
+
+    /** All keyframe versions ever made for a shot, newest first. */
+    public List<Map<String, Object>> shotVersions(UUID shotId) {
+        return jdbc.sql("""
+                        SELECT a.id, a.created_at, p.provider, p.model, (a.id = s.keyframe_asset_id) AS active
+                        FROM asset a JOIN shot s ON s.id = a.shot_id LEFT JOIN provenance p ON p.id = a.provenance_id
+                        WHERE a.shot_id = :s AND a.kind = 'image' ORDER BY a.created_at DESC
+                        """).param("s", shotId).query().listOfRows();
+    }
+
+    /** Switch a shot back (or forward) to any of its versions. Free: nothing is generated. */
+    @Transactional
+    public void selectKeyframe(UUID shotId, UUID assetId) {
+        int n = jdbc.sql("UPDATE shot SET keyframe_asset_id = :a, status = 'READY', error = NULL, updated_at = now() WHERE id = :s AND EXISTS (SELECT 1 FROM asset WHERE id = :a AND shot_id = :s)")
+                .param("a", assetId).param("s", shotId).update();
+        if (n == 0) {
+            throw new IllegalStateException("That image is not a version of this shot");
+        }
+    }
+
+    public UUID videoOfShot(UUID shotId) {
+        return jdbc.sql("SELECT sc.video_id FROM shot s JOIN scene sc ON sc.id = s.scene_id WHERE s.id = :s")
+                .param("s", shotId).query(UUID.class).optional()
+                .orElseThrow(() -> new java.util.NoSuchElementException("No shot " + shotId));
     }
 
     @Transactional
@@ -403,6 +476,8 @@ public class ProductionService {
         for (KeyframeOutput o : r.results()) {
             if (o.uri() == null) {
                 errors.add(o.error());
+                jdbc.sql("UPDATE shot SET status = 'FAILED', error = :e, updated_at = now() WHERE id = :s")
+                        .param("e", o.error()).param("s", UUID.fromString(o.shotId())).update();
                 continue;
             }
             KeyframeJob job = jobs.get(o.shotId());
@@ -410,7 +485,8 @@ public class ProductionService {
             UUID assetId = assets.create(new NewAsset(videoId, "image", o.uri(), o.uri().endsWith(".png") ? "image/png" : "image/jpeg",
                     job.width(), job.height(), null, o.provider(), o.model(), job.prompt(), o.seed(),
                     isGemini ? AssetStore.LICENCE_GEMINI : AssetStore.LICENCE_ZIMAGE, true));
-            jdbc.sql("UPDATE shot SET keyframe_asset_id = :a, updated_at = now() WHERE id = :s")
+            jdbc.sql("UPDATE asset SET shot_id = :s WHERE id = :a").param("s", UUID.fromString(o.shotId())).param("a", assetId).update();
+            jdbc.sql("UPDATE shot SET keyframe_asset_id = :a, status = 'READY', error = NULL, updated_at = now() WHERE id = :s")
                     .param("a", assetId).param("s", UUID.fromString(o.shotId())).update();
             if (isGemini) {
                 gem++;
@@ -518,6 +594,17 @@ public class ProductionService {
         out.put("shots", shots);
         out.put("animaticAssetId", jdbc.sql("SELECT animatic_asset_id FROM video WHERE id = :v").param("v", videoId)
                 .query(UUID.class).optional().orElse(null));
+        // True when any active keyframe is newer than the animatic: the owner redid shots and should rebuild it.
+        out.put("animaticOutdated", jdbc.sql("""
+                        SELECT EXISTS (
+                            SELECT 1 FROM video v JOIN asset an ON an.id = v.animatic_asset_id
+                            JOIN scene sc ON sc.video_id = v.id JOIN shot s ON s.scene_id = sc.id
+                            JOIN asset k ON k.id = s.keyframe_asset_id
+                            WHERE v.id = :v AND k.created_at > an.created_at)
+                        """).param("v", videoId).query(Boolean.class).single());
+        out.put("redoingShots", jdbc.sql("""
+                        SELECT count(*) FROM shot s JOIN scene sc ON sc.id = s.scene_id WHERE sc.video_id = :v AND s.status = 'REDOING'
+                        """).param("v", videoId).query(Integer.class).single());
         return out;
     }
 
@@ -570,6 +657,7 @@ public class ProductionService {
         return jdbc.sql("""
                         SELECT s.id, s.ord, s.duration_target_sec, s.shot_type, s.camera_move, s.description,
                                s.prompt_json::text AS prompt_json, s.priority, s.overlay_text, s.keyframe_asset_id,
+                               s.status, s.error,
                                a.uri_hot AS keyframe_uri, p.provider AS keyframe_provider, sc.title AS scene_title
                         FROM shot s JOIN scene sc ON sc.id = s.scene_id
                         LEFT JOIN asset a ON a.id = s.keyframe_asset_id

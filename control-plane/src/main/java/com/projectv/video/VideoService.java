@@ -106,6 +106,29 @@ public class VideoService {
         return stages;
     }
 
+    /** Starts a per-shot redo; returns the redo's workflow id. Blocked only while the main run is rendering keyframes. */
+    public String redoShots(UUID id, List<UUID> shotIds, String notes, String policy) {
+        if (shotIds == null || shotIds.isEmpty()) {
+            throw new IllegalStateException("Pick at least one shot");
+        }
+        Map<String, Object> v = jdbc.sql("SELECT status, current_stage FROM video WHERE id = :id").param("id", id)
+                .query().listOfRows().stream().findFirst().orElseThrow(() -> new NoSuchElementException("No video " + id));
+        if ("RUNNING".equals(v.get("status")) && List.of("KEYFRAMES", "ANIMATIC").contains(v.get("current_stage"))) {
+            throw new IllegalStateException("Keyframes or the animatic are being made right now; wait until that finishes");
+        }
+        String p = policy == null ? "AUTO" : policy.toUpperCase();
+        if (!List.of("AUTO", "PREMIUM", "FREE").contains(p)) {
+            throw new IllegalStateException("policy must be AUTO, PREMIUM or FREE");
+        }
+        String workflowId = "shot-redo-" + id + "-" + UUID.randomUUID();
+        com.projectv.workflow.ShotRedoWorkflow wf = temporal.newWorkflowStub(com.projectv.workflow.ShotRedoWorkflow.class,
+                WorkflowOptions.newBuilder().setWorkflowId(workflowId).setTaskQueue(TaskQueues.CONTROL).build());
+        WorkflowClient.start(wf::run, new com.projectv.workflow.ShotRedoWorkflow.ShotRedoRequest(id.toString(),
+                shotIds.stream().map(UUID::toString).toList(), notes, p));
+        recordDecision(id, Stage.KEYFRAMES, "shot_redo", (notes == null ? "" : notes) + " [" + shotIds.size() + " shot(s), " + p + "]");
+        return workflowId;
+    }
+
     public List<Map<String, Object>> list() {
         return jdbc.sql("""
                         SELECT id, title, prompt, status, current_stage, spent_inr, created_at, updated_at

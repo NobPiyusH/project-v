@@ -69,8 +69,8 @@ export interface ScriptLine {
 export interface ShotRow {
   id: string; ord: number; duration_target_sec: number; shot_type: string | null; camera_move: string | null
   description: string | null; priority: string; overlay_text: string | null; keyframe_asset_id: string | null
-  keyframe_provider: string | null; scene_title: string
-  prompt_json: { keyframePrompt?: string; motionPrompt?: string; lineIndex?: number | null; startSec?: number }
+  keyframe_provider: string | null; scene_title: string; status: string; error: string | null
+  prompt_json: { keyframePrompt?: string; motionPrompt?: string; lineIndex?: number | null; startSec?: number; editedByOwner?: boolean }
 }
 
 export interface Production {
@@ -80,7 +80,12 @@ export interface Production {
   music: { asset_id: string; bpm: number } | null
   shots: ShotRow[]
   animaticAssetId: string | null
+  animaticOutdated: boolean
+  redoingShots: number
 }
+
+export type ImagePolicy = 'AUTO' | 'PREMIUM' | 'FREE'
+export interface ShotVersion { id: string; created_at: string; provider: string; model: string; active: boolean }
 
 export const assetUrl = (id: string) => `/api/assets/${id}/content`
 
@@ -118,6 +123,11 @@ export const api = {
   setMode: (id: string, stage: string, mode: Mode) => call<void>('PUT', `/videos/${id}/modes/${stage}`, { mode }),
   setAllModes: (id: string, mode: Mode) => call<void>('PUT', `/videos/${id}/modes`, { mode }),
   rerun: (id: string, stage: string) => call<{ stages: string[] }>('POST', `/videos/${id}/stages/${stage}/rerun`),
+  redoShots: (id: string, shotIds: string[], notes: string, policy: ImagePolicy) =>
+    call<{ workflowId: string }>('POST', `/videos/${id}/shots/redo`, { shotIds, notes: notes || null, policy }),
+  editShotPrompt: (shotId: string, keyframePrompt: string) => call<void>('PUT', `/shots/${shotId}/prompt`, { keyframePrompt }),
+  shotVersions: (shotId: string) => call<ShotVersion[]>('GET', `/shots/${shotId}/versions`),
+  selectKeyframe: (shotId: string, assetId: string) => call<void>('PUT', `/shots/${shotId}/keyframe`, { assetId }),
   pause: (id: string) => call<void>('POST', `/videos/${id}/pause`),
   resume: (id: string) => call<void>('POST', `/videos/${id}/resume`),
 }

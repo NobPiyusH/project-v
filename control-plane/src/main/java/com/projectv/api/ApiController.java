@@ -73,6 +73,15 @@ public class ApiController {
     public record ReviewRequest(int minutes) {
     }
 
+    public record ShotRedoBody(List<UUID> shotIds, String notes, String policy) {
+    }
+
+    public record PromptBody(@NotBlank @Size(max = 4000) String keyframePrompt) {
+    }
+
+    public record SelectBody(UUID assetId) {
+    }
+
     public record NotesRequest(String notes) {
     }
 
@@ -125,6 +134,26 @@ public class ApiController {
     @PutMapping("/videos/{id}/modes")
     public void setAllModes(@PathVariable UUID id, @RequestBody ModeRequest body) {
         videos.setAllModes(id, body.mode());
+    }
+
+    @PostMapping("/videos/{id}/shots/redo")
+    public Map<String, Object> redoShots(@PathVariable UUID id, @RequestBody ShotRedoBody body) {
+        return Map.of("workflowId", videos.redoShots(id, body.shotIds(), body.notes(), body.policy()));
+    }
+
+    @PutMapping("/shots/{shotId}/prompt")
+    public void editShotPrompt(@PathVariable UUID shotId, @Valid @RequestBody PromptBody body) {
+        production.editShotPrompt(shotId, body.keyframePrompt());
+    }
+
+    @GetMapping("/shots/{shotId}/versions")
+    public List<Map<String, Object>> shotVersions(@PathVariable UUID shotId) {
+        return production.shotVersions(shotId);
+    }
+
+    @PutMapping("/shots/{shotId}/keyframe")
+    public void selectKeyframe(@PathVariable UUID shotId, @RequestBody SelectBody body) {
+        production.selectKeyframe(shotId, body.assetId());
     }
 
     @PutMapping("/videos/{id}/review-minutes")
