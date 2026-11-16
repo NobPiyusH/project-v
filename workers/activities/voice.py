@@ -10,7 +10,11 @@ from __future__ import annotations
 import concurrent.futures
 import difflib
 import io
+import json
+import os
 import re
+import urllib.request
+import uuid
 import wave
 
 from google.genai import types
@@ -82,7 +86,33 @@ def _tts(req: dict, prompt: str) -> tuple[bytes, dict]:
     return wav, usage_dict(response)
 
 
+def _whisper(wav: bytes) -> str | None:
+    """Literal transcript from Whisper on Groq (free tier). Gemini's transcriber was found to silently drop spoken
+    style instructions ("Say in a fast-paced ... voice"), so the quality gate passed bad takes (16 Nov 2026).
+    Returns None when no Groq key is set or the call fails, so the Gemini check is used instead."""
+    key = os.getenv("GROQ_API_KEY")
+    if not key:
+        return None
+    b = uuid.uuid4().hex
+    crlf = "\r\n"
+    head = (f'--{b}{crlf}Content-Disposition: form-data; name="model"{crlf}{crlf}whisper-large-v3{crlf}'
+            f'--{b}{crlf}Content-Disposition: form-data; name="file"; filename="line.wav"{crlf}'
+            f'Content-Type: audio/wav{crlf}{crlf}')
+    body = head.encode() + wav + f"{crlf}--{b}--{crlf}".encode()
+    request = urllib.request.Request("https://api.groq.com/openai/v1/audio/transcriptions", body, {
+        "Authorization": "Bearer " + key, "Content-Type": f"multipart/form-data; boundary={b}", "User-Agent": "projectv"})
+    try:
+        with urllib.request.urlopen(request, timeout=60) as r:
+            return (json.load(r).get("text") or "").strip()
+    except Exception as e:  # never fail a take on the checker; fall back to Gemini
+        log.warning("Whisper check unavailable (%s), using Gemini", type(e).__name__)
+        return None
+
+
 def _transcribe(req: dict, wav: bytes) -> tuple[str, dict]:
+    heard = _whisper(wav)
+    if heard is not None:
+        return heard, {}
     _, response = with_models(req.get("checkModel"), lambda m: gemini().models.generate_content(
         model=m,
         contents=[types.Part.from_bytes(data=wav, mime_type="audio/wav"),
@@ -94,15 +124,18 @@ def _transcribe(req: dict, wav: bytes) -> tuple[str, dict]:
 
 def _speak(req: dict, line: dict) -> dict:
     style = (req.get("style") or "").strip().rstrip(".")
-    # Take 1-2: short, officially supported "Say in <style>: <text>" form. Last take: the bare text, no style.
-    prompts = [f"Say {style}: {line['text']}" if style else line["text"]] * (MAX_TAKES - 1) + [line["text"]]
+    # Take 1-2: style in a marked director's-notes block, apart from the transcript (the old "Say <style>: <text>"
+    # form was read aloud on 4 of 7 lines of the night-sky Short). Last take: the bare text, no style.
+    styled = (f"### DIRECTOR'S NOTES (do not read aloud)\nStyle: {style}\n\n### TRANSCRIPT (read only this)\n"
+              f"{line['text']}") if style else line["text"]
+    prompts = [styled] * (MAX_TAKES - 1) + [line["text"]]
     usages, checks = [], []
     wav = b""
     for take, prompt in enumerate(prompts, start=1):
         wav, usage = _tts(req, prompt)
         heard, check_usage = _transcribe(req, wav)
         ok, why = judge(line["text"], heard)
-        usages += [usage, check_usage]
+        usages += [usage, check_usage] if check_usage else [usage]
         checks.append({"take": take, "ok": ok, "why": why, "heard": heard[:300]})
         if ok:
             break

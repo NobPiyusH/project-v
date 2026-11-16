@@ -70,3 +70,22 @@ def test_closed_client_is_rebuilt_and_retried(monkeypatch):
 
     assert common.with_retry(fn, what="test") == "ok"
     assert resets == [1]
+
+
+class Quota(Exception):
+    code = 429
+
+
+def test_used_up_daily_quota_moves_to_next_model_instead_of_sleeping(monkeypatch):
+    from google.genai import errors as genai_errors
+    monkeypatch.setattr(common.genai_errors, "ClientError", Quota)
+    calls = []
+
+    def call(m):
+        calls.append(m)
+        if m == "tts-a":
+            raise Quota("429 RESOURCE_EXHAUSTED {'retryDelay': '51767s'}")
+        return "ok"
+
+    assert common.with_models("tts-a,tts-b", call, what="TTS") == ("tts-b", "ok")
+    assert calls == ["tts-a", "tts-b"]

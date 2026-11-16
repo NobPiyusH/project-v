@@ -147,9 +147,20 @@ def with_retry(fn, *, attempts: int = 6, what: str = "Gemini call"):
                 raise
             m = re.search(r"retryDelay'?:\s*'?(\d+(?:\.\d+)?)s", str(e))
             wait = max(float(m.group(1)) + 1.0, delay) if m else delay
+            if wait > MAX_RETRY_WAIT:
+                # 16 Nov 2026: TTS daily quota ran out and Google said "retry in 51767s"; the worker slept 14 h.
+                # A wait that long means this model's quota is used up: hand over to the next model now.
+                raise QuotaExhausted(f"{what}: quota used up, Google asks to wait {wait:.0f}s") from e
             log.warning("%s got %s, retrying in %.0fs (%d/%d)", what, code, wait, i + 1, attempts)
             time.sleep(wait + random.uniform(0, 1.5))
             delay = min(delay * 2, 60.0)
+
+
+MAX_RETRY_WAIT = 120.0  # seconds; a longer server-requested wait is treated as an exhausted quota
+
+
+class QuotaExhausted(RuntimeError):
+    """A model's quota is used up for now (server asked for a very long wait)."""
 
 
 def model_list(spec: str | None, default: str | None = None) -> list[str]:
@@ -162,6 +173,8 @@ def _model_problem(e: Exception) -> bool:
     """Errors where trying the NEXT model makes sense: retired/unknown model, still overloaded after retries, hangs."""
     text = str(e).lower()
     if isinstance(e, (TimeoutError,)) or "timed out" in text or "timeout" in text:
+        return True
+    if isinstance(e, QuotaExhausted):  # each model has its own daily quota on the same account
         return True
     code = getattr(e, "code", None) or getattr(e, "status_code", None)
     if code in (404, 503, 504):

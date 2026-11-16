@@ -36,3 +36,10 @@ def test_bad_takes_fail():
     for expected, heard in BAD:
         ok, why = judge(expected, heard)
         assert not ok, (why, heard)
+
+
+def test_spoken_style_instruction_is_rejected():
+    from workers.activities.voice import judge
+    ok, why = judge("But light travels at three hundred thousand kilometers per second.",
+                    "Say in a fast-paced inquisitive and mind-bending voice. But light travels at 300,000 kilometers per second.")
+    assert not ok, why
