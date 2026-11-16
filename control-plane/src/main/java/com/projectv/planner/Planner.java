@@ -42,12 +42,12 @@ public class Planner {
     private final String modelName;
     private final long timeoutSeconds;
     private final String fallbacks;
-    private final com.projectv.agents.NvidiaChat nvidia;
+    private final com.projectv.agents.OpenAiCompatChat nvidia;
 
     private record Out(VideoPlan plan, Long tokens) {
     }
 
-    public Planner(ObjectProvider<ChatModel> chatModel, StylePresets presets, com.projectv.agents.NvidiaChat nvidia,
+    public Planner(ObjectProvider<ChatModel> chatModel, StylePresets presets, com.projectv.agents.OpenAiCompatChat nvidia,
                    @Value("${spring.ai.google.genai.api-key:}") String apiKey,
                    @Value("${spring.ai.google.genai.chat.options.model:}") String modelName,
                    @Value("${projectv.planner.timeout-seconds:90}") long timeoutSeconds,
@@ -78,7 +78,7 @@ public class Planner {
             // the next one instead of blocking or failing the video; the rule-based plan is the last resort.
             com.projectv.agents.ModelFallback.Attempt<Out> attempt = com.projectv.agents.ModelFallback.run(
                     com.projectv.agents.ModelFallback.models(modelName, fallbacks), timeoutSeconds, "PLAN", m -> {
-                        if (com.projectv.agents.NvidiaChat.handles(m)) {
+                        if (com.projectv.agents.OpenAiCompatChat.handles(m)) {
                             var n = nvidia.call(m, systemPrompt(), userPrompt(prompt, ownerNotes), VideoPlan.class);
                             return new Out(n.entity(), n.totalTokens());
                         }
@@ -99,7 +99,7 @@ public class Planner {
                     });
             String usedModel = attempt.model();
             VideoPlan plan = normalise(attempt.value().plan(), prompt);
-            String source = com.projectv.agents.NvidiaChat.handles(usedModel) ? usedModel : "gemini:" + usedModel;
+            String source = com.projectv.agents.OpenAiCompatChat.handles(usedModel) ? usedModel : "gemini:" + usedModel;
             return new Outcome(plan, stagesFor(plan), source, attempt.value().tokens(), null);
         } catch (TimeoutException e) {
             log.warn("Gemini planning timed out after {}s, using rule-based fallback", timeoutSeconds);

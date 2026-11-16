@@ -32,12 +32,12 @@ public class Llm {
     private final long timeoutSeconds;
     private final String model;
     private final String fallbacks;
-    private final NvidiaChat nvidia;
+    private final OpenAiCompatChat nvidia;
 
     private record Out<T>(T entity, com.projectv.media.MediaTypes.Usage usage) {
     }
 
-    public Llm(ObjectProvider<ChatModel> chatModel, CostLedger ledger, Pricing pricing, BudgetGuard budget, NvidiaChat nvidia,
+    public Llm(ObjectProvider<ChatModel> chatModel, CostLedger ledger, Pricing pricing, BudgetGuard budget, OpenAiCompatChat nvidia,
                @Value("${projectv.agents.timeout-seconds:150}") long timeoutSeconds,
                @Value("${projectv.models.text}") String model,
                @Value("${projectv.models.text-fallbacks:}") String fallbacks) {
@@ -65,8 +65,8 @@ public class Llm {
         List<String> models = ModelFallback.models(model, fallbacks);
         try {
             ModelFallback.Attempt<Out<T>> a = ModelFallback.run(models, timeoutSeconds, purpose, m -> {
-                if (NvidiaChat.handles(m)) {
-                    NvidiaChat.Result<T> n = nvidia.call(m, system, user, type);
+                if (OpenAiCompatChat.handles(m)) {
+                    OpenAiCompatChat.Result<T> n = nvidia.call(m, system, user, type);
                     return new Out<>(n.entity(), new com.projectv.media.MediaTypes.Usage(
                             n.promptTokens(), n.completionTokens(), 0, n.totalTokens()));
                 }
@@ -77,9 +77,9 @@ public class Llm {
             });
             Out<T> r = a.value();
             com.projectv.media.MediaTypes.Usage usage = r.usage();
-            if (NvidiaChat.handles(a.model())) {
-                // NVIDIA's hosted catalog is free: record the call (₹0) so every call stays in the ledger.
-                ledger.record(videoId, "nvidia", BigDecimal.ZERO, BigDecimal.valueOf(usage.totalTokens()),
+            if (OpenAiCompatChat.handles(a.model())) {
+                // NVIDIA NIM and Groq free tiers: record the call (₹0) so every call stays in the ledger.
+                ledger.record(videoId, OpenAiCompatChat.provider(a.model()), BigDecimal.ZERO, BigDecimal.valueOf(usage.totalTokens()),
                         "tokens", true, purpose + " (" + a.model() + ")");
             } else {
                 ledger.record(videoId, BudgetGuard.GEMINI, pricing.textInr(usage), BigDecimal.valueOf(usage.totalTokens()),
