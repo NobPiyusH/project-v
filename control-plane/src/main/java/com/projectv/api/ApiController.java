@@ -185,7 +185,8 @@ public class ApiController {
     public record ClipRedoBody(List<UUID> shotIds, String kind) {
     }
 
-    public record ClipProgressBody(UUID videoId, List<Map<String, Object>> clips, boolean finished) {
+    /** {@code finished} is only sent with the last report of a batch. */
+    public record ClipProgressBody(UUID videoId, List<Map<String, Object>> clips, Boolean finished) {
     }
 
     @GetMapping("/videos/{id}/clips/estimate")
@@ -228,7 +229,7 @@ public class ApiController {
     // Called by the local media worker (same machine): progress of a running batch, and whether to stop.
     @PostMapping("/internal/clips/progress")
     public void reportClipProgress(@RequestBody ClipProgressBody body) {
-        clipProgress.report(body.videoId(), body.clips(), body.finished());
+        clipProgress.report(body.videoId(), body.clips(), Boolean.TRUE.equals(body.finished()));
     }
 
     @GetMapping("/internal/clips/{id}/stop")
