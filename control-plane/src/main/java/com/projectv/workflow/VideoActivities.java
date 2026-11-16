@@ -101,6 +101,19 @@ public interface VideoActivities {
 
     void markClips(String videoId, java.util.List<String> shotIds, String status, String error);
 
+    // ---- Free real footage (NASA)
+
+    com.projectv.media.MediaTypes.FootageSearchRequest footageSearchRequest(String videoId, java.util.List<String> shotIds,
+                                                                          String query);
+
+    StageResult saveFootageCandidates(String videoId, com.projectv.media.MediaTypes.FootageSearchResponse result);
+
+    com.projectv.media.MediaTypes.FootageFetchRequest footageFetchRequest(String videoId, String shotId, String nasaId,
+                                                                        Double startSec);
+
+    StageResult saveFootage(String videoId, com.projectv.media.MediaTypes.FootageFetchRequest request,
+                            com.projectv.media.MediaTypes.FootageFetchResult result);
+
     /** Upsert the stage_run row and the video's status / current stage. */
     void recordStage(String videoId, Stage stage, int attempt, StageMode mode, String status,
                      String summary, String artifactJson, String ownerNotes);

@@ -47,6 +47,12 @@ public interface MediaActivities {
     @ActivityMethod(name = "review_images")
     com.projectv.media.MediaTypes.ImageReviewResult reviewImages(com.projectv.media.MediaTypes.ImageReviewRequest request);
 
+    @ActivityMethod(name = "search_footage")
+    com.projectv.media.MediaTypes.FootageSearchResponse searchFootage(com.projectv.media.MediaTypes.FootageSearchRequest request);
+
+    @ActivityMethod(name = "fetch_footage")
+    com.projectv.media.MediaTypes.FootageFetchResult fetchFootage(com.projectv.media.MediaTypes.FootageFetchRequest request);
+
     /** Inspector file checks (Whisper, FFmpeg, image statistics). Free to run; reports findings, changes nothing. */
     @ActivityMethod(name = "inspect_media")
     com.projectv.media.MediaTypes.MediaInspectResult inspectMedia(com.projectv.media.MediaTypes.MediaInspectRequest request);

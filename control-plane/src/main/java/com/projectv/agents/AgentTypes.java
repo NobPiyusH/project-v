@@ -35,10 +35,12 @@ public final class AgentTypes {
     /**
      * @param lineIndex index of the script line this shot covers (null for pure visual/music moments)
      * @param priority  hero | standard | filler
+     * @param footageQuery 2-5 search words when real NASA footage would show this better (real Sun, Earth from
+     *                  orbit, launches, telescope views), else empty
      */
     public record PlannedShot(String sceneTitle, Integer lineIndex, double durationSec, String shotType,
                               String cameraMove, String description, String keyframePrompt, String motionPrompt,
-                              String priority, String overlayText) {
+                              String priority, String overlayText, String footageQuery) {
     }
 
     public record ShotPlan(List<PlannedShot> shots) {

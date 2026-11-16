@@ -310,7 +310,7 @@ public class Inspector extends StageSupport {
         return shots.stream()
                 .filter(s -> drafts ? s.get("keyframe_uri") != null && s.get("draft_uri") == null
                         : s.get("draft_uri") != null && Boolean.TRUE.equals(s.get("final_wanted")) && s.get("final_uri") == null)
-                .filter(s -> !"STOPPED".equals(s.get("clip_status")))
+                .filter(s -> !"STOPPED".equals(s.get("clip_status")) && s.get("footage_asset_id") == null)
                 .map(s -> new Finding("FAIL", "MISSING_CLIP", "This shot has no " + (drafts ? "draft" : "final") + " clip"
                         + (s.get("clip_error") == null ? "." : ": " + s.get("clip_error")), shotRef(s), String.valueOf(s.get("id"))))
                 .toList();
@@ -318,7 +318,8 @@ public class Inspector extends StageSupport {
 
     private List<Map<String, Object>> clipShots(UUID videoId) {
         return jdbc.sql("""
-                        SELECT s.id, s.ord, s.final_wanted, s.clip_status, s.clip_error, k.uri_hot AS keyframe_uri,
+                        SELECT s.id, s.ord, s.final_wanted, s.clip_status, s.clip_error, s.footage_asset_id,
+                               k.uri_hot AS keyframe_uri,
                                d.uri_hot AS draft_uri, f.uri_hot AS final_uri
                         FROM shot s JOIN scene sc ON sc.id = s.scene_id
                         LEFT JOIN asset k ON k.id = s.keyframe_asset_id

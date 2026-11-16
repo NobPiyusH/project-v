@@ -34,9 +34,18 @@ image = modal.Image.debian_slim(python_version="3.11").apt_install("ffmpeg").pip
     "imageio[ffmpeg]",
     "pillow",
     "huggingface_hub>=0.35",
+    "kernels>=0.10",   # precompiled attention kernels from the Hub (FlashAttention 3, SageAttention): no CUDA build
 )
 
 hf_cache = modal.Volume.from_name("projectv-hf-cache", create_if_missing=True)
+
+# Faster attention, chosen per clip so the owner can A/B it against the default (quality first: default stays native).
+#   native - PyTorch SDPA, exact. The quality reference.
+#   fa3    - FlashAttention 3 (Hopper/H100 only), exact maths, faster. Kernel: kernels-community/flash-attn3.
+#   sage   - SageAttention (INT8/FP8 quantised attention): fastest, near-lossless. Kernel: SageAttention/sage-attention.
+# Kernels from publishers the Hub doesn't mark as trusted are NOT forced on (no DIFFUSERS_TRUST_REMOTE_KERNELS): the clip
+# then falls back to native and reports it, so the A/B stays honest.
+ATTENTION = {"native": None, "fa3": "_flash_3_hub", "sage": "sage_hub"}
 
 NEGATIVE = ("blurry, low quality, low resolution, distorted, warped, morphing, flickering, jittery, text, captions, "
             "watermark, logo, frame border, static image, frozen, duplicate frames, oversaturated, cartoon")
@@ -154,6 +163,32 @@ class Wan:
                                    "etaSec": round(elapsed / done * (steps - done), 1), "state": "rendering"}
             return kwargs
 
+        import contextlib
+
+        from diffusers.models.attention_dispatch import attention_backend
+
+        wanted = job.get("attention") or "native"
+        backend = ATTENTION.get(wanted)
+        ctx = contextlib.nullcontext()
+        self.attention_used = "native"
+        if backend:
+            try:
+                ctx = attention_backend(backend)
+                ctx.__enter__()
+                self.attention_used = wanted
+            except Exception as e:  # noqa: BLE001 - untrusted/missing kernel, wrong GPU: fall back, say so
+                print(f"attention {wanted} unavailable, using native: {type(e).__name__}: {e}")
+                self.attention_fallback = f"{type(e).__name__}: {str(e)[:200]}"
+                ctx = contextlib.nullcontext()
+        try:
+            return self._call_pipe(job, cfg, steps, img, w, h, on_step)
+        finally:
+            if self.attention_used != "native":
+                ctx.__exit__(None, None, None)
+
+    def _call_pipe(self, job: dict, cfg: dict, steps: int, img, w: int, h: int, on_step):
+        import torch
+
         return self.pipe(
             image=img,
             prompt=job["prompt"],
@@ -178,6 +213,7 @@ class Wan:
             cfg = self.MODES[mode]
             steps = int(job.get("steps") or cfg["steps"])
             self._set_mode(cfg)
+            self.attention_used, self.attention_fallback = "native", None
             progress[job["id"]] = {"step": 0, "steps": steps, "elapsed": 0, "etaSec": None, "state": "starting"}
             try:
                 frames = self._render(job, cfg, steps)
@@ -195,7 +231,8 @@ class Wan:
             progress[job["id"]] = {"step": steps, "steps": steps, "elapsed": round(time.time() - t, 1), "etaSec": 0,
                                    "state": "done"}
             return {"id": job["id"], "mp4": data, "seconds": time.time() - t, "frames": len(frames), "fps": 16,
-                    "mode": mode, "steps": steps, "offloaded": self.offloaded, "error": None}
+                    "mode": mode, "steps": steps, "offloaded": self.offloaded, "error": None,
+                    "attention": self.attention_used, "attentionFallback": self.attention_fallback}
         except Exception as e:
             progress[job["id"]] = {"state": "failed", "error": f"{type(e).__name__}: {e}"[:300]}
             return {"id": job["id"], "mp4": None, "seconds": time.time() - t, "mode": job.get("mode"),

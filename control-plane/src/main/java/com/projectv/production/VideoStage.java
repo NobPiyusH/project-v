@@ -107,8 +107,8 @@ public class VideoStage extends StageSupport {
             if (wanted != null && !wanted.contains(id)) {
                 continue;
             }
-            if (s.get("keyframe_uri") == null) {
-                continue;
+            if (s.get("keyframe_uri") == null || s.get("footage_asset_id") != null) {
+                continue; // no image to animate, or the owner chose real footage for this shot
             }
             if (!draft && wanted == null && (s.get("draft_clip_asset_id") == null || !Boolean.TRUE.equals(s.get("final_wanted")))) {
                 continue; // finals only for shots with a draft that the owner didn't mark "keep the draft"
@@ -249,7 +249,8 @@ public class VideoStage extends StageSupport {
     private List<Map<String, Object>> clipShots(UUID videoId) {
         return jdbc.sql("""
                         SELECT s.id, s.ord, s.duration_target_sec, s.description, s.prompt_json::text AS prompt_json,
-                               s.draft_clip_asset_id, s.final_clip_asset_id, s.final_wanted, a.uri_hot AS keyframe_uri,
+                               s.draft_clip_asset_id, s.final_clip_asset_id, s.final_wanted, s.footage_asset_id,
+                               a.uri_hot AS keyframe_uri,
                                (SELECT count(*) FROM asset x WHERE x.shot_id = s.id AND x.kind = 'video' AND x.clip_kind = 'draft') AS draft_takes,
                                (SELECT count(*) FROM asset x WHERE x.shot_id = s.id AND x.kind = 'video' AND x.clip_kind = 'final') AS final_takes
                         FROM shot s JOIN scene sc ON sc.id = s.scene_id LEFT JOIN asset a ON a.id = s.keyframe_asset_id

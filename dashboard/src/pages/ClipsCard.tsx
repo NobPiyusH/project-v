@@ -109,7 +109,7 @@ function ClipTile({ shot: s, selected, onToggle, busy, onKeepDraft, showTakes, o
   shot: ShotRow; selected: boolean; onToggle: () => void; busy: boolean; onKeepDraft: (keep: boolean) => void
   showTakes: boolean; onTakes: () => void; onSelectTake: (assetId: string) => void
 }) {
-  const clip = s.final_clip_asset_id ?? s.draft_clip_asset_id
+  const clip = s.footage_asset_id ?? s.final_clip_asset_id ?? s.draft_clip_asset_id
   return (
     <figure className={`shot ${s.priority === 'hero' ? 'hero' : ''} ${selected ? 'selected' : ''}`}>
       <div className="shot-media">
@@ -123,7 +123,8 @@ function ClipTile({ shot: s, selected, onToggle, busy, onKeepDraft, showTakes, o
         <div className="row small">
           <input type="checkbox" checked={selected} onChange={onToggle} aria-label={`Select shot ${s.ord + 1}`} />
           <strong>#{s.ord + 1}</strong>
-          {s.final_clip_asset_id ? <span className="badge b-ok">final</span> : s.draft_clip_asset_id ? <span className="badge b-info">draft</span> : null}
+          {s.footage_asset_id ? <span className="badge b-ok">NASA footage</span>
+            : s.final_clip_asset_id ? <span className="badge b-ok">final</span> : s.draft_clip_asset_id ? <span className="badge b-info">draft</span> : null}
           {s.priority === 'hero' && <span className="badge b-warn">hero</span>}
           {(s.draft_clip_asset_id || s.final_clip_asset_id) && (
             <button className="small" style={{ padding: '1px 6px' }} onClick={onTakes}>{showTakes ? 'Hide takes' : 'Takes'}</button>

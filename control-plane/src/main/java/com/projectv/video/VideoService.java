@@ -154,6 +154,16 @@ public class VideoService {
         return workflowId;
     }
 
+    /** Real NASA footage for one shot: search (nasaId null) or use a picked clip. Free. */
+    public String footage(UUID id, UUID shotId, String query, String nasaId, Double startSec) {
+        String workflowId = "footage-" + id + "-" + UUID.randomUUID();
+        com.projectv.workflow.FootageWorkflow wf = temporal.newWorkflowStub(com.projectv.workflow.FootageWorkflow.class,
+                WorkflowOptions.newBuilder().setWorkflowId(workflowId).setTaskQueue(TaskQueues.CONTROL).build());
+        WorkflowClient.start(wf::run, new com.projectv.workflow.FootageWorkflow.FootageRequest(id.toString(),
+                shotId.toString(), query, nasaId, startSec));
+        return workflowId;
+    }
+
     /** Creative Director review of the existing images (nothing is regenerated). */
     public String reviewImages(UUID id) {
         Integer images = jdbc.sql("""

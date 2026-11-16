@@ -176,6 +176,7 @@ function ShotEditor({ videoId, shot, onChange }: { videoId: string; shot: ShotRo
         {changed && <button disabled={busy} onClick={() => run(() => api.editShotPrompt(shot.id, prompt))}>Save prompt only</button>}
       </div>
       {error && <p className="error">{error}</p>}
+      <FootagePanel videoId={videoId} shot={shot} onChange={onChange} />
       {versions && versions.length > 1 && (
         <>
           <div className="small"><strong>Versions</strong> <span className="muted">(click one to use it; free)</span></div>
@@ -190,6 +191,64 @@ function ShotEditor({ videoId, shot, onChange }: { videoId: string; shot: ShotRo
           </div>
         </>
       )}
+    </div>
+  )
+}
+
+/**
+ * Free real NASA footage for this shot: the Director's suggestions (or your own search), each with a preview. Picking
+ * one replaces the generated clip for this shot, so no GPU time is spent on it.
+ */
+function FootagePanel({ videoId, shot, onChange }: { videoId: string; shot: ShotRow; onChange: () => void }) {
+  const [query, setQuery] = useState(shot.prompt_json.footageQuery ?? '')
+  const [start, setStart] = useState('')
+  const [preview, setPreview] = useState<string | null>(null)
+  const { error, busy, run } = useAction(onChange)
+  const candidates = shot.prompt_json.footageCandidates ?? []
+  return (
+    <div style={{ display: 'grid', gap: 6, marginTop: 8 }}>
+      <div className="small"><strong>Real footage (NASA, free)</strong>{' '}
+        <span className="muted">{shot.footage_asset_id ? 'This shot uses real footage.' : 'Use a real clip instead of generating one.'}</span>
+      </div>
+      {shot.footage_asset_id && (
+        <div className="row small">
+          <video src={assetUrl(shot.footage_asset_id)} muted playsInline controls preload="metadata" style={{ width: 120 }} />
+          <button disabled={busy} onClick={() => run(() => api.clearFootage(shot.id))}>Use the generated clip instead</button>
+        </div>
+      )}
+      <div className="row">
+        <input className="grow" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="e.g. solar flare SDO, Earth night lights ISS"
+          aria-label="Search NASA footage" />
+        <button disabled={busy || query.trim() === ''} onClick={() => run(() => api.footage(videoId, shot.id, { query }))}>
+          {busy ? 'Searching…' : 'Search'}
+        </button>
+      </div>
+      {shot.prompt_json.footageError && <div className="small error">Search failed: {shot.prompt_json.footageError}</div>}
+      {candidates.length > 0 && (
+        <>
+          <label className="row small muted">Start at second
+            <input type="number" min={0} step={0.5} value={start} onChange={(e) => setStart(e.target.value)} style={{ width: 70 }}
+              placeholder="auto" /> (auto skips the title card)</label>
+          {candidates.map((c) => (
+            <div key={c.nasaId} className="row small" style={{ alignItems: 'flex-start' }}>
+              {preview === c.nasaId
+                ? <video src={c.previewUrl} autoPlay muted loop playsInline controls style={{ width: 160 }} />
+                : <img src={c.thumbUrl} alt={c.title} loading="lazy" style={{ width: 160, cursor: 'pointer' }}
+                  title="Play preview" onClick={() => setPreview(c.nasaId)} />}
+              <div className="grow">
+                <div><strong>{c.title}</strong> <span className="muted">{c.date}</span></div>
+                <div className="muted">{c.description}</div>
+                <div className="muted">Credit: NASA{c.credit ? ` / ${c.credit}` : ''}</div>
+                <button className="primary" disabled={busy} style={{ marginTop: 4 }}
+                  onClick={() => run(() => api.footage(videoId, shot.id, { nasaId: c.nasaId, startSec: start === '' ? null : Number(start) }))}>
+                  Use this clip
+                </button>
+              </div>
+            </div>
+          ))}
+        </>
+      )}
+      {error && <p className="error">{error}</p>}
     </div>
   )
 }

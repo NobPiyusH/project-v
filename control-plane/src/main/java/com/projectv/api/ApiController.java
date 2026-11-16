@@ -19,6 +19,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -55,12 +56,14 @@ public class ApiController {
     private final com.projectv.production.CreativeDirector creative;
     private final com.projectv.production.VideoStage video;
     private final com.projectv.video.ClipProgress clipProgress;
+    private final com.projectv.production.FootageStage footageStage;
 
     public ApiController(VideoService videos, ProviderRegistry providers, StylePresets presets, CostLedger ledger,
                          Planner planner, ProductionService production, AssetStore assets, MediaUrls mediaUrls,
                          BudgetGuard budget, Pricing pricing, com.projectv.production.Inspector inspector,
                          com.projectv.production.CreativeDirector creative,
-                         com.projectv.production.VideoStage video, com.projectv.video.ClipProgress clipProgress) {
+                         com.projectv.production.VideoStage video, com.projectv.video.ClipProgress clipProgress,
+                         com.projectv.production.FootageStage footageStage) {
         this.videos = videos;
         this.providers = providers;
         this.presets = presets;
@@ -75,6 +78,7 @@ public class ApiController {
         this.creative = creative;
         this.video = video;
         this.clipProgress = clipProgress;
+        this.footageStage = footageStage;
     }
 
     public record CreateVideoRequest(@NotBlank @Size(max = 4000) String prompt, StageMode defaultMode,
@@ -235,6 +239,25 @@ public class ApiController {
     @GetMapping("/internal/clips/{id}/stop")
     public Map<String, Object> clipStop(@PathVariable UUID id) {
         return Map.of("stop", clipProgress.stopRequested(id));
+    }
+
+    // ---- Free real footage (NASA)
+
+    public record FootageBody(String query, String nasaId, Double startSec) {
+    }
+
+    @PostMapping("/videos/{id}/shots/{shotId}/footage")
+    public Map<String, Object> footage(@PathVariable UUID id, @PathVariable UUID shotId, @RequestBody FootageBody body) {
+        boolean pick = body.nasaId() != null && !body.nasaId().isBlank();
+        if (!pick && (body.query() == null || body.query().isBlank())) {
+            throw new IllegalStateException("Give search words or pick a clip");
+        }
+        return Map.of("workflowId", videos.footage(id, shotId, body.query(), pick ? body.nasaId() : null, body.startSec()));
+    }
+
+    @DeleteMapping("/shots/{shotId}/footage")
+    public void clearFootage(@PathVariable UUID shotId) {
+        footageStage.clearFootage(shotId);
     }
 
     @PostMapping("/videos/{id}/creative-review")

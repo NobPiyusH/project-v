@@ -40,12 +40,14 @@ public class VideoActivitiesImpl implements VideoActivities {
     private final com.projectv.production.CreativeDirector creative;
     private final com.projectv.production.VideoStage video;
     private final com.projectv.video.ClipProgress clipProgress;
+    private final com.projectv.production.FootageStage footage;
 
     public VideoActivitiesImpl(JdbcClient jdbc, Planner planner, CostLedger ledger, ObjectMapper json,
                                ProductionService production, Pricing pricing,
                                com.projectv.production.Inspector inspector,
                                com.projectv.production.CreativeDirector creative,
-                               com.projectv.production.VideoStage video, com.projectv.video.ClipProgress clipProgress) {
+                               com.projectv.production.VideoStage video, com.projectv.video.ClipProgress clipProgress,
+                               com.projectv.production.FootageStage footage) {
         this.jdbc = jdbc;
         this.planner = planner;
         this.ledger = ledger;
@@ -56,6 +58,30 @@ public class VideoActivitiesImpl implements VideoActivities {
         this.creative = creative;
         this.video = video;
         this.clipProgress = clipProgress;
+        this.footage = footage;
+    }
+
+    @Override
+    public com.projectv.media.MediaTypes.FootageSearchRequest footageSearchRequest(String videoId, java.util.List<String> shotIds,
+                                                                                 String query) {
+        return footage.searchRequest(UUID.fromString(videoId), ids(shotIds), query);
+    }
+
+    @Override
+    public StageResult saveFootageCandidates(String videoId, com.projectv.media.MediaTypes.FootageSearchResponse result) {
+        return footage.saveCandidates(UUID.fromString(videoId), result);
+    }
+
+    @Override
+    public com.projectv.media.MediaTypes.FootageFetchRequest footageFetchRequest(String videoId, String shotId, String nasaId,
+                                                                               Double startSec) {
+        return footage.fetchRequest(UUID.fromString(videoId), UUID.fromString(shotId), nasaId, startSec);
+    }
+
+    @Override
+    public StageResult saveFootage(String videoId, com.projectv.media.MediaTypes.FootageFetchRequest request,
+                                   com.projectv.media.MediaTypes.FootageFetchResult result) {
+        return footage.saveFootage(UUID.fromString(videoId), request, result);
     }
 
     private static java.util.List<UUID> ids(java.util.List<String> shotIds) {

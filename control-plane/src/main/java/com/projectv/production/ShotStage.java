@@ -112,6 +112,9 @@ public class ShotStage extends StageSupport {
             prompt.put("keyframePrompt", s.keyframePrompt());
             prompt.put("motionPrompt", s.motionPrompt());
             prompt.put("lineIndex", s.lineIndex());
+            if (s.footageQuery() != null && !s.footageQuery().isBlank()) {
+                prompt.put("footageQuery", s.footageQuery().strip());
+            }
             prompt.put("startSec", round(times.get(i)[0]));
             jdbc.sql("""
                             INSERT INTO shot (id, scene_id, ord, duration_target_sec, shot_type, camera_move, description,

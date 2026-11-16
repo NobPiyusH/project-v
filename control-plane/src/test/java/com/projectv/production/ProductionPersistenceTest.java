@@ -51,6 +51,7 @@ class ProductionPersistenceTest {
     static Inspector inspector;
     static CreativeDirector creative;
     static VideoStage clips;
+    static FootageStage footage;
     static BudgetGuard budget;
 
     UUID video;
@@ -70,6 +71,7 @@ class ProductionPersistenceTest {
         inspector = new Inspector(deps);
         creative = new CreativeDirector(deps, null, "gemini-3.6-flash");
         clips = new VideoStage(deps, "projectv-wan", "Wan", "http://127.0.0.1:8080", BigDecimal.ZERO);
+        footage = new FootageStage(deps);
     }
 
     @BeforeEach
@@ -120,8 +122,8 @@ class ProductionPersistenceTest {
 
     @Test
     void allMigrationsApplyAndLicencesAreSeeded() {
-        assertEquals(4, jdbc.sql("SELECT count(*) FROM licence").query(Integer.class).single());
-        assertEquals(7, jdbc.sql("SELECT count(*) FROM flyway_schema_history WHERE success").query(Integer.class).single());
+        assertEquals(5, jdbc.sql("SELECT count(*) FROM licence").query(Integer.class).single());
+        assertEquals(8, jdbc.sql("SELECT count(*) FROM flyway_schema_history WHERE success").query(Integer.class).single());
     }
 
     @Test
@@ -245,6 +247,37 @@ class ProductionPersistenceTest {
         clips.setFinalWanted(a, false);
         assertEquals(0, clips.estimate(video, VideoStage.FINAL, null).clips(), "kept draft: no final");
         assertEquals(1, clips.clipVersions(a).size());
+    }
+
+    @Test
+    void pickedNasaFootageReplacesTheGeneratedClipForThatShot() {
+        UUID sun = shotWithKeyframe(0, 3.0);
+        UUID other = shotWithKeyframe(1, 3.0);
+        jdbc.sql("UPDATE shot SET prompt_json = CAST('{\"footageQuery\":\"solar flare SDO\"}' AS jsonb) WHERE id = :s")
+                .param("s", sun).update();
+        var search = footage.searchRequest(video, null, null);
+        assertEquals(1, search.queries().size(), "only the shot the Director marked");
+        var candidate = new com.projectv.media.MediaTypes.FootageCandidate("GSFC_SDO_1", "Solar flare", "d",
+                "GSFC, Joy Ng", "2016-06-24", "t", "p");
+        var saved = footage.saveCandidates(video, new com.projectv.media.MediaTypes.FootageSearchResponse(List.of(
+                new com.projectv.media.MediaTypes.FootageSearchResult(sun.toString(), "solar flare SDO", List.of(candidate), null))));
+        assertTrue(saved.summary().startsWith("Found 1 free NASA clip"), saved.summary());
+
+        var req = footage.fetchRequest(video, sun, "GSFC_SDO_1", null);
+        assertEquals("9:16", req.aspectRatio());
+        var result = footage.saveFootage(video, req, new com.projectv.media.MediaTypes.FootageFetchResult(
+                "s3://b/sun.mp4", 1080, 1920, 3.0, 1920, 1080, 1.78, 35.0, "https://images-assets.nasa.gov/x~orig.mp4"));
+        assertTrue(result.summary().contains("credit: NASA / GSFC, Joy Ng"), result.summary());
+        assertTrue(result.summary().contains("may look soft"), "a 1.78x enlargement is flagged");
+        assertEquals(1, jdbc.sql("""
+                        SELECT count(*) FROM asset a JOIN provenance p ON p.id = a.provenance_id
+                        WHERE a.shot_id = :s AND a.clip_kind = 'footage' AND p.licence_id = :l
+                        """).param("s", sun).param("l", com.projectv.assets.AssetStore.LICENCE_NASA).query(Integer.class).single());
+
+        var jobs = clips.clipRequest(video, VideoStage.DRAFT, null).jobs();
+        assertEquals(List.of(other.toString()), jobs.stream().map(j -> j.shotId()).toList(), "no GPU clip for the footage shot");
+        footage.clearFootage(sun);
+        assertEquals(2, clips.clipRequest(video, VideoStage.DRAFT, null).jobs().size(), "back to a generated clip");
     }
 
     @Test

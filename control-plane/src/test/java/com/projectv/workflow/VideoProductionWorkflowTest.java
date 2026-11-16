@@ -207,6 +207,37 @@ class VideoProductionWorkflowTest {
             events.add("CLIPS:" + shotIds + ":" + status);
         }
 
+        // ---- NASA footage
+        volatile int footageQueries;
+
+        @Override
+        public com.projectv.media.MediaTypes.FootageSearchRequest footageSearchRequest(String videoId, List<String> shotIds,
+                                                                                     String query) {
+            List<com.projectv.media.MediaTypes.FootageQuery> q = new java.util.ArrayList<>();
+            for (int i = 0; i < footageQueries; i++) {
+                q.add(new com.projectv.media.MediaTypes.FootageQuery("shot-" + i, "solar flare"));
+            }
+            return new com.projectv.media.MediaTypes.FootageSearchRequest(q);
+        }
+
+        @Override
+        public StageResult saveFootageCandidates(String videoId, com.projectv.media.MediaTypes.FootageSearchResponse result) {
+            events.add("FOOTAGE:" + result.results().size());
+            return StageResult.of("footage suggested", "{}");
+        }
+
+        @Override
+        public com.projectv.media.MediaTypes.FootageFetchRequest footageFetchRequest(String videoId, String shotId, String nasaId,
+                                                                                   Double startSec) {
+            return new com.projectv.media.MediaTypes.FootageFetchRequest(videoId, shotId, 1, nasaId, startSec, 3, "9:16");
+        }
+
+        @Override
+        public StageResult saveFootage(String videoId, com.projectv.media.MediaTypes.FootageFetchRequest request,
+                                       com.projectv.media.MediaTypes.FootageFetchResult result) {
+            return StageResult.of("footage used", "{}");
+        }
+
         /** How many more image reviews report shot-3 as weak. */
         volatile int weakImageReviews;
         volatile boolean failCreative;
@@ -282,6 +313,19 @@ class VideoProductionWorkflowTest {
         volatile boolean failVoice;
 
         volatile boolean failInspector;
+
+        @Override
+        public com.projectv.media.MediaTypes.FootageSearchResponse searchFootage(
+                com.projectv.media.MediaTypes.FootageSearchRequest request) {
+            return new com.projectv.media.MediaTypes.FootageSearchResponse(request.queries().stream()
+                    .map(q -> new com.projectv.media.MediaTypes.FootageSearchResult(q.shotId(), q.query(), List.of(), null))
+                    .toList());
+        }
+
+        @Override
+        public com.projectv.media.MediaTypes.FootageFetchResult fetchFootage(com.projectv.media.MediaTypes.FootageFetchRequest request) {
+            return new com.projectv.media.MediaTypes.FootageFetchResult("s3://b/f.mp4", 1080, 1920, 3, 1920, 1080, 1.78, 2, "u");
+        }
 
         @Override
         public com.projectv.media.MediaTypes.ClipResult generateClips(com.projectv.media.MediaTypes.ClipRequest request) {
@@ -515,6 +559,15 @@ class VideoProductionWorkflowTest {
         assertTrue(activities.events.contains("DRAFT_GEN:1:INSPECTION_FAILED"));
         assertTrue(activities.clipRequests.contains("draft:[shot-7]"), "only the broken shot is rendered again");
         assertTrue(activities.events.contains("DRAFT_GEN:2:AUTO_PASSED"));
+    }
+
+    @Test
+    void libraryMatchSuggestsRealFootageForFree() {
+        activities.footageQueries = 2;
+        VideoProductionWorkflow wf = start("footage", StageMode.AUTO, Map.of());
+        WorkflowStub.fromTyped(wf).getResult(Void.class);
+        assertTrue(activities.events.contains("FOOTAGE:2"));
+        assertTrue(activities.events.contains("LIBRARY_MATCH:1:AUTO_PASSED"));
     }
 
     @Test

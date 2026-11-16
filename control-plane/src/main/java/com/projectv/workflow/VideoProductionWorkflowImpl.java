@@ -398,6 +398,16 @@ public class VideoProductionWorkflowImpl implements VideoProductionWorkflow {
             }
             case ANIMATIC:
                 return activities.saveAnimatic(videoId, media.renderAnimatic(activities.animaticRequest(videoId)));
+            case LIBRARY_MATCH:
+                if (libraryMatchEnabled()) {
+                    // Free: suggests real NASA footage for the shots the Director marked; the owner picks.
+                    var search = activities.footageSearchRequest(videoId, null, null);
+                    if (search.queries().isEmpty()) {
+                        return StageResult.of("No shots asked for real footage.", null);
+                    }
+                    return activities.saveFootageCandidates(videoId, media.searchFootage(search));
+                }
+                break;
             case DRAFT_GEN:
             case FINAL_GEN:
                 if (videoClipsEnabled()) {
@@ -461,6 +471,11 @@ public class VideoProductionWorkflowImpl implements VideoProductionWorkflow {
         List<Finding> findings = new ArrayList<>(files == null || files.findings() == null ? List.of() : files.findings());
         findings.addAll(more);
         return new MediaInspectResult(findings, files == null || files.checked() == null ? List.of() : files.checked());
+    }
+
+    /** Workflows started before real footage existed replay the old placeholder Library match (determinism). */
+    private boolean libraryMatchEnabled() {
+        return Workflow.getVersion("library-match", Workflow.DEFAULT_VERSION, 1) != Workflow.DEFAULT_VERSION;
     }
 
     /** Workflows started before M2b replay their old placeholder clip stages (Temporal determinism). */

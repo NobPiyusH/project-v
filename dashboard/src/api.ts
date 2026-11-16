@@ -102,8 +102,11 @@ export interface ShotRow {
   description: string | null; priority: string; overlay_text: string | null; keyframe_asset_id: string | null
   keyframe_provider: string | null; scene_title: string; status: string; error: string | null
   draft_clip_asset_id: string | null; final_clip_asset_id: string | null; clip_status: string | null
-  clip_error: string | null; final_wanted: boolean
-  prompt_json: { keyframePrompt?: string; motionPrompt?: string; lineIndex?: number | null; startSec?: number; editedByOwner?: boolean }
+  clip_error: string | null; final_wanted: boolean; footage_asset_id: string | null
+  prompt_json: {
+    keyframePrompt?: string; motionPrompt?: string; lineIndex?: number | null; startSec?: number; editedByOwner?: boolean
+    footageQuery?: string; footageCandidates?: FootageCandidate[]; footageError?: string
+  }
 }
 
 export interface Production {
@@ -118,6 +121,8 @@ export interface Production {
   redoingLines: number
   linesNeedingVoice: number
 }
+
+export interface FootageCandidate { nasaId: string; title: string; description: string; credit: string; date: string; thumbUrl: string; previewUrl: string }
 
 export type ClipKind = 'draft' | 'final'
 
@@ -173,6 +178,9 @@ export const api = {
   setFinalWanted: (shotId: string, wanted: boolean) => call<void>('PUT', `/shots/${shotId}/final-wanted?wanted=${wanted}`),
   clipVersions: (shotId: string) => call<ClipVersion[]>('GET', `/shots/${shotId}/clips`),
   selectClip: (shotId: string, assetId: string) => call<void>('PUT', `/shots/${shotId}/clips/${assetId}`),
+  footage: (id: string, shotId: string, body: { query?: string; nasaId?: string; startSec?: number | null }) =>
+    call<{ workflowId: string }>('POST', `/videos/${id}/shots/${shotId}/footage`, body),
+  clearFootage: (shotId: string) => call<void>('DELETE', `/shots/${shotId}/footage`),
   reviewImages: (id: string) => call<{ workflowId: string }>('POST', `/videos/${id}/creative-review`),
   rerun: (id: string, stage: string) => call<{ stages: string[] }>('POST', `/videos/${id}/stages/${stage}/rerun`),
   redoShots: (id: string, shotIds: string[], notes: string, policy: ImagePolicy) =>

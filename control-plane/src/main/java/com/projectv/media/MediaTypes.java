@@ -158,4 +158,32 @@ public final class MediaTypes {
     public record ClipEstimate(String kind, int clips, double gpuSeconds, java.math.BigDecimal inr, double usd,
                                double wallMinutes, boolean needsApproval, String summary) {
     }
+
+    // ---- Free real footage (NASA Image and Video Library)
+
+    public record FootageQuery(String shotId, String query) {
+    }
+
+    public record FootageCandidate(String nasaId, String title, String description, String credit, String date,
+                                   String thumbUrl, String previewUrl) {
+    }
+
+    public record FootageSearchRequest(List<FootageQuery> queries) {
+    }
+
+    public record FootageSearchResult(String shotId, String query, List<FootageCandidate> candidates, String error) {
+    }
+
+    public record FootageSearchResponse(List<FootageSearchResult> results) {
+    }
+
+    /** @param startSec null = automatic (skips NASA's opening title card) */
+    public record FootageFetchRequest(String videoId, String shotId, int shotNumber, String nasaId, Double startSec,
+                                      double durationSec, String aspectRatio) {
+    }
+
+    /** @param upscale how much the cropped source had to be enlarged to fill the frame (1.0 = native, >1.5 = soft) */
+    public record FootageFetchResult(String uri, int width, int height, double durationSec, int sourceWidth,
+                                     int sourceHeight, Double upscale, double startSec, String sourceUrl) {
+    }
 }
