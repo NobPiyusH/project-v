@@ -5,7 +5,7 @@ const STATUS_CLASS: Record<string, string> = {
   COMPLETED: 'b-ok', APPROVED: 'b-ok', AUTO_PASSED: 'b-ok', AUTO_APPROVED: 'b-ok',
   RUNNING: 'b-info', CREATED: 'b-idle',
   WAITING: 'b-warn', WAITING_APPROVAL: 'b-warn', PAUSED: 'b-warn',
-  REJECTED: 'b-bad', FAILED: 'b-bad', CANCELLED: 'b-bad',
+  REJECTED: 'b-bad', FAILED: 'b-bad', CANCELLED: 'b-bad', INSPECTION_FAILED: 'b-bad',
   SKIPPED: 'b-idle', PENDING: 'b-idle',
 }
 
@@ -13,6 +13,7 @@ const STATUS_LABEL: Record<string, string> = {
   AUTO_PASSED: 'Done (auto)', AUTO_APPROVED: 'Done (review time ended)', APPROVED: 'Approved', WAITING_APPROVAL: 'Waiting for you',
   WAITING: 'Waiting for you', RUNNING: 'Running', REJECTED: 'Rejected', SKIPPED: 'Skipped',
   COMPLETED: 'Completed', PAUSED: 'Paused', PENDING: 'Pending', CREATED: 'Created', FAILED: 'Failed',
+  INSPECTION_FAILED: 'Sent back by Inspector',
 }
 
 export const MODE_HELP: Record<Mode, string> = {

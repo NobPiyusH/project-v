@@ -1,5 +1,5 @@
 import { Fragment, useState } from 'react'
-import { api, type Mode, type StageInfo, type StageRun, type VideoDetail as Detail } from '../api'
+import { api, type Inspection, type Mode, type StageInfo, type StageRun, type VideoDetail as Detail } from '../api'
 import { Countdown, ModeSwitch, StatusBadge } from '../components'
 import { fmtTime, usePoll } from '../hooks'
 import { ProductionView } from './ProductionView'
@@ -75,6 +75,7 @@ export function VideoDetail({ id, stages }: { id: string; stages: StageInfo[] })
         <div className="stages">
           {stages.map((s, i) => (
             <StageRow key={s.id} index={i + 1} stage={s} run={latest[s.id]} mode={modeOf(s.id)} stages={stages}
+              inspection={(video.inspections ?? []).find((x) => x.stage === s.id && x.attempt === latest[s.id]?.attempt)}
               canRedo={finished && s.redoWith.length > 0 && latest[s.id] !== undefined && latest[s.id].status !== 'SKIPPED'}
               onRedo={() => act(() => api.rerun(id, s.id))}
               attempts={video.stageRuns.filter((r) => r.stage === s.id && r.attempt > 0).length}
@@ -102,6 +103,7 @@ function latestRuns(runs: StageRun[]): Record<string, StageRun> {
 
 function StageRow(props: {
   index: number; stage: StageInfo; run?: StageRun; mode: Mode; attempts: number; locked: boolean
+  inspection?: Inspection
   stages: StageInfo[]; canRedo: boolean; onRedo: () => void
   onMode: (m: Mode) => void; onApprove: (notes?: string) => void; onReject: (notes: string) => void
 }) {
@@ -124,6 +126,7 @@ function StageRow(props: {
         </div>
         <div className="muted small">{run?.summary ?? stage.description}</div>
         {run?.owner_notes && <div className="small">Your notes: “{run.owner_notes}”</div>}
+        {props.inspection && <InspectorPanel report={props.inspection} />}
         <div className="row" style={{ marginTop: 6 }}>
           {run?.artifact_json && (
             <button className="small" style={{ padding: '2px 8px' }} onClick={() => setShowArtifact((s) => !s)}>
@@ -171,6 +174,39 @@ function StageRow(props: {
         )}
       </div>
       <ModeSwitch value={mode} onChange={props.onMode} disabled={locked} />
+    </div>
+  )
+}
+
+const VERDICT: Record<Inspection['verdict'], [string, string]> = {
+  PASS: ['b-ok', 'Inspector: passed'],
+  WARN: ['b-warn', 'Inspector: warnings'],
+  FAIL: ['b-bad', 'Inspector: problems'],
+}
+
+/** Second-level check results for a stage: what the Inspector looked at and what it found. */
+function InspectorPanel({ report }: { report: Inspection }) {
+  const [open, setOpen] = useState(report.verdict === 'FAIL')
+  const [cls, label] = VERDICT[report.verdict]
+  const issues = report.findings.filter((f) => f.severity !== 'INFO')
+  return (
+    <div style={{ marginTop: 6 }}>
+      <button className="small" style={{ padding: '2px 8px' }} onClick={() => setOpen((o) => !o)}
+        title="Independent second-level checks of this stage's output">
+        <span className={`badge ${cls}`}>{label}</span>{' '}
+        {issues.length > 0 ? `${issues.length} finding${issues.length === 1 ? '' : 's'}` : 'all checks passed'}
+        {report.checked.length > 0 && ` · ${report.checked.length} files checked`}
+      </button>
+      {open && issues.length > 0 && (
+        <ul className="small" style={{ margin: '6px 0 0', paddingLeft: 18 }}>
+          {issues.map((f, i) => (
+            <li key={i}>
+              <span className={`badge ${f.severity === 'FAIL' ? 'b-bad' : 'b-warn'}`}>{f.severity === 'FAIL' ? 'Problem' : 'Warning'}</span>{' '}
+              {f.ref && <strong>{f.ref}: </strong>}{f.message}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   )
 }

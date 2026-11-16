@@ -10,6 +10,7 @@ from temporalio.client import Client
 from temporalio.worker import Worker
 
 from workers.activities.animatic import render_animatic
+from workers.activities.inspect import inspect_media
 from workers.activities.keyframes import generate_keyframes
 from workers.activities.media import tool_versions
 from workers.activities.music import generate_music
@@ -35,7 +36,7 @@ async def main() -> None:
             client,
             task_queue=MEDIA_TASK_QUEUE,
             activities=[tool_versions, research_topic, synthesize_narration, generate_music,
-                        generate_keyframes, render_animatic],
+                        generate_keyframes, render_animatic, inspect_media],
             activity_executor=pool,
             max_concurrent_activities=8,
         )

@@ -36,15 +36,29 @@ public class VideoActivitiesImpl implements VideoActivities {
     private final ObjectMapper json;
     private final ProductionService production;
     private final Pricing pricing;
+    private final com.projectv.production.Inspector inspector;
 
     public VideoActivitiesImpl(JdbcClient jdbc, Planner planner, CostLedger ledger, ObjectMapper json,
-                               ProductionService production, Pricing pricing) {
+                               ProductionService production, Pricing pricing,
+                               com.projectv.production.Inspector inspector) {
         this.jdbc = jdbc;
         this.planner = planner;
         this.ledger = ledger;
         this.json = json;
         this.production = production;
         this.pricing = pricing;
+        this.inspector = inspector;
+    }
+
+    @Override
+    public com.projectv.media.MediaTypes.MediaInspectRequest inspectionRequest(String videoId, Stage stage) {
+        return inspector.mediaRequest(UUID.fromString(videoId), stage);
+    }
+
+    @Override
+    public WorkflowTypes.InspectionReport saveInspection(String videoId, Stage stage, int attempt,
+                                                         com.projectv.media.MediaTypes.MediaInspectResult media) {
+        return inspector.evaluate(UUID.fromString(videoId), stage, attempt, media);
     }
 
     @Override

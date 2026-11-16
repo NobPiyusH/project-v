@@ -65,6 +65,15 @@ public interface VideoActivities {
 
     StageResult saveAnimatic(String videoId, AnimaticResult result);
 
+    // ---- Inspector (second-level checks)
+
+    /** File checks for the media worker, or null when the stage has none. */
+    com.projectv.media.MediaTypes.MediaInspectRequest inspectionRequest(String videoId, Stage stage);
+
+    /** Structural checks + the worker's file findings -> stored report and verdict. */
+    WorkflowTypes.InspectionReport saveInspection(String videoId, Stage stage, int attempt,
+                                                  com.projectv.media.MediaTypes.MediaInspectResult media);
+
     /** Upsert the stage_run row and the video's status / current stage. */
     void recordStage(String videoId, Stage stage, int attempt, StageMode mode, String status,
                      String summary, String artifactJson, String ownerNotes);

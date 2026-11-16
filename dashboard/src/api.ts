@@ -38,6 +38,18 @@ export interface CostRow {
   ts: string
 }
 
+export interface Finding { severity: 'FAIL' | 'WARN' | 'INFO'; code: string; message: string; ref: string | null }
+
+/** Inspector report for one stage attempt (second-level, independent checks). */
+export interface Inspection {
+  stage: string
+  attempt: number
+  verdict: 'PASS' | 'WARN' | 'FAIL'
+  findings: Finding[]
+  checked: string[]
+  created_at: string
+}
+
 export interface VideoDetail extends VideoSummary {
   workflow_id: string
   plan_json: string | null
@@ -45,6 +57,7 @@ export interface VideoDetail extends VideoSummary {
   review_minutes: number
   stageRuns: StageRun[]
   costs: CostRow[]
+  inspections: Inspection[]
 }
 
 export interface Provider {

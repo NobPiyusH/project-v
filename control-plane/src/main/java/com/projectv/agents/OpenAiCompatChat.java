@@ -32,19 +32,23 @@ public class OpenAiCompatChat {
     public OpenAiCompatChat(@Value("${projectv.nvidia.api-key:}") String nvidiaKey,
                             @Value("${projectv.nvidia.base-url:https://integrate.api.nvidia.com/v1}") String nvidiaUrl,
                             @Value("${projectv.groq.api-key:}") String groqKey,
-                            @Value("${projectv.groq.base-url:https://api.groq.com/openai/v1}") String groqUrl) {
+                            @Value("${projectv.groq.base-url:https://api.groq.com/openai/v1}") String groqUrl,
+                            @Value("${projectv.openrouter.api-key:}") String openRouterKey,
+                            @Value("${projectv.openrouter.base-url:https://openrouter.ai/api/v1}") String openRouterUrl) {
         this.providers = java.util.Map.of(
                 "nvidia", new Provider(nvidiaUrl, nvidiaKey),
-                "groq", new Provider(groqUrl, groqKey));
+                "groq", new Provider(groqUrl, groqKey),
+                "openrouter", new Provider(openRouterUrl, openRouterKey));
         SimpleClientHttpRequestFactory f = new SimpleClientHttpRequestFactory();
         f.setConnectTimeout(15_000);
         f.setReadTimeout(300_000); // the caller's ModelFallback time limit is the real limit
         this.http = RestClient.builder().requestFactory(f).build();
     }
 
-    /** True for {@code nvidia:...} and {@code groq:...} model ids. */
+    /** True for {@code nvidia:...}, {@code groq:...} and {@code openrouter:...} model ids. */
     public static boolean handles(String model) {
-        return model != null && (model.startsWith("nvidia:") || model.startsWith("groq:"));
+        return model != null && (model.startsWith("nvidia:") || model.startsWith("groq:")
+                || model.startsWith("openrouter:"));
     }
 
     /** Provider name of a routed model id, for the cost ledger. */

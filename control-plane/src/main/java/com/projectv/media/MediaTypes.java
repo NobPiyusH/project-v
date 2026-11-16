@@ -83,4 +83,25 @@ public final class MediaTypes {
 
     public record AnimaticResult(String uri, double durationSec) {
     }
+
+    // ---- Inspector (second-level checks)
+
+    /** @param severity FAIL (must not pass unseen), WARN (shown, does not block) or INFO */
+    public record Finding(String severity, String code, String message, String ref) {
+    }
+
+    public record InspectLine(int index, String text, String uri) {
+    }
+
+    public record InspectImage(String ref, String uri) {
+    }
+
+    public record MediaInspectRequest(String videoId, String stage, String aspectRatio, boolean isShort, double targetSec,
+                                      List<InspectLine> lines, String musicUri, List<InspectImage> images,
+                                      String videoUri, Double speechEndSec) {
+    }
+
+    public record MediaInspectResult(List<Finding> findings, List<String> checked) {
+        public static final MediaInspectResult NONE = new MediaInspectResult(List.of(), List.of());
+    }
 }

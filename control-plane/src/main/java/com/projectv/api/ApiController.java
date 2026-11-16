@@ -50,10 +50,11 @@ public class ApiController {
     private final MediaUrls mediaUrls;
     private final BudgetGuard budget;
     private final Pricing pricing;
+    private final com.projectv.production.Inspector inspector;
 
     public ApiController(VideoService videos, ProviderRegistry providers, StylePresets presets, CostLedger ledger,
                          Planner planner, ProductionService production, AssetStore assets, MediaUrls mediaUrls,
-                         BudgetGuard budget, Pricing pricing) {
+                         BudgetGuard budget, Pricing pricing, com.projectv.production.Inspector inspector) {
         this.videos = videos;
         this.providers = providers;
         this.presets = presets;
@@ -64,6 +65,7 @@ public class ApiController {
         this.mediaUrls = mediaUrls;
         this.budget = budget;
         this.pricing = pricing;
+        this.inspector = inspector;
     }
 
     public record CreateVideoRequest(@NotBlank @Size(max = 4000) String prompt, StageMode defaultMode,
@@ -109,6 +111,7 @@ public class ApiController {
     public Map<String, Object> detail(@PathVariable UUID id) {
         Map<String, Object> d = new LinkedHashMap<>(videos.detail(id));
         d.put("costs", ledger.forVideo(id));
+        d.put("inspections", inspector.reports(id));
         return d;
     }
 

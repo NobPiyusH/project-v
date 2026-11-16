@@ -38,4 +38,8 @@ public interface MediaActivities {
 
     @ActivityMethod(name = "render_animatic")
     AnimaticResult renderAnimatic(AnimaticRequest request);
+
+    /** Inspector file checks (Whisper, FFmpeg, image statistics). Free to run; reports findings, changes nothing. */
+    @ActivityMethod(name = "inspect_media")
+    com.projectv.media.MediaTypes.MediaInspectResult inspectMedia(com.projectv.media.MediaTypes.MediaInspectRequest request);
 }

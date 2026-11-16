@@ -22,7 +22,7 @@ class OpenAiCompatChatTest {
 
     @Test
     void missingKeyIsAModelProblemSoTheListMovesOn() {
-        var chat = new OpenAiCompatChat("", "http://127.0.0.1:1", "", "http://127.0.0.1:1");
+        var chat = new OpenAiCompatChat("", "http://127.0.0.1:1", "", "http://127.0.0.1:1", "", "http://127.0.0.1:1");
         try {
             chat.call("nvidia:x", "s", "u", String.class);
         } catch (IllegalStateException e) {

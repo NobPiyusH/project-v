@@ -1,5 +1,9 @@
 package com.projectv.workflow;
 
+import com.projectv.media.MediaTypes.MediaInspectRequest;
+import com.projectv.media.MediaTypes.MediaInspectResult;
+import com.projectv.production.Inspector;
+import com.projectv.workflow.WorkflowTypes.InspectionReport;
 import com.projectv.workflow.WorkflowTypes.StageResult;
 import com.projectv.workflow.WorkflowTypes.StageView;
 import com.projectv.workflow.WorkflowTypes.VideoRequest;
@@ -13,6 +17,7 @@ import org.slf4j.Logger;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.EnumMap;
+import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -24,6 +29,8 @@ import java.util.Map;
  * <p>Stage loop for every stage the plan includes:
  * <ol>
  *   <li>run the stage (activity)</li>
+ *   <li>Inspector: independent second-level checks. A FAIL is redone once automatically with the findings as notes;
+ *       a second FAIL waits for the owner (approve = accept anyway, reject = redo with notes), whatever the mode.</li>
  *   <li>AUTO: record AUTO_PASSED and continue</li>
  *   <li>MANUAL: record WAITING_APPROVAL and wait for approve / reject / a switch to AUTO.
  *       Reject re-runs the stage with the owner's notes.</li>
@@ -69,6 +76,22 @@ public class VideoProductionWorkflowImpl implements VideoProductionWorkflow {
                             .setMaximumAttempts(3)
                             .build())
                     .build());
+
+    // Inspector file checks on the media worker: free (FFmpeg + Groq Whisper), so a couple of retries are fine.
+    private final MediaActivities inspectorMedia = Workflow.newActivityStub(MediaActivities.class,
+            ActivityOptions.newBuilder()
+                    .setTaskQueue(TaskQueues.MEDIA)
+                    .setStartToCloseTimeout(Duration.ofMinutes(30))
+                    .setHeartbeatTimeout(Duration.ofMinutes(5))
+                    .setScheduleToCloseTimeout(Duration.ofHours(2))
+                    .setRetryOptions(RetryOptions.newBuilder()
+                            .setInitialInterval(Duration.ofSeconds(15))
+                            .setMaximumAttempts(2)
+                            .build())
+                    .build());
+
+    /** Stages the Inspector already sent back once in this run (the automatic redo happens only once). */
+    private final java.util.Set<Stage> inspectorRedone = EnumSet.noneOf(Stage.class);
 
     private record Decision(Stage stage, boolean approve, String notes) {
     }
@@ -178,6 +201,42 @@ public class VideoProductionWorkflowImpl implements VideoProductionWorkflow {
                 continue;
             }
 
+            InspectionReport inspection = inspect(videoId, stage, attempt);
+            if (inspection.summary() != null) {
+                result = new StageResult(result.summary() + " " + inspection.summary(), result.artifactJson(),
+                        result.plannedStages());
+            }
+            if ("FAIL".equals(inspection.verdict()) && modeOf(stage) != StageMode.MANUAL) {
+                if (!inspectorRedone.contains(stage)) {
+                    // First FAIL: redo once by itself, telling the stage what was wrong.
+                    inspectorRedone.add(stage);
+                    log.info("Inspector failed stage {}, redoing once", stage);
+                    finish(videoId, stage, attempt, "INSPECTION_FAILED", result, notes);
+                    notes = inspection.notes();
+                    continue;
+                }
+                // Failed again after the automatic redo: never pass it unseen, whatever the mode or review timer.
+                views.put(stage, new StageView(stage, modeOf(stage), "WAITING_APPROVAL", attempt, result.summary()));
+                activities.recordStage(videoId, stage, attempt, modeOf(stage), "WAITING_APPROVAL",
+                        result.summary() + " Approve to accept it anyway, or Reject (with notes) to redo.",
+                        result.artifactJson(), notes);
+                phase = "WAITING";
+                waitingStage = stage;
+                decision = null;
+                Workflow.await(() -> decision != null);
+                waitingStage = null;
+                phase = "RUNNING";
+                Decision d = decision;
+                decision = null;
+                if (d.approve()) {
+                    finish(videoId, stage, attempt, "APPROVED", result, notes);
+                    return result;
+                }
+                finish(videoId, stage, attempt, "REJECTED", result, notes);
+                notes = d.notes() == null || d.notes().isBlank() ? inspection.notes() : d.notes();
+                continue;
+            }
+
             if (modeOf(stage) == StageMode.AUTO) {
                 finish(videoId, stage, attempt, "AUTO_PASSED", result, notes);
                 return result;
@@ -279,6 +338,28 @@ public class VideoProductionWorkflowImpl implements VideoProductionWorkflow {
                     result.plannedStages());
         }
         return result;
+    }
+
+    /**
+     * Second-level inspection of a finished stage. Never fails the stage itself: if the Inspector can't run, that is
+     * reported as a warning and production continues.
+     */
+    private InspectionReport inspect(String videoId, Stage stage, int attempt) {
+        if (!Inspector.INSPECTED.contains(stage)) {
+            return InspectionReport.SKIPPED;
+        }
+        // Workflows started before the Inspector existed replay without it (Temporal determinism).
+        if (Workflow.getVersion("inspector", Workflow.DEFAULT_VERSION, 1) == Workflow.DEFAULT_VERSION) {
+            return InspectionReport.SKIPPED;
+        }
+        try {
+            MediaInspectRequest request = activities.inspectionRequest(videoId, stage);
+            MediaInspectResult files = request == null ? null : inspectorMedia.inspectMedia(request);
+            return activities.saveInspection(videoId, stage, attempt, files);
+        } catch (ActivityFailure failure) {
+            log.warn("Inspector could not check {}: {}", stage, rootMessage(failure));
+            return new InspectionReport("WARN", "Inspector could not run: " + rootMessage(failure), null);
+        }
     }
 
     private static String rootMessage(Throwable t) {

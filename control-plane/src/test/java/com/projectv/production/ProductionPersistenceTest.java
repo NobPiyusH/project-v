@@ -48,6 +48,7 @@ class ProductionPersistenceTest {
     static JsonMapper json;
     static VoiceStage voice;
     static ShotStage shots;
+    static Inspector inspector;
     static BudgetGuard budget;
 
     UUID video;
@@ -64,6 +65,7 @@ class ProductionPersistenceTest {
                 new StylePresets("../config"), "gemini-3.6-flash", "gemini-3.8-flash-tts", "img", "music", "Charon", "app", "cls");
         voice = new VoiceStage(deps);
         shots = new ShotStage(deps);
+        inspector = new Inspector(deps);
     }
 
     @BeforeEach
@@ -95,9 +97,27 @@ class ProductionPersistenceTest {
     }
 
     @Test
+    void inspectorFindsTheMissingVoiceAndStoresOneReportPerAttempt() {
+        // The seeded script's spoken line has no recording yet.
+        var report = inspector.evaluate(video, com.projectv.workflow.Stage.NARRATION, 1,
+                com.projectv.media.MediaTypes.MediaInspectResult.NONE);
+        assertEquals("FAIL", report.verdict());
+        assertTrue(report.notes().contains("line 1: This line has no voice recording."), report.notes());
+        // Re-inspecting the same attempt replaces the row; a new attempt adds one.
+        inspector.evaluate(video, com.projectv.workflow.Stage.NARRATION, 1, null);
+        voice.saveNarration(video, take("s3://projectv/l0.wav", 2.0));
+        var second = inspector.evaluate(video, com.projectv.workflow.Stage.NARRATION, 2,
+                new com.projectv.media.MediaTypes.MediaInspectResult(List.of(new com.projectv.media.MediaTypes.Finding(
+                        "WARN", "CLIPPING", "Peak -0.1 dBTP", "line 1")), List.of("line 1")));
+        assertEquals("WARN", second.verdict());
+        assertEquals(List.of("FAIL", "WARN"), jdbc.sql("SELECT verdict FROM inspection WHERE video_id = :v ORDER BY attempt")
+                .param("v", video).query(String.class).list());
+    }
+
+    @Test
     void allMigrationsApplyAndLicencesAreSeeded() {
         assertEquals(3, jdbc.sql("SELECT count(*) FROM licence").query(Integer.class).single());
-        assertEquals(4, jdbc.sql("SELECT count(*) FROM flyway_schema_history WHERE success").query(Integer.class).single());
+        assertEquals(5, jdbc.sql("SELECT count(*) FROM flyway_schema_history WHERE success").query(Integer.class).single());
     }
 
     @Test

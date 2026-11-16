@@ -175,12 +175,44 @@ class VideoProductionWorkflowTest {
         public void setVideoStatus(String videoId, String status) {
             events.add("VIDEO:" + status);
         }
+
+        /** How many more times the Inspector reports FAIL for KEYFRAMES. */
+        volatile int keyframeInspectionFails;
+        final List<String> inspected = new CopyOnWriteArrayList<>();
+
+        @Override
+        public com.projectv.media.MediaTypes.MediaInspectRequest inspectionRequest(String videoId, Stage stage) {
+            return stage == Stage.KEYFRAMES ? new com.projectv.media.MediaTypes.MediaInspectRequest(videoId,
+                    stage.name(), "16:9", false, 60, List.of(), null, List.of(), null, null) : null;
+        }
+
+        @Override
+        public WorkflowTypes.InspectionReport saveInspection(String videoId, Stage stage, int attempt,
+                                                             com.projectv.media.MediaTypes.MediaInspectResult media) {
+            inspected.add(stage + ":" + attempt);
+            if (stage == Stage.KEYFRAMES && keyframeInspectionFails > 0) {
+                keyframeInspectionFails--;
+                return new WorkflowTypes.InspectionReport("FAIL", "Inspector: FAIL", "shot 3: blank image");
+            }
+            return new WorkflowTypes.InspectionReport("PASS", "Inspector: all checks passed.", null);
+        }
     }
 
     static class FakeMedia implements MediaActivities {
         /** When true, keyframe generation throws, to test the failed-stage path. */
         volatile boolean failKeyframes;
         volatile boolean failVoice;
+
+        volatile boolean failInspector;
+
+        @Override
+        public com.projectv.media.MediaTypes.MediaInspectResult inspectMedia(
+                com.projectv.media.MediaTypes.MediaInspectRequest request) {
+            if (failInspector) {
+                throw ApplicationFailure.newNonRetryableFailure("ffmpeg missing", "Test");
+            }
+            return com.projectv.media.MediaTypes.MediaInspectResult.NONE;
+        }
 
         @Override
         public String toolVersions() {
@@ -311,6 +343,38 @@ class VideoProductionWorkflowTest {
         wf.approve(Stage.KEYFRAMES, null);                        // approve = continue without it
         WorkflowStub.fromTyped(wf).getResult(Void.class);
         assertTrue(activities.events.contains("KEYFRAMES:2:SKIPPED"));
+        assertEquals("VIDEO:COMPLETED", activities.events.getLast());
+    }
+
+    @Test
+    void inspectorFailIsRedoneOnceAutomaticallyWithTheFindingsAsNotes() {
+        activities.keyframeInspectionFails = 1;
+        VideoProductionWorkflow wf = start("inspect-once", StageMode.AUTO, Map.of());
+        WorkflowStub.fromTyped(wf).getResult(Void.class);
+        assertTrue(activities.events.contains("KEYFRAMES:1:INSPECTION_FAILED"));
+        assertTrue(activities.events.contains("KEYFRAMES:2:AUTO_PASSED"));
+        assertTrue(activities.inspected.contains("SHOT_PLAN:1"), "every inspected stage is checked");
+        assertEquals("VIDEO:COMPLETED", activities.events.getLast());
+    }
+
+    @Test
+    void inspectorFailingTwiceWaitsForTheOwnerEvenInAuto() {
+        activities.keyframeInspectionFails = 2;
+        VideoProductionWorkflow wf = start("inspect-twice", StageMode.AUTO, Map.of());
+        awaitWaiting(wf, Stage.KEYFRAMES);
+        assertTrue(activities.events.contains("KEYFRAMES:2:WAITING_APPROVAL"));
+        wf.approve(Stage.KEYFRAMES, null);                       // accept it anyway
+        WorkflowStub.fromTyped(wf).getResult(Void.class);
+        assertTrue(activities.events.contains("KEYFRAMES:2:APPROVED"));
+        assertEquals("VIDEO:COMPLETED", activities.events.getLast());
+    }
+
+    @Test
+    void aBrokenInspectorNeverBlocksTheVideo() {
+        media.failInspector = true;
+        VideoProductionWorkflow wf = start("inspect-broken", StageMode.AUTO, Map.of());
+        WorkflowStub.fromTyped(wf).getResult(Void.class);
+        assertTrue(activities.events.contains("KEYFRAMES:1:AUTO_PASSED"));
         assertEquals("VIDEO:COMPLETED", activities.events.getLast());
     }
 

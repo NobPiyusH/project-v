@@ -36,6 +36,13 @@ public final class WorkflowTypes {
         }
     }
 
+    /**
+     * Inspector verdict for one stage attempt. {@code notes} are the FAIL findings written as redo instructions.
+     */
+    public record InspectionReport(String verdict, String summary, String notes) {
+        public static final InspectionReport SKIPPED = new InspectionReport("PASS", null, null);
+    }
+
     public record StageView(Stage stage, StageMode mode, String status, int attempt, String summary) {
     }
 
