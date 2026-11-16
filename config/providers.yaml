@@ -1,0 +1,67 @@
+# Provider registry (HANDOVER §11.2, §12). Loaded at startup into the `provider` table.
+# M1: config only; routing arrives in M3. Prices and quotas are starting points: verify before use (CLAUDE.md rule 7).
+# Never put keys here. `secret_ref` names the .env variable that holds the key.
+providers:
+  - id: gemini_api
+    name: Gemini API (text)
+    kind: api
+    capabilities: [llm.plan, llm.script, vlm.critic]
+    secret_ref: GEMINI_API_KEY
+    enabled: true
+
+  - id: modal_a100
+    name: Modal (serverless A100)
+    kind: gpu_serverless
+    capabilities: [video.wan22_14b, image.flux2, upscale.seedvr, interp.rife]
+    quota: { type: monthly_usd, amount: 30, reset: "monthly@1" }
+    enabled: false
+
+  - id: kaggle_t4
+    name: Kaggle notebooks (T4/P100)
+    kind: gpu_notebook
+    capabilities: [upscale.realesrgan, image.zimage_turbo, tts.kokoro, interp.rife]
+    quota: { type: weekly_hours, amount: 30, reset: "weekly@SUN00:00Z" }
+    enabled: false
+
+  - id: lightning_t4
+    name: Lightning AI (T4)
+    kind: gpu_notebook
+    capabilities: [upscale.realesrgan, image.zimage_turbo, interp.rife]
+    quota: { type: monthly_credits, amount: 15, reset: "monthly@1" }
+    enabled: false
+
+  - id: vast_4090_interruptible
+    name: Vast.ai RTX 4090 (interruptible)
+    kind: gpu_pod
+    capabilities: [video.wan22_14b, image.flux2, upscale.seedvr]
+    cost: { unit: gpu_hour, live_price: true }
+    interruptible: true
+    enabled: false
+
+  - id: runpod_4090_community
+    name: RunPod RTX 4090 (community)
+    kind: gpu_pod
+    capabilities: [video.wan22_14b, image.flux2, upscale.seedvr]
+    cost: { unit: gpu_hour, live_price: true }
+    enabled: false
+
+  - id: gemini_api_veo
+    name: Gemini API Veo (video, paid)
+    kind: api
+    capabilities: [video.veo_fast, video.veo_quality]
+    secret_ref: GEMINI_API_KEY
+    enabled: false
+
+  - id: manual_flow
+    name: Google Flow (you, by hand)
+    kind: manual
+    capabilities: [video.veo_quality, video.omni_flash, image.nano_banana]
+    quota: { type: monthly_credits, amount: 1000, daily_bonus: 50 }
+    latency: human
+    enabled: true
+
+  - id: local_laptop
+    name: This laptop (RTX 3050 4 GB)
+    kind: local
+    capabilities: [tts.kokoro, asr.whisper, ffmpeg, otio]
+    enabled: true

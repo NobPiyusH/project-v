@@ -1,0 +1,11 @@
+{
+  "identities": [
+    {
+      "name": "projectv-local",
+      "credentials": [
+        { "accessKey": "projectv", "secretKey": "projectv-local-secret" }
+      ],
+      "actions": ["Admin", "Read", "Write", "List", "Tagging"]
+    }
+  ]
+}

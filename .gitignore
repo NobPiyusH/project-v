@@ -1,0 +1,32 @@
+# Secrets
+.env
+*.env.local
+
+# Gradle / Java
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+*.class
+HELP.md
+
+# IDEs
+.idea/
+*.iml
+.vscode/
+*.swp
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+dist/
+
+# Local runtime data (never commit media or databases)
+data/
+drop/
+*.log

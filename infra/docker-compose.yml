@@ -1,0 +1,52 @@
+# Local services for projectv. All ports bind to 127.0.0.1 only (never exposed to the network).
+# Start:  docker compose -f infra/docker-compose.yml up -d
+# Stop:   docker compose -f infra/docker-compose.yml down        (data is kept in named volumes)
+name: projectv
+
+services:
+  postgres:
+    image: pgvector/pgvector:0.8.7-pg17-trixie
+    environment:
+      POSTGRES_DB: projectv
+      POSTGRES_USER: projectv
+      POSTGRES_PASSWORD: projectv-local
+    ports:
+      # 5433 on the host: the owner's laptop already runs its own PostgreSQL on 5432.
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U projectv -d projectv"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  # Temporal dev server: single process, SQLite persistence (survives restarts), built-in Web UI on :8233.
+  # Light enough for a laptop. Can be swapped for a full Temporal cluster later without code changes.
+  temporal:
+    image: temporalio/temporal:1.10.1
+    command: ["server", "start-dev", "--ip", "0.0.0.0", "--db-filename", "/data/temporal.db", "--ui-port", "8233"]
+    user: "0:0"
+    ports:
+      - "127.0.0.1:7233:7233"
+      - "127.0.0.1:8233:8233"
+    volumes:
+      - temporal-data:/data
+    restart: unless-stopped
+
+  # S3-compatible object store for media (replaces MinIO, whose public images were discontinued).
+  seaweedfs:
+    image: chrislusf/seaweedfs:4.54
+    command: ["server", "-dir=/data", "-s3", "-s3.config=/etc/seaweedfs/s3.json", "-s3.port=8333"]
+    ports:
+      - "127.0.0.1:8333:8333"
+    volumes:
+      - seaweedfs-data:/data
+      - ./seaweedfs/s3.json:/etc/seaweedfs/s3.json:ro
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  temporal-data:
+  seaweedfs-data:
