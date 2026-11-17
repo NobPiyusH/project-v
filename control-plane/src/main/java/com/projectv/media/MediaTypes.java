@@ -57,6 +57,11 @@ public final class MediaTypes {
         public boolean elevenLabs() {
             return model != null && model.startsWith("elevenlabs:");
         }
+
+        /** Kokoro on the laptop: the free last-resort voice. */
+        public boolean kokoro() {
+            return model != null && model.startsWith("kokoro:");
+        }
     }
 
     // ---- music

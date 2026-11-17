@@ -13,6 +13,7 @@ import io
 import json
 import os
 import re
+import threading
 import urllib.request
 import uuid
 import wave
@@ -201,6 +202,8 @@ def eleven_needed(lines: list[dict], multiplier: float = 1.0) -> int:
 def choose_provider(req: dict, remaining: int | None, cfg: dict) -> str:
     """'elevenlabs' or 'gemini' for the whole request. A redo keeps the video's provider ('elevenlabs' asked)."""
     wanted = (req.get("voiceProvider") or "auto").lower()
+    if wanted == "kokoro":
+        return "kokoro"
     if wanted == "gemini" or not cfg["key"]:
         if wanted == "elevenlabs":
             raise RuntimeError("This video was voiced by ElevenLabs but no ELEVENLABS_API_KEY is set")
@@ -246,6 +249,68 @@ def _speak_eleven(req: dict, cfg: dict, line: dict) -> dict:
             "takes": len(checks), "passed": checks[-1]["ok"], "check": checks[-1]["why"], "characters": billed}
 
 
+# ------------------------------------------------------------------------------------------------ Kokoro
+# Last-resort voice (18 Nov 2026): Kokoro-82M (Apache-2.0) on the laptop CPU, free and offline, so narration never
+# stops a video when ElevenLabs and Gemini are both unavailable. English only; weights pinned on Hugging Face.
+
+KOKORO_REPO = "hexgrad/Kokoro-82M"
+KOKORO_REVISION = "f3ff3571791e39611d31c381e3a41a3af07b4987"
+_kokoro = None
+_kokoro_lock = threading.Lock()
+
+
+def _kokoro_voice() -> str:
+    return os.getenv("KOKORO_VOICE") or "bm_george"  # British male narrator; 'a…' voices are American
+
+
+def kokoro_available(language: str | None) -> bool:
+    if (language or "en")[:2].lower() != "en":
+        return False
+    try:
+        import kokoro  # noqa: F401
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _kokoro_pipeline():
+    global _kokoro
+    if _kokoro is None:
+        from huggingface_hub import hf_hub_download
+        from kokoro import KModel, KPipeline
+
+        get = lambda f: hf_hub_download(KOKORO_REPO, f, revision=KOKORO_REVISION)  # noqa: E731
+        model = KModel(repo_id=KOKORO_REPO, config=get("config.json"), model=get("kokoro-v1_0.pth")).eval()
+        voice = _kokoro_voice()
+        _kokoro = (KPipeline(lang_code=voice[0], repo_id=KOKORO_REPO, model=model), get(f"voices/{voice}.pt"))
+    return _kokoro
+
+
+def _kokoro_tts(text: str) -> bytes:
+    import numpy as np
+
+    with _kokoro_lock:  # one model, used one line at a time
+        pipe, voice = _kokoro_pipeline()
+        chunks = [np.asarray(audio, dtype=np.float32) for _, _, audio in pipe(text, voice=voice) if audio is not None]
+    pcm = (np.clip(np.concatenate(chunks), -1, 1) * 32767).astype("<i2").tobytes()
+    return pcm_to_wav(pcm, rate=24000)
+
+
+def _speak_kokoro(req: dict, line: dict) -> dict:
+    wav = _kokoro_tts(line["text"])
+    heard, _ = _transcribe(req, wav)
+    ok, why = judge(line["text"], heard)
+    uri = put_bytes(f"videos/{req['videoId']}/narration/line-{line['index']:03d}.wav", wav, "audio/wav")
+    return {"index": line["index"], "uri": uri, "durationSec": round(_wav_seconds(wav), 3), "usage": None,
+            "takes": 1, "passed": ok, "check": why}
+
+
+def _kokoro_result(req: dict) -> dict:
+    lines = _run(req, lambda line: _speak_kokoro(req, line))
+    return {"lines": lines, "model": f"kokoro:{_kokoro_voice()}", "voiceName": f"Kokoro {_kokoro_voice()}",
+            "characters": 0}
+
+
 def _run(req: dict, speak) -> list[dict]:
     results = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
@@ -278,6 +343,14 @@ def synthesize_narration(req: dict) -> dict:
             if (req.get("voiceProvider") or "auto") == "elevenlabs":
                 raise  # a redo must keep the video's voice: let the owner decide
             log.warning("ElevenLabs failed (%s: %s); re-voicing the whole video with Gemini", type(e).__name__, e)
-    lines = _run(req, lambda line: _speak(req, line))
+    if provider == "kokoro":
+        return _kokoro_result(req)
+    try:
+        lines = _run(req, lambda line: _speak(req, line))
+    except Exception as e:  # noqa: BLE001
+        if (req.get("voiceProvider") or "auto") != "auto" or not kokoro_available(req.get("language")):
+            raise
+        log.warning("Gemini TTS failed (%s: %s); voicing the whole video with Kokoro on the laptop", type(e).__name__, e)
+        return _kokoro_result(req)
     return {"lines": lines, "model": model_list(req["model"])[0], "voiceName": req.get("voiceName") or "Charon",
             "characters": 0}

@@ -26,3 +26,18 @@ def test_a_redo_keeps_the_videos_voice_and_says_so_when_credit_is_short():
     assert V.choose_provider(redo, 300, CFG) == "elevenlabs"  # the reserve exists for exactly this
     with pytest.raises(RuntimeError, match="too low to re-voice in the same voice"):
         V.choose_provider(redo, 100, CFG)
+
+
+def test_a_kokoro_video_keeps_kokoro_for_redos():
+    assert V.choose_provider({"lines": LINES, "voiceProvider": "kokoro"}, 9000, CFG) == "kokoro"
+
+
+def test_when_gemini_tts_fails_kokoro_voices_the_whole_video(monkeypatch):
+    calls = []
+    monkeypatch.setattr(V, "_eleven_config", lambda: {**CFG, "key": ""})
+    monkeypatch.setattr(V, "_speak", lambda req, line: (_ for _ in ()).throw(RuntimeError("503 overloaded")))
+    monkeypatch.setattr(V, "kokoro_available", lambda language: True)
+    monkeypatch.setattr(V, "_kokoro_result", lambda req: calls.append(len(req["lines"])) or {"model": "kokoro:bm_george"})
+    monkeypatch.setattr(V.activity, "heartbeat", lambda *a: None)
+    out = V.synthesize_narration({"videoId": "v", "model": "tts", "language": "en", "lines": LINES})
+    assert out["model"] == "kokoro:bm_george" and calls == [3]

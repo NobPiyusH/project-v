@@ -126,8 +126,9 @@ public class FinishStage extends StageSupport {
         if (ok == 0 && !req.jobs().isEmpty() && !r.stopped()) {
             throw new IllegalStateException("No clips were smoothed: " + String.join(" | ", errors));
         }
-        return StageResult.of("%d/%d clips smoothed to a true 24 fps (RIFE in-between frames) in %.0f s of L4 time%s.".formatted(
-                ok, req.jobs().size(), gpu, errors.isEmpty() ? "" : "; " + errors.size() + " failed: " + errors.getFirst()),
+        String where = gpu <= 0 ? "on the laptop GPU (free)" : "in %.0f s of L4 time".formatted(gpu);
+        return StageResult.of("%d/%d clips smoothed to a true 24 fps (RIFE in-between frames) %s%s.".formatted(
+                ok, req.jobs().size(), where, errors.isEmpty() ? "" : "; " + errors.size() + " failed: " + errors.getFirst()),
                 json.writeValueAsString(Map.of("ok", ok, "failed", errors)));
     }
 }

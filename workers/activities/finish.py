@@ -13,13 +13,14 @@ import os
 import queue
 import threading
 import uuid
+from pathlib import Path
 from typing import Callable, Iterable
 
 import modal
 from temporalio import activity
 
 from workers.activities.clips import POLL_SECONDS, _post, _stop_requested
-from workers.common import get_bytes, log, put_bytes
+from workers.common import get_bytes, log, put_bytes, put_file, workdir
 
 
 def _beat(detail) -> None:
@@ -100,9 +101,55 @@ def _stream(req: dict, kind: str, folder: str, payload: Callable[[dict], dict],
     return {"clips": clips, "containers": 1, "stopped": stopped}
 
 
+def _smooth_local(req: dict) -> tuple[list[dict], list[dict]]:
+    """Smooth on the laptop's GPU (free). Returns (done clips, jobs left for Modal). Any failure hands the rest over."""
+    from workers.local import rife
+
+    video_id, done, left = req["videoId"], [], []
+    base = (req.get("progressUrl") or "http://127.0.0.1:8080").rstrip("/")
+    with workdir("rife") as tmp:
+        for n, j in enumerate(req["jobs"]):
+            if left or _stop_requested(base, video_id):
+                left.append(j)
+                continue
+            try:
+                src, dst = Path(tmp) / f"in{n}.mp4", Path(tmp) / f"out{n}.mp4"
+                src.write_bytes(get_bytes(j["uri"]))
+                r = rife.smooth(src, dst, float(j.get("srcFps") or 16), float(req.get("dstFps") or 24))
+                uri = put_file(f"videos/{video_id}/clips/smooth/shot{j['shotNumber']:03d}-{j['sourceAssetId'][:8]}.mp4",
+                               dst, "video/mp4")
+                # gpuSeconds 0: the laptop costs nothing, so no Modal charge is recorded for these clips.
+                done.append({"shotId": j["shotId"], "sourceAssetId": j["sourceAssetId"], "uri": uri, "gpuSeconds": 0,
+                             "frames": r["frames"], "fps": r["fps"], "error": None})
+                log.info("smooth shot %s on the laptop GPU in %.1fs", j["shotNumber"], r["seconds"])
+            except Exception as e:  # noqa: BLE001 - e.g. out of GPU memory: Modal does the rest
+                log.warning("Local RIFE failed on shot %s (%s); Modal takes over", j["shotNumber"], e)
+                left.append(j)
+            _post(f"{base}/api/internal/clips/progress", {"videoId": video_id, "clips": [
+                {"shotId": x["shotId"], "shotNumber": x["shotNumber"], "kind": "smooth", "state": "queued"}
+                for x in req["jobs"][n + 1:]]})
+            _beat({"done": len(done), "total": len(req["jobs"])})
+    return done, left
+
+
 @activity.defn(name="smooth_clips")
 def smooth_clips(req: dict) -> dict:
-    """req: {videoId, progressUrl, dstFps, jobs:[{shotId, shotNumber, sourceAssetId, uri, srcFps}]}"""
+    """req: {videoId, progressUrl, dstFps, jobs:[{shotId, shotNumber, sourceAssetId, uri, srcFps}]}
+    Laptop GPU first (free, PROJECTV_LOCAL_RIFE=0 turns it off), Modal for anything left."""
+    if req.get("jobs") and os.getenv("PROJECTV_LOCAL_RIFE", "1") != "0":
+        from workers.local import rife
+        if rife.available():
+            done, left = _smooth_local(req)
+            if not left:
+                _post(f"{(req.get('progressUrl') or 'http://127.0.0.1:8080').rstrip('/')}/api/internal/clips/progress",
+                      {"videoId": req["videoId"], "clips": [], "finished": True})
+                return {"clips": done, "containers": 0, "stopped": False}
+            rest = _modal_smooth({**req, "jobs": left})
+            return {**rest, "clips": done + rest["clips"]}
+    return _modal_smooth(req)
+
+
+def _modal_smooth(req: dict) -> dict:
     smooth = modal.Cls.from_name("projectv-finish", "Smooth")()
     return _stream(req, "smooth", "smooth",
                    lambda j: {"srcFps": j.get("srcFps") or 16, "dstFps": req.get("dstFps") or 24},

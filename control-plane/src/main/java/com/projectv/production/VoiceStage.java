@@ -79,8 +79,9 @@ public class VoiceStage extends StageSupport {
                 continue;
             }
             UUID assetId = assets.create(new NewAsset(videoId, "audio", c.uri(), "audio/wav", null, null, c.durationSec(),
-                    r.elevenLabs() ? "elevenlabs" : "gemini_api", r.model(), "[" + r.voiceName() + "] " + l.text(), null,
-                    r.elevenLabs() ? AssetStore.LICENCE_ELEVENLABS_FREE : AssetStore.LICENCE_GEMINI, true));
+                    r.elevenLabs() ? "elevenlabs" : r.kokoro() ? "kokoro" : "gemini_api", r.model(),
+                    "[" + r.voiceName() + "] " + l.text(), null, r.elevenLabs() ? AssetStore.LICENCE_ELEVENLABS_FREE
+                            : r.kokoro() ? AssetStore.LICENCE_KOKORO : AssetStore.LICENCE_GEMINI, true));
             lines.add(l.withNewTake(new AudioVersion(assetId, c.uri(), c.durationSec(), now, c.check(), style, l.text()), c.passed()));
         }
         writeScript(videoId, withLines(s, lines));
@@ -88,7 +89,7 @@ public class VoiceStage extends StageSupport {
             // Free plan: no money, but the credits are tracked (10,000 a month).
             ledger.record(videoId, "elevenlabs", pricing.elevenLabsInr(r.characters()), BigDecimal.valueOf(r.characters()),
                     "credits", false, purpose + " (" + r.model() + ", " + r.lines().size() + " lines)");
-        } else {
+        } else if (!r.kokoro()) { // Kokoro runs free on the laptop: nothing to record
             ledger.record(videoId, BudgetGuard.GEMINI, pricing.ttsInr(total), BigDecimal.valueOf(total.totalTokens()), "tokens",
                     true, purpose + " (" + r.model() + ", " + r.lines().size() + " lines)");
         }
@@ -150,14 +151,14 @@ public class VoiceStage extends StageSupport {
                 base.language(), lines, currentProvider(videoId));
     }
 
-    /** "elevenlabs" or "gemini": who voiced this video's narration most recently. */
+    /** "elevenlabs", "gemini" or "kokoro": who voiced this video's narration most recently. */
     String currentProvider(UUID videoId) {
         return jdbc.sql("""
                         SELECT p.provider FROM asset a JOIN provenance p ON p.id = a.provenance_id
                         WHERE a.video_id = :v AND a.kind = 'audio' AND a.uri_hot LIKE '%/narration/%'
-                          AND p.provider IN ('elevenlabs', 'gemini_api') ORDER BY a.created_at DESC LIMIT 1
+                          AND p.provider IN ('elevenlabs', 'gemini_api', 'kokoro') ORDER BY a.created_at DESC LIMIT 1
                         """).param("v", videoId).query(String.class).optional()
-                .map(p -> "elevenlabs".equals(p) ? "elevenlabs" : "gemini").orElse("auto");
+                .map(p -> "gemini_api".equals(p) ? "gemini" : p).orElse("auto");
     }
 
     @Transactional
