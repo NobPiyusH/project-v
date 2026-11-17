@@ -61,6 +61,10 @@ public interface MediaActivities {
     @ActivityMethod(name = "smooth_clips")
     com.projectv.media.MediaTypes.SmoothResult smoothClips(com.projectv.media.MediaTypes.SmoothRequest request);
 
+    /** M2c part 2b: SeedVR2 7B restore to 1080p on one Modal H100, clips in groups; saved per clip; honours Stop. */
+    @ActivityMethod(name = "upscale_clips")
+    com.projectv.media.MediaTypes.SmoothResult upscaleClips(com.projectv.media.MediaTypes.SmoothRequest request);
+
     /** Inspector file checks (Whisper, FFmpeg, image statistics). Free to run; reports findings, changes nothing. */
     @ActivityMethod(name = "inspect_media")
     com.projectv.media.MediaTypes.MediaInspectResult inspectMedia(com.projectv.media.MediaTypes.MediaInspectRequest request);

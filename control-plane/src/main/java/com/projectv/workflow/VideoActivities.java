@@ -130,6 +130,15 @@ public interface VideoActivities {
     StageResult saveSmooth(String videoId, com.projectv.media.MediaTypes.SmoothRequest request,
                            com.projectv.media.MediaTypes.SmoothResult result);
 
+    // ---- M2c part 2b: sharpness (SeedVR2)
+
+    com.projectv.media.MediaTypes.ClipEstimate sharpEstimate(String videoId);
+
+    com.projectv.media.MediaTypes.SmoothRequest sharpRequest(String videoId);
+
+    StageResult saveSharp(String videoId, com.projectv.media.MediaTypes.SmoothRequest request,
+                          com.projectv.media.MediaTypes.SmoothResult result);
+
     /** Upsert the stage_run row and the video's status / current stage. */
     void recordStage(String videoId, Stage stage, int attempt, StageMode mode, String status,
                      String summary, String artifactJson, String ownerNotes);

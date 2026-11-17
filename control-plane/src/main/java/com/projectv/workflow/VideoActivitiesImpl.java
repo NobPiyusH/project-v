@@ -43,6 +43,7 @@ public class VideoActivitiesImpl implements VideoActivities {
     private final com.projectv.production.FootageStage footage;
     private final com.projectv.production.AssemblyStage assembly;
     private final com.projectv.production.FinishStage finish;
+    private final com.projectv.production.SharpenStage sharpen;
 
     public VideoActivitiesImpl(JdbcClient jdbc, Planner planner, CostLedger ledger, ObjectMapper json,
                                ProductionService production, Pricing pricing,
@@ -51,7 +52,8 @@ public class VideoActivitiesImpl implements VideoActivities {
                                com.projectv.production.VideoStage video, com.projectv.video.ClipProgress clipProgress,
                                com.projectv.production.FootageStage footage,
                                com.projectv.production.AssemblyStage assembly,
-                               com.projectv.production.FinishStage finish) {
+                               com.projectv.production.FinishStage finish,
+                               com.projectv.production.SharpenStage sharpen) {
         this.jdbc = jdbc;
         this.planner = planner;
         this.ledger = ledger;
@@ -65,6 +67,7 @@ public class VideoActivitiesImpl implements VideoActivities {
         this.footage = footage;
         this.assembly = assembly;
         this.finish = finish;
+        this.sharpen = sharpen;
     }
 
     @Override
@@ -81,6 +84,22 @@ public class VideoActivitiesImpl implements VideoActivities {
     public StageResult saveSmooth(String videoId, com.projectv.media.MediaTypes.SmoothRequest request,
                                   com.projectv.media.MediaTypes.SmoothResult result) {
         return finish.save(UUID.fromString(videoId), request, result);
+    }
+
+    @Override
+    public com.projectv.media.MediaTypes.ClipEstimate sharpEstimate(String videoId) {
+        return sharpen.estimate(UUID.fromString(videoId));
+    }
+
+    @Override
+    public com.projectv.media.MediaTypes.SmoothRequest sharpRequest(String videoId) {
+        return sharpen.request(UUID.fromString(videoId));
+    }
+
+    @Override
+    public StageResult saveSharp(String videoId, com.projectv.media.MediaTypes.SmoothRequest request,
+                                 com.projectv.media.MediaTypes.SmoothResult result) {
+        return sharpen.save(UUID.fromString(videoId), request, result);
     }
 
     @Override

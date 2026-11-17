@@ -225,6 +225,23 @@ class VideoProductionWorkflowTest {
             return StageResult.of("smoothed", "{}");
         }
 
+        @Override
+        public com.projectv.media.MediaTypes.ClipEstimate sharpEstimate(String videoId) {
+            return new com.projectv.media.MediaTypes.ClipEstimate("sharp", 0, 0, java.math.BigDecimal.ZERO, 0, 0, false,
+                    "Every clip is already sharp.");
+        }
+
+        @Override
+        public com.projectv.media.MediaTypes.SmoothRequest sharpRequest(String videoId) {
+            return new com.projectv.media.MediaTypes.SmoothRequest(videoId, "u", 24, List.of(), java.math.BigDecimal.ZERO);
+        }
+
+        @Override
+        public StageResult saveSharp(String videoId, com.projectv.media.MediaTypes.SmoothRequest request,
+                                     com.projectv.media.MediaTypes.SmoothResult result) {
+            return StageResult.of("sharpened", "{}");
+        }
+
         // ---- M2c assembly
         @Override
         public com.projectv.media.MediaTypes.AssemblyRequest assemblyRequest(String videoId) {
@@ -347,6 +364,11 @@ class VideoProductionWorkflowTest {
 
         @Override
         public com.projectv.media.MediaTypes.SmoothResult smoothClips(com.projectv.media.MediaTypes.SmoothRequest request) {
+            return new com.projectv.media.MediaTypes.SmoothResult(List.of(), 1, false);
+        }
+
+        @Override
+        public com.projectv.media.MediaTypes.SmoothResult upscaleClips(com.projectv.media.MediaTypes.SmoothRequest request) {
             return new com.projectv.media.MediaTypes.SmoothResult(List.of(), 1, false);
         }
 

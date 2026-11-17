@@ -19,6 +19,7 @@ public class AssetStore {
     public static final UUID LICENCE_WAN = UUID.fromString("00000000-0000-0000-0000-00000000a004");
     public static final UUID LICENCE_NASA = UUID.fromString("00000000-0000-0000-0000-00000000a005");
     public static final UUID LICENCE_RIFE = UUID.fromString("00000000-0000-0000-0000-00000000a006");
+    public static final UUID LICENCE_SEEDVR2 = UUID.fromString("00000000-0000-0000-0000-00000000a007");
 
     public record NewAsset(UUID videoId, String kind, String uri, String mimeType, Integer width, Integer height,
                            Double durationSec, String provider, String model, String prompt, Long seed, UUID licenceId,

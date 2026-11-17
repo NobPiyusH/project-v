@@ -54,6 +54,7 @@ class ProductionPersistenceTest {
     static FootageStage footage;
     static AssemblyStage assembly;
     static FinishStage finish;
+    static SharpenStage sharpen;
     static BudgetGuard budget;
 
     UUID video;
@@ -76,6 +77,7 @@ class ProductionPersistenceTest {
         footage = new FootageStage(deps);
         assembly = new AssemblyStage(deps);
         finish = new FinishStage(deps, "http://127.0.0.1:8080", BigDecimal.ZERO);
+        sharpen = new SharpenStage(deps, finish, "http://127.0.0.1:8080", BigDecimal.ZERO);
     }
 
     @BeforeEach
@@ -126,8 +128,8 @@ class ProductionPersistenceTest {
 
     @Test
     void allMigrationsApplyAndLicencesAreSeeded() {
-        assertEquals(6, jdbc.sql("SELECT count(*) FROM licence").query(Integer.class).single());
-        assertEquals(10, jdbc.sql("SELECT count(*) FROM flyway_schema_history WHERE success").query(Integer.class).single());
+        assertEquals(7, jdbc.sql("SELECT count(*) FROM licence").query(Integer.class).single());
+        assertEquals(11, jdbc.sql("SELECT count(*) FROM flyway_schema_history WHERE success").query(Integer.class).single());
     }
 
     @Test
@@ -367,6 +369,36 @@ class ProductionPersistenceTest {
         shots = assembly.assemblyRequest(video).shots();
         assertEquals("draft:s3://b/d2.mp4", shots.getFirst().kind() + ":" + shots.getFirst().uri(), "stale smooth clip not used");
         assertEquals(1, finish.estimate(video).clips(), "the new take needs smoothing");
+    }
+
+    @Test
+    void sharpeningWorksOnTheSmoothedClipAndTheEditUsesItOnlyWhileFresh() {
+        UUID s1 = shotWithKeyframe(0, 3.0);
+        UUID d1 = videoAsset(s1, "draft", "s3://b/d1.mp4");
+        jdbc.sql("UPDATE shot SET draft_clip_asset_id = :a, prompt_json = CAST('{\"startSec\": 0}' AS jsonb) WHERE id = :s")
+                .param("a", d1).param("s", s1).update();
+        assertEquals(1, sharpen.estimate(video).clips(), "a shot about to be smoothed is counted once");
+        var smoothReq = finish.request(video);
+        finish.save(video, smoothReq, new com.projectv.media.MediaTypes.SmoothResult(List.of(new com.projectv.media.MediaTypes.SmoothOutput(
+                s1.toString(), d1.toString(), "s3://b/d1-smooth.mp4", 4.0, 72, 24, null)), 1, false));
+        var req = sharpen.request(video);
+        assertEquals(1, req.jobs().size());
+        assertEquals("s3://b/d1-smooth.mp4", req.jobs().getFirst().uri(), "sharpening starts from the smoothed clip");
+        String smoothId = req.jobs().getFirst().sourceAssetId();
+        var saved = sharpen.save(video, req, new com.projectv.media.MediaTypes.SmoothResult(List.of(new com.projectv.media.MediaTypes.SmoothOutput(
+                s1.toString(), smoothId, "s3://b/d1-sharp.mp4", 95.0, 72, 24, null)), 1, false));
+        assertTrue(saved.summary().startsWith("1/1 clips sharpened"), saved.summary());
+        assertEquals(0, sharpen.estimate(video).clips(), "already sharp from the clip in use");
+        assertEquals(1, jdbc.sql("SELECT count(*) FROM cost_entry WHERE video_id = :v AND provider_id = 'modal_h100'")
+                .param("v", video).query(Integer.class).single());
+        var shots = assembly.assemblyRequest(video).shots();
+        assertEquals("draft+smooth+sharp:s3://b/d1-sharp.mp4", shots.getFirst().kind() + ":" + shots.getFirst().uri());
+
+        UUID d2 = videoAsset(s1, "draft", "s3://b/d2.mp4");   // the owner picks another take
+        jdbc.sql("UPDATE shot SET draft_clip_asset_id = :a WHERE id = :s").param("a", d2).param("s", s1).update();
+        shots = assembly.assemblyRequest(video).shots();
+        assertEquals("draft:s3://b/d2.mp4", shots.getFirst().kind() + ":" + shots.getFirst().uri(), "stale sharp clip not used");
+        assertEquals(1, sharpen.estimate(video).clips(), "the new take needs sharpening");
     }
 
     @Test

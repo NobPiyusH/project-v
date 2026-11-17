@@ -480,27 +480,49 @@ public class VideoProductionWorkflowImpl implements VideoProductionWorkflow {
     }
 
     /**
-     * Smooth motion (GPU): estimated first; the owner approves the spend unless it is under the auto-approve amount;
-     * declining skips the stage (the edit then repeats frames instead).
+     * Upscale stage (GPU finishing): smooth motion (RIFE, L4), then sharpness (SeedVR2, H100). Both are estimated
+     * first and shown as one approval; the owner approves the spend unless it is under the auto-approve amount;
+     * declining skips the stage (the edit then uses the clips as they are). Sharpening runs after smoothing so it
+     * works on the clips the edit will actually use.
      */
     private StageResult runSmooth(String videoId, Stage stage, int attempt, String notes) {
-        ClipEstimate estimate = activities.smoothEstimate(videoId);
-        if (estimate.clips() == 0) {
+        ClipEstimate smooth = activities.smoothEstimate(videoId);
+        ClipEstimate sharp = sharpenEnabled() ? activities.sharpEstimate(videoId) : null;
+        int clips = smooth.clips() + (sharp == null ? 0 : sharp.clips());
+        String summary = sharp == null || sharp.clips() == 0 ? smooth.summary()
+                : smooth.clips() == 0 ? sharp.summary() : smooth.summary() + " Then: " + sharp.summary();
+        if (clips == 0) {
             skipStage = true;
-            return StageResult.of(estimate.summary(), null);
+            return StageResult.of(summary, null);
         }
-        if (estimate.needsApproval()) {
-            Decision d = awaitOwner(videoId, stage, attempt, "WAITING_APPROVAL", estimate.summary(),
-                    estimate.summary() + " Approve to start, or Reject to skip (nothing is spent).", null, notes, false);
+        if (smooth.needsApproval() || (sharp != null && sharp.needsApproval())) {
+            Decision d = awaitOwner(videoId, stage, attempt, "WAITING_APPROVAL", summary,
+                    summary + " Approve to start, or Reject to skip (nothing is spent).", null, notes, false);
             if (!d.approve()) {
                 skipStage = true;
-                return StageResult.of("Skipped: the owner didn't approve the GPU spend (" + estimate.summary() + ")", null);
+                return StageResult.of("Skipped: the owner didn't approve the GPU spend (" + summary + ")", null);
             }
             activities.recordStage(videoId, stage, attempt, modeOf(stage), "RUNNING", null, null, notes);
             views.put(stage, new StageView(stage, modeOf(stage), "RUNNING", attempt, null));
         }
-        var request = agents.smoothRequest(videoId);
-        return activities.saveSmooth(videoId, request, clipMedia.smoothClips(request));
+        StageResult smoothed = null;
+        if (smooth.clips() > 0) {
+            var request = agents.smoothRequest(videoId);
+            smoothed = activities.saveSmooth(videoId, request, clipMedia.smoothClips(request));
+        }
+        if (sharp == null || sharp.clips() == 0) {
+            return smoothed;
+        }
+        var request = agents.sharpRequest(videoId);
+        StageResult sharpened = request.jobs().isEmpty() ? StageResult.of("Every clip is already sharp.", null)
+                : activities.saveSharp(videoId, request, clipMedia.upscaleClips(request));
+        return smoothed == null ? sharpened
+                : StageResult.of(smoothed.summary() + " " + sharpened.summary(), sharpened.artifactJson());
+    }
+
+    /** Workflows started before sharpening existed replay smoothing only (Temporal determinism). */
+    private boolean sharpenEnabled() {
+        return Workflow.getVersion("sharpen", Workflow.DEFAULT_VERSION, 1) != Workflow.DEFAULT_VERSION;
     }
 
     /** Workflows started before smooth motion existed replay the old placeholder Upscale (determinism). */
