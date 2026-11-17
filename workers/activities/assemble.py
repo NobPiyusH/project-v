@@ -263,6 +263,9 @@ def assemble_video(req: dict) -> dict:
             args += ["-i", str(mix)]
         vf = f"subtitles=filename='{ass.as_posix().replace(':', chr(92) + ':')}':fontsdir='{FONTS_DIR}'" if ass else "null"
         args += ["-vf", vf, "-map", "0:v"] + (["-map", "1:a", "-c:a", "aac", "-b:a", "256k", "-ar", "48000"] if mix else [])
+        # Cut exactly at the planned length: per-shot frame rounding must never push a Short past 60 s.
+        if req.get("totalSec"):
+            args += ["-t", f"{min(float(req['totalSec']), total):.3f}"]
         args += ["-c:v", "libx264", "-preset", "slow", "-crf", "16", "-pix_fmt", "yuv420p", "-r", str(FPS),
                  "-movflags", "+faststart", "-shortest", str(master)]
         run_ffmpeg(args)
