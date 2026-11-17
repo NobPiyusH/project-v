@@ -33,10 +33,18 @@ def render_animatic(req: dict) -> dict:
 
         # 1. One short clip per shot: the still with a slow push-in, a shot label and any on-screen overlay.
         clips = []
+        # Shot lengths are cut on one frame grid (cumulative), so rounding never adds up (a 60 s Short was 60.1 s);
+        # the last shot ends exactly at the planned length.
+        limit = round(float(req["totalSec"]) * FPS) if req.get("totalSec") else None
+        done = 0
         for n, shot in enumerate(shots):
             img = download(shot["imageUri"], tmp / f"k{n}{Path(shot['imageUri']).suffix}")
             dur = max(0.5, float(shot["durationSec"]))
-            frames = int(round(dur * FPS))
+            end = round((done / FPS + dur) * FPS)
+            if limit is not None:
+                end = limit if n == len(shots) - 1 else min(end, limit)
+            frames = max(1, end - done)
+            done += frames
             label = _esc(f"ANIMATIC DRAFT  |  shot {shot['index']}  |  {dur:.1f}s")
             vf = (
                 f"scale={W * 2}:{H * 2}:force_original_aspect_ratio=increase,crop={W * 2}:{H * 2},"
