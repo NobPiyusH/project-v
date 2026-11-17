@@ -46,6 +46,12 @@ public final class ModelFallback {
 
     public static <T> Attempt<T> run(List<String> models, long timeoutSeconds, String what, Function<String, T> call)
             throws Exception {
+        return run(models, m -> timeoutSeconds, what, call);
+    }
+
+    /** @param timeoutFor per-model time limit (a slower paid model gets longer, so its answer is never paid and lost) */
+    public static <T> Attempt<T> run(List<String> models, Function<String, Long> timeoutFor, String what,
+                                     Function<String, T> call) throws Exception {
         if (models.isEmpty()) {
             throw new IllegalStateException(what + ": no model configured");
         }
@@ -53,13 +59,13 @@ public final class ModelFallback {
             String m = models.get(i);
             boolean last = i == models.size() - 1;
             try {
-                T value = CompletableFuture.supplyAsync(() -> call.apply(m)).get(timeoutSeconds, TimeUnit.SECONDS);
+                T value = CompletableFuture.supplyAsync(() -> call.apply(m)).get(timeoutFor.apply(m), TimeUnit.SECONDS);
                 return new Attempt<>(m, value);
             } catch (TimeoutException e) {
                 if (last) {
                     throw e;
                 }
-                log.warn("{}: {} did not answer within {}s, falling back to {}", what, m, timeoutSeconds, models.get(i + 1));
+                log.warn("{}: {} did not answer within {}s, falling back to {}", what, m, timeoutFor.apply(m), models.get(i + 1));
             } catch (ExecutionException e) {
                 Throwable cause = e.getCause() == null ? e : e.getCause();
                 if (last || !isModelProblem(cause)) {

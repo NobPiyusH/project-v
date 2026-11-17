@@ -28,6 +28,7 @@ dependencies {
 	implementation("org.springframework.boot:spring-boot-starter-webmvc")
 	implementation("org.flywaydb:flyway-database-postgresql")
 	implementation("org.springframework.ai:spring-ai-starter-model-google-genai")
+	implementation("com.anthropic:anthropic-java:3.3.0") // Claude: script + shot plan only (owner-funded, capped)
 	// Plain Temporal SDK, wired by hand in TemporalConfig: the Temporal Spring Boot starter targets older Boot lines.
 	implementation("io.temporal:temporal-sdk:${property("temporalVersion")}")
 	implementation("org.yaml:snakeyaml")

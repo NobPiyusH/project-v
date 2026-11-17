@@ -70,6 +70,17 @@ public class Pricing {
         return inr(num(map(modal, "gpuPerSecondUsd"), gpu) * seconds);
     }
 
+    /** Hard monthly cap on Claude (owner-funded), in rupees. */
+    public BigDecimal claudeMonthlyCapInr() {
+        return inr(num(map(pricing, "anthropic"), "monthlyCapUsd"));
+    }
+
+    /** Claude Sonnet cost; thinking tokens are billed as output. */
+    public BigDecimal claudeInr(long inputTokens, long outputTokens) {
+        Map<String, Object> rates = map(map(pricing, "anthropic"), "sonnet");
+        return inr(inputTokens / 1e6 * num(rates, "inputPerMTokUsd") + outputTokens / 1e6 * num(rates, "outputPerMTokUsd"));
+    }
+
     /** Hard monthly cap on GPU work (Modal), in rupees. Default: the free credit. */
     public BigDecimal gpuMonthlyCapInr() {
         return inr(num(map(pricing, "modal"), "monthlyCapUsd"));

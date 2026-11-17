@@ -19,10 +19,14 @@ public class DirectorAgent {
 
     private final Llm llm;
     private final StylePresets presets;
+    /** Model tried first for this agent's most important call (Claude, owner-funded and capped); Gemini behind it. */
+    private final String storyModel;
 
-    public DirectorAgent(Llm llm, StylePresets presets) {
+    public DirectorAgent(Llm llm, StylePresets presets,
+                 @org.springframework.beans.factory.annotation.Value("${projectv.models.story:}") String storyModel) {
         this.llm = llm;
         this.presets = presets;
+        this.storyModel = storyModel;
     }
 
     public ShotPlan plan(UUID videoId, VideoPlan plan, Concept concept, List<TimedLine> lines, double bpm,
@@ -64,6 +68,6 @@ public class DirectorAgent {
                     .append(String.format("%.1f", l.durationSec())).append(" | ").append(l.text()).append('\n');
         }
         user.append(WriterAgent.notes(ownerNotes));
-        return llm.call(videoId, "SHOT_PLAN", system, user.toString(), ShotPlan.class);
+        return llm.call(videoId, "SHOT_PLAN", system, user.toString(), ShotPlan.class, storyModel);
     }
 }

@@ -33,11 +33,13 @@ public class Llm {
     private final String model;
     private final String fallbacks;
     private final OpenAiCompatChat nvidia;
+    private final ClaudeChat claude;
 
     private record Out<T>(T entity, com.projectv.media.MediaTypes.Usage usage) {
     }
 
     public Llm(ObjectProvider<ChatModel> chatModel, CostLedger ledger, Pricing pricing, BudgetGuard budget, OpenAiCompatChat nvidia,
+               ClaudeChat claude,
                @Value("${projectv.agents.timeout-seconds:150}") long timeoutSeconds,
                @Value("${projectv.models.text}") String model,
                @Value("${projectv.models.text-fallbacks:}") String fallbacks) {
@@ -49,6 +51,7 @@ public class Llm {
         this.model = model;
         this.fallbacks = fallbacks;
         this.nvidia = nvidia;
+        this.claude = claude;
     }
 
     public String model() {
@@ -57,14 +60,36 @@ public class Llm {
 
     /** Calls the model for a typed result. Records the cost against {@code videoId}. Throws on timeout or failure. */
     public <T> T call(UUID videoId, String purpose, String system, String user, Class<T> type) {
+        return call(videoId, purpose, system, user, type, null);
+    }
+
+    /**
+     * @param preferred a model tried before the usual list (e.g. {@code claude:claude-sonnet-5-5} for the script and
+     *                  shot plan); skipped when it isn't configured or its monthly cap is used up
+     */
+    public <T> T call(UUID videoId, String purpose, String system, String user, Class<T> type, String preferred) {
         ChatModel cm = chatModel.getIfAvailable();
         if (cm == null) {
             throw new IllegalStateException("No LLM configured: set GEMINI_API_KEY in .env");
         }
         budget.require(BigDecimal.ONE, purpose); // a text call costs well under ₹1; refuse only when the cap is hit
-        List<String> models = ModelFallback.models(model, fallbacks);
+        List<String> models = ModelFallback.models(
+                preferred != null && !preferred.isBlank() && (!ClaudeChat.handles(preferred) || claude.configured())
+                        ? preferred + "," + model : model, fallbacks);
         try {
-            ModelFallback.Attempt<Out<T>> a = ModelFallback.run(models, timeoutSeconds, purpose, m -> {
+            ModelFallback.Attempt<Out<T>> a = ModelFallback.run(models,
+                    m -> ClaudeChat.handles(m) ? Math.max(timeoutSeconds, 180) : timeoutSeconds, purpose, m -> {
+                if (ClaudeChat.handles(m)) {
+                    // Owner-funded: stop at the monthly cap and let Gemini do it (≈₹10 = the most a capped call costs).
+                    if (!budget.canSpendClaude(BigDecimal.TEN)) {
+                        throw new IllegalStateException("unavailable: Claude monthly cap reached");
+                    }
+                    ClaudeChat.Result<T> c = claude.call(m, system, user, type, (in, out) -> ledger.record(videoId,
+                            BudgetGuard.CLAUDE, pricing.claudeInr(in, out), BigDecimal.valueOf(in + out), "tokens", false,
+                            purpose + " (" + m + ", " + in + " in / " + out + " out)"));
+                    return new Out<>(c.entity(), new com.projectv.media.MediaTypes.Usage(c.inputTokens(), c.outputTokens(), 0,
+                            c.inputTokens() + c.outputTokens()));
+                }
                 if (OpenAiCompatChat.handles(m)) {
                     OpenAiCompatChat.Result<T> n = nvidia.call(m, system, user, type);
                     return new Out<>(n.entity(), new com.projectv.media.MediaTypes.Usage(
@@ -77,7 +102,9 @@ public class Llm {
             });
             Out<T> r = a.value();
             com.projectv.media.MediaTypes.Usage usage = r.usage();
-            if (OpenAiCompatChat.handles(a.model())) {
+            if (ClaudeChat.handles(a.model())) {
+                // Already recorded when the response arrived (a paid call is recorded even if it couldn't be used).
+            } else if (OpenAiCompatChat.handles(a.model())) {
                 // NVIDIA NIM and Groq free tiers: record the call (₹0) so every call stays in the ledger.
                 ledger.record(videoId, OpenAiCompatChat.provider(a.model()), BigDecimal.ZERO, BigDecimal.valueOf(usage.totalTokens()),
                         "tokens", true, purpose + " (" + a.model() + ")");

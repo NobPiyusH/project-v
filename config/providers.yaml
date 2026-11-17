@@ -79,6 +79,9 @@ pricing:
     image: { perImageUsd: { "1K": 0.0336, "2K": 0.0504, "4K": 0.113 } }  # gemini-nano-banana-2.1 (verify)
     music: { perSongUsd: 0.08 }                                     # lyria-3.5 per generated song (verify)
     groundingPerQueryUsd: 0.014                                     # Google Search grounding (verify)
+  anthropic:
+    monthlyCapUsd: 5             # owner-funded credit (17 Nov 2026): hard stop; over the cap, Gemini takes over
+    sonnet: { inputPerMTokUsd: 2.00, outputPerMTokUsd: 10.00 }   # claude-sonnet-5-5 (verify on claude.com/pricing)
   modal:
     monthlyFreeUsd: 30
     gpuPerSecondUsd: { L40S: 0.000542, H100: 0.001097 }             # ~$1.95/h, ~$3.95/h (verify on modal.com/pricing)

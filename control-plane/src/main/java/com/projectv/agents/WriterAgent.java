@@ -21,10 +21,14 @@ public class WriterAgent {
 
     private final Llm llm;
     private final StylePresets presets;
+    /** Model tried first for this agent's most important call (Claude, owner-funded and capped); Gemini behind it. */
+    private final String storyModel;
 
-    public WriterAgent(Llm llm, StylePresets presets) {
+    public WriterAgent(Llm llm, StylePresets presets,
+                 @org.springframework.beans.factory.annotation.Value("${projectv.models.story:}") String storyModel) {
         this.llm = llm;
         this.presets = presets;
+        this.storyModel = storyModel;
     }
 
     public Concept concept(UUID videoId, String prompt, VideoPlan plan, List<Fact> facts, String ownerNotes) {
@@ -78,7 +82,7 @@ public class WriterAgent {
                 blank(concept.clockLabel()) ? "none" : concept.clockLabel(),
                 concept.acts() == null ? "" : concept.acts().stream().map(a -> a.title() + " (" + a.approxSec() + "s): " + a.purpose()).collect(Collectors.joining("; ")),
                 String.join(", ", plan.mustInclude()), factsText(facts), notes(ownerNotes));
-        return llm.call(videoId, "SCRIPT", system, user, Script.class);
+        return llm.call(videoId, "SCRIPT", system, user, Script.class, storyModel);
     }
 
     static String factsText(List<Fact> facts) {

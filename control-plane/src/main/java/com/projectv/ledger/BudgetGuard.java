@@ -48,6 +48,21 @@ public class BudgetGuard {
         }
     }
 
+    // ---- Claude (Anthropic): owner-funded, its own monthly cap; over it, callers fall back to Gemini
+
+    public static final String CLAUDE = "anthropic";
+
+    public BigDecimal claudeSpentThisMonth() {
+        return jdbc.sql("""
+                        SELECT COALESCE(sum(amount_inr), 0) FROM cost_entry
+                        WHERE provider_id = :p AND ts >= date_trunc('month', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'
+                        """).param("p", CLAUDE).query(BigDecimal.class).single();
+    }
+
+    public boolean canSpendClaude(BigDecimal estimateInr) {
+        return pricing.claudeMonthlyCapInr().subtract(claudeSpentThisMonth()).compareTo(estimateInr) >= 0;
+    }
+
     // ---- GPU (Modal): its own monthly cap, the free credit by default (owner rule: ask before spending money)
 
     public static final String GPU_PREFIX = "modal_";
