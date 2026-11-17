@@ -146,15 +146,138 @@ def _speak(req: dict, line: dict) -> dict:
             "takes": len(checks), "passed": checks[-1]["ok"], "check": checks[-1]["why"]}
 
 
-@activity.defn(name="synthesize_narration")
-def synthesize_narration(req: dict) -> dict:
-    """req: {videoId, model, checkModel, voiceName, style, language, lines:[{index, text}]}
-    -> {lines:[{index, uri, durationSec, usage, takes, passed, check}], model, voiceName}"""
+# ------------------------------------------------------------------------------------------------ ElevenLabs
+# Owner's account (17 Nov 2026): Free plan, 10,000 characters a month, so credit is spent carefully:
+# - one provider per video (never mixed voices): ElevenLabs only if the remaining credit covers every line plus
+#   30% for retakes plus a reserve kept for later line redos; otherwise Gemini voices the whole video;
+# - no style text is sent (it can't be read aloud), so 2 takes per line are enough; Whisper still checks each one;
+# - a full narration that fails part-way on ElevenLabs is re-voiced entirely with Gemini.
+
+ELEVEN_URL = "https://api.elevenlabs.io"
+ELEVEN_TAKES = 2
+ELEVEN_HEADROOM = 1.3
+
+
+def _eleven_config() -> dict:
+    return {"key": os.getenv("ELEVENLABS_API_KEY") or "",
+            # v4 turbo: same v4 voices at half the credits (0.5 per character); owner: "consume less credits".
+            "model": os.getenv("ELEVENLABS_MODEL") or "eleven_v4_turbo",
+            "voiceId": os.getenv("ELEVENLABS_VOICE_ID") or "JBFqnCBsd6RMkjVDRZzb",  # George: warm storyteller
+            "voiceName": os.getenv("ELEVENLABS_VOICE_NAME") or "George",
+            "reserve": int(os.getenv("ELEVENLABS_RESERVE_CHARS") or 1500)}
+
+
+def _eleven_get(path: str, key: str) -> dict:
+    request = urllib.request.Request(ELEVEN_URL + path, headers={"xi-api-key": key, "User-Agent": "projectv"})
+    with urllib.request.urlopen(request, timeout=30) as r:
+        return json.load(r)
+
+
+def eleven_remaining(key: str) -> int | None:
+    """Characters left this month (a free, read-only call). None when it can't be checked."""
+    try:
+        s = _eleven_get("/v1/user/subscription", key)
+        return int(s["character_limit"]) - int(s["character_count"])
+    except Exception as e:  # noqa: BLE001
+        log.warning("ElevenLabs credit check failed (%s)", type(e).__name__)
+        return None
+
+
+def eleven_multiplier(key: str, model: str) -> float:
+    """Credits per character for a model (a free call); 1.0 when unknown, so the check never under-counts."""
+    try:
+        for m in _eleven_get("/v1/models", key):
+            if m.get("model_id") == model:
+                return float((m.get("model_rates") or {}).get("character_cost_multiplier") or 1.0)
+    except Exception as e:  # noqa: BLE001
+        log.warning("ElevenLabs model check failed (%s)", type(e).__name__)
+    return 1.0
+
+
+def eleven_needed(lines: list[dict], multiplier: float = 1.0) -> int:
+    return int(sum(len(l["text"]) for l in lines) * multiplier * ELEVEN_HEADROOM) + 1
+
+
+def choose_provider(req: dict, remaining: int | None, cfg: dict) -> str:
+    """'elevenlabs' or 'gemini' for the whole request. A redo keeps the video's provider ('elevenlabs' asked)."""
+    wanted = (req.get("voiceProvider") or "auto").lower()
+    if wanted == "gemini" or not cfg["key"]:
+        if wanted == "elevenlabs":
+            raise RuntimeError("This video was voiced by ElevenLabs but no ELEVENLABS_API_KEY is set")
+        return "gemini"
+    needed = eleven_needed(req["lines"], cfg.get("multiplier", 1.0))
+    if wanted == "elevenlabs":
+        if remaining is not None and remaining < needed:
+            raise RuntimeError(f"ElevenLabs credit is too low to re-voice in the same voice ({remaining} characters "
+                               f"left, {needed} needed). Re-voice the whole narration (it will use Gemini) or wait "
+                               "for the monthly reset.")
+        return "elevenlabs"
+    return "elevenlabs" if remaining is not None and remaining - cfg["reserve"] >= needed else "gemini"
+
+
+def _eleven_tts(cfg: dict, text: str, language: str | None) -> tuple[bytes, int]:
+    """One line -> (24 kHz WAV, characters billed)."""
+    body = {"text": text, "model_id": cfg["model"],
+            "voice_settings": {"stability": 0.5, "similarity_boost": 0.8, "style": 0.3, "use_speaker_boost": True}}
+    if language and len(language) == 2:
+        body["language_code"] = language
+    request = urllib.request.Request(
+        f"{ELEVEN_URL}/v1/text-to-speech/{cfg['voiceId']}?output_format=pcm_24000", json.dumps(body).encode(),
+        {"xi-api-key": cfg["key"], "Content-Type": "application/json", "User-Agent": "projectv"})
+    with urllib.request.urlopen(request, timeout=120) as r:
+        pcm = r.read()
+        billed = int(r.headers.get("character-cost") or len(text))
+    return pcm_to_wav(pcm, rate=24000), billed
+
+
+def _speak_eleven(req: dict, cfg: dict, line: dict) -> dict:
+    checks, billed, wav = [], 0, b""
+    for take in range(1, ELEVEN_TAKES + 1):
+        wav, chars = _eleven_tts(cfg, line["text"], req.get("language"))
+        billed += chars
+        heard, _ = _transcribe(req, wav)
+        ok, why = judge(line["text"], heard)
+        checks.append({"take": take, "ok": ok, "why": why})
+        if ok:
+            break
+        log.warning("ElevenLabs line %s take %d rejected: %s | heard: %r", line["index"], take, why, heard[:120])
+    uri = put_bytes(f"videos/{req['videoId']}/narration/line-{line['index']:03d}.wav", wav, "audio/wav")
+    return {"index": line["index"], "uri": uri, "durationSec": round(_wav_seconds(wav), 3), "usage": None,
+            "takes": len(checks), "passed": checks[-1]["ok"], "check": checks[-1]["why"], "characters": billed}
+
+
+def _run(req: dict, speak) -> list[dict]:
     results = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
-        futures = [pool.submit(_speak, req, line) for line in req["lines"]]
+        futures = [pool.submit(speak, line) for line in req["lines"]]
         for f in concurrent.futures.as_completed(futures):
             results.append(f.result())
             activity.heartbeat(len(results))
-    results.sort(key=lambda r: r["index"])
-    return {"lines": results, "model": model_list(req["model"])[0], "voiceName": req.get("voiceName") or "Charon"}
+    return sorted(results, key=lambda r: r["index"])
+
+
+@activity.defn(name="synthesize_narration")
+def synthesize_narration(req: dict) -> dict:
+    """req: {videoId, model, checkModel, voiceName, style, language, voiceProvider (auto|elevenlabs|gemini),
+             lines:[{index, text}]}
+    -> {lines:[{index, uri, durationSec, usage, takes, passed, check}], model, voiceName, characters}"""
+    cfg = _eleven_config()
+    remaining = None
+    if cfg["key"] and (req.get("voiceProvider") or "auto") != "gemini":
+        remaining = eleven_remaining(cfg["key"])
+        cfg["multiplier"] = eleven_multiplier(cfg["key"], cfg["model"])
+    provider = choose_provider(req, remaining, cfg)
+    if provider == "elevenlabs":
+        try:
+            lines = _run(req, lambda line: _speak_eleven(req, cfg, line))
+            chars = sum(l.pop("characters", 0) for l in lines)
+            log.info("ElevenLabs voiced %d lines (%d characters; %s left before)", len(lines), chars, remaining)
+            return {"lines": lines, "model": f"elevenlabs:{cfg['model']}", "voiceName": cfg["voiceName"],
+                    "characters": chars}
+        except Exception as e:  # noqa: BLE001
+            if (req.get("voiceProvider") or "auto") == "elevenlabs":
+                raise  # a redo must keep the video's voice: let the owner decide
+            log.warning("ElevenLabs failed (%s: %s); re-voicing the whole video with Gemini", type(e).__name__, e)
+    lines = _run(req, lambda line: _speak(req, line))
+    return {"lines": lines, "model": model_list(req["model"])[0], "voiceName": req.get("voiceName") or "Charon",
+            "characters": 0}

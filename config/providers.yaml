@@ -83,6 +83,10 @@ pricing:
     monthlyCapUsd: 5             # owner-funded credit (17 Nov 2026): hard stop; over the cap, Gemini takes over
     sonnet: { inputPerMTokUsd: 2.00, outputPerMTokUsd: 10.00 }   # claude-sonnet-5-5 (verify on claude.com/pricing)
     webSearchPer1000Usd: 10.00   # server-side web search, backup researcher (verify on claude.com/pricing)
+  elevenlabs:
+    plan: free                   # owner's account (17 Nov 2026): 10,000 credits a month, non-commercial, attribution
+    monthlyCredits: 10000
+    usdPer1000Credits: 0.00      # set to the paid plan's rate when upgrading (verify on elevenlabs.io/pricing)
   modal:
     monthlyFreeUsd: 30
     gpuPerSecondUsd: { L40S: 0.000542, H100: 0.001097, L4: 0.000222 }             # ~$1.95/h, ~$3.95/h (verify on modal.com/pricing)

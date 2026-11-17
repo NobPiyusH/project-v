@@ -128,8 +128,25 @@ class ProductionPersistenceTest {
 
     @Test
     void allMigrationsApplyAndLicencesAreSeeded() {
-        assertEquals(7, jdbc.sql("SELECT count(*) FROM licence").query(Integer.class).single());
-        assertEquals(11, jdbc.sql("SELECT count(*) FROM flyway_schema_history WHERE success").query(Integer.class).single());
+        assertEquals(8, jdbc.sql("SELECT count(*) FROM licence").query(Integer.class).single());
+        assertEquals(12, jdbc.sql("SELECT count(*) FROM flyway_schema_history WHERE success").query(Integer.class).single());
+    }
+
+    @Test
+    void lineRedosKeepTheVoiceTheVideoHasAndElevenLabsCreditsAreTracked() {
+        assertEquals("auto", voice.currentProvider(video), "no narration yet");
+        voice.saveNarration(video, take("s3://projectv/videos/x/narration/line-000.wav", 2.0));
+        assertEquals("gemini", voice.currentProvider(video));
+        voice.saveNarration(video, new NarrationResult(List.of(new NarrationClip(0, "s3://projectv/videos/x/narration/line-000.wav",
+                2.1, null, 1, true, "coverage 100%")), "elevenlabs:eleven_v4_turbo", "George", 42));
+        assertEquals("elevenlabs", voice.currentProvider(video));
+        assertEquals("elevenlabs", voice.lineNarrationRequest(video, List.of(0), null).voiceProvider());
+        assertEquals(1, jdbc.sql("SELECT count(*) FROM cost_entry WHERE video_id = :v AND provider_id = 'elevenlabs' AND units = 42")
+                .param("v", video).query(Integer.class).single());
+        assertEquals(1, jdbc.sql("""
+                        SELECT count(*) FROM asset a JOIN provenance p ON p.id = a.provenance_id
+                        WHERE a.video_id = :v AND p.licence_id = '00000000-0000-0000-0000-00000000a008'
+                        """).param("v", video).query(Integer.class).single(), "free-plan licence recorded");
     }
 
     @Test

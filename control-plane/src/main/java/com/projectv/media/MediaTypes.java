@@ -34,8 +34,13 @@ public final class MediaTypes {
     public record NarrationLine(int index, String text) {
     }
 
+    /** @param voiceProvider auto (ElevenLabs when its credit covers the whole video, else Gemini), elevenlabs or gemini */
     public record NarrationRequest(String videoId, String model, String checkModel, String voiceName, String style,
-                                   String language, List<NarrationLine> lines) {
+                                   String language, List<NarrationLine> lines, String voiceProvider) {
+        public NarrationRequest(String videoId, String model, String checkModel, String voiceName, String style,
+                                String language, List<NarrationLine> lines) {
+            this(videoId, model, checkModel, voiceName, style, language, lines, "auto");
+        }
     }
 
     /** takes: how many generations were needed; passed: whether the final take passed the transcript check */
@@ -43,7 +48,15 @@ public final class MediaTypes {
                                 String check) {
     }
 
-    public record NarrationResult(List<NarrationClip> lines, String model, String voiceName) {
+    /** @param characters ElevenLabs credits used (0 for Gemini) */
+    public record NarrationResult(List<NarrationClip> lines, String model, String voiceName, long characters) {
+        public NarrationResult(List<NarrationClip> lines, String model, String voiceName) {
+            this(lines, model, voiceName, 0);
+        }
+
+        public boolean elevenLabs() {
+            return model != null && model.startsWith("elevenlabs:");
+        }
     }
 
     // ---- music

@@ -81,6 +81,11 @@ public class Pricing {
         return inr(inputTokens / 1e6 * num(rates, "inputPerMTokUsd") + outputTokens / 1e6 * num(rates, "outputPerMTokUsd"));
     }
 
+    /** ElevenLabs credits in rupees (the plan's price per 1,000 credits; 0 on the free plan). */
+    public BigDecimal elevenLabsInr(long credits) {
+        return inr(credits / 1000.0 * num(map(pricing, "elevenlabs"), "usdPer1000Credits"));
+    }
+
     /** Claude's server-side web search, billed per search. */
     public BigDecimal claudeSearchInr(long searches) {
         return inr(searches / 1000.0 * num(map(pricing, "anthropic"), "webSearchPer1000Usd"));

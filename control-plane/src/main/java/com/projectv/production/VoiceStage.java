@@ -79,12 +79,19 @@ public class VoiceStage extends StageSupport {
                 continue;
             }
             UUID assetId = assets.create(new NewAsset(videoId, "audio", c.uri(), "audio/wav", null, null, c.durationSec(),
-                    "gemini_api", r.model(), "[" + r.voiceName() + "] " + l.text(), null, AssetStore.LICENCE_GEMINI, true));
+                    r.elevenLabs() ? "elevenlabs" : "gemini_api", r.model(), "[" + r.voiceName() + "] " + l.text(), null,
+                    r.elevenLabs() ? AssetStore.LICENCE_ELEVENLABS_FREE : AssetStore.LICENCE_GEMINI, true));
             lines.add(l.withNewTake(new AudioVersion(assetId, c.uri(), c.durationSec(), now, c.check(), style, l.text()), c.passed()));
         }
         writeScript(videoId, withLines(s, lines));
-        ledger.record(videoId, BudgetGuard.GEMINI, pricing.ttsInr(total), BigDecimal.valueOf(total.totalTokens()), "tokens",
-                true, purpose + " (" + r.model() + ", " + r.lines().size() + " lines)");
+        if (r.elevenLabs()) {
+            // Free plan: no money, but the credits are tracked (10,000 a month).
+            ledger.record(videoId, "elevenlabs", pricing.elevenLabsInr(r.characters()), BigDecimal.valueOf(r.characters()),
+                    "credits", false, purpose + " (" + r.model() + ", " + r.lines().size() + " lines)");
+        } else {
+            ledger.record(videoId, BudgetGuard.GEMINI, pricing.ttsInr(total), BigDecimal.valueOf(total.totalTokens()), "tokens",
+                    true, purpose + " (" + r.model() + ", " + r.lines().size() + " lines)");
+        }
     }
 
     /**
@@ -138,8 +145,19 @@ public class VoiceStage extends StageSupport {
             // Kept short on purpose: long style text gets read aloud by the TTS model.
             style = "in a voice that is " + String.join(" ", java.util.Arrays.copyOf(w, Math.min(w.length, 12))).toLowerCase(java.util.Locale.ROOT);
         }
+        // A redo keeps the voice the video already has (never a second voice in one video).
         return new NarrationRequest(base.videoId(), base.model(), base.checkModel(), base.voiceName(), style,
-                base.language(), lines);
+                base.language(), lines, currentProvider(videoId));
+    }
+
+    /** "elevenlabs" or "gemini": who voiced this video's narration most recently. */
+    String currentProvider(UUID videoId) {
+        return jdbc.sql("""
+                        SELECT p.provider FROM asset a JOIN provenance p ON p.id = a.provenance_id
+                        WHERE a.video_id = :v AND a.kind = 'audio' AND a.uri_hot LIKE '%/narration/%'
+                          AND p.provider IN ('elevenlabs', 'gemini_api') ORDER BY a.created_at DESC LIMIT 1
+                        """).param("v", videoId).query(String.class).optional()
+                .map(p -> "elevenlabs".equals(p) ? "elevenlabs" : "gemini").orElse("auto");
     }
 
     @Transactional
