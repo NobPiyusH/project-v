@@ -389,12 +389,14 @@ public class VideoProductionWorkflowImpl implements VideoProductionWorkflow {
                 // Claude first (blind A/B on the deep-ocean demo, 17 Nov 2026: accuracy 10 vs 8, facts 9 vs 7), then
                 // Gemini with Google Search. Older runs replay the Gemini-first path below (determinism).
                 if (Workflow.getVersion("research-claude-first", Workflow.DEFAULT_VERSION, 1) != Workflow.DEFAULT_VERSION) {
+                    com.projectv.media.MediaTypes.ResearchResult found;
                     try {
-                        return activities.saveResearch(videoId, claudeOnce.claudeResearch(videoId, research));
+                        found = claudeOnce.claudeResearch(videoId, research);
                     } catch (ActivityFailure failure) {
                         log.warn("Claude research failed ({}); using Gemini with Google Search", rootMessage(failure));
-                        return activities.saveResearch(videoId, media.researchTopic(research));
+                        found = media.researchTopic(research);
                     }
+                    return activities.saveResearch(videoId, checkSources(found));
                 }
                 try {
                     return activities.saveResearch(videoId, media.researchTopic(research));
@@ -545,6 +547,19 @@ public class VideoProductionWorkflowImpl implements VideoProductionWorkflow {
                 : activities.saveSharp(videoId, request, clipMedia.upscaleClips(request));
         return smoothed == null ? sharpened
                 : StageResult.of(smoothed.summary() + " " + sharpened.summary(), sharpened.artifactJson());
+    }
+
+    /** Source check (18 Nov 2026): free and optional; a failure keeps the facts as they are. Versioned. */
+    private com.projectv.media.MediaTypes.ResearchResult checkSources(com.projectv.media.MediaTypes.ResearchResult r) {
+        if (Workflow.getVersion("source-check", Workflow.DEFAULT_VERSION, 1) == Workflow.DEFAULT_VERSION) {
+            return r;
+        }
+        try {
+            return inspectorMedia.checkSources(r);
+        } catch (ActivityFailure failure) {
+            log.warn("Source check skipped: {}", rootMessage(failure));
+            return r;
+        }
     }
 
     /** Workflows started before sharpening existed replay smoothing only (Temporal determinism). */

@@ -374,6 +374,11 @@ class VideoProductionWorkflowTest {
         }
 
         @Override
+        public com.projectv.media.MediaTypes.ResearchResult checkSources(com.projectv.media.MediaTypes.ResearchResult research) {
+            return research;
+        }
+
+        @Override
         public com.projectv.media.MediaTypes.SmoothResult upscaleClips(com.projectv.media.MediaTypes.SmoothRequest request) {
             return new com.projectv.media.MediaTypes.SmoothResult(List.of(), 1, false);
         }

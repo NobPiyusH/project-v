@@ -19,6 +19,9 @@ dependencies = [
     "torch==2.8.0",
     "huggingface_hub>=0.35",
     "kokoro>=0.9.4",
+    # Source check: Scrapling's core is only an HTML parser (BSD-3). Its "fetchers" extra (stealth/anti-bot,
+    # browser fingerprints) is deliberately NOT installed: we read pages politely (rule 4).
+    "scrapling>=0.5.1",
     # misaki (Kokoro's English phonemizer) needs spaCy's small English model; uv venvs have no pip to fetch it later.
     "en_core_web_sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl",
 ]

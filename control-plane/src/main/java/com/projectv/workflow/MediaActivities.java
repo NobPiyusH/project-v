@@ -61,6 +61,10 @@ public interface MediaActivities {
     @ActivityMethod(name = "smooth_clips")
     com.projectv.media.MediaTypes.SmoothResult smoothClips(com.projectv.media.MediaTypes.SmoothRequest request);
 
+    /** Reads each fact's cited page (politely) and marks whether its numbers appear there. Free; never fails. */
+    @ActivityMethod(name = "check_sources")
+    com.projectv.media.MediaTypes.ResearchResult checkSources(com.projectv.media.MediaTypes.ResearchResult research);
+
     /** M2c part 2b: SeedVR2 7B restore to 1080p on one Modal H100, clips in groups; saved per clip; honours Stop. */
     @ActivityMethod(name = "upscale_clips")
     com.projectv.media.MediaTypes.SmoothResult upscaleClips(com.projectv.media.MediaTypes.SmoothRequest request);

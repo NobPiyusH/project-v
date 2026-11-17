@@ -46,9 +46,13 @@ public class ResearchStage extends StageSupport {
                     "RESEARCH (" + r.model() + ", " + queries + " searches)");
         }
         long sourced = r.facts().stream().filter(f -> f.sources() != null && !f.sources().isEmpty()).count();
+        long confirmed = r.facts().stream().filter(f -> "confirmed".equals(f.check())).count();
+        long unconfirmed = r.facts().stream().filter(f -> "unconfirmed".equals(f.check())).count();
+        String checked = confirmed + unconfirmed == 0 ? "" : " Source check: %d confirmed on their page, %d unconfirmed (writer told to avoid those numbers)."
+                .formatted(confirmed, unconfirmed);
         String summary = "%d facts (%d with sources) from %d web sources%s.".formatted(r.facts().size(), sourced,
                 r.sources() == null ? 0 : r.sources().size(),
-                com.projectv.agents.ClaudeChat.handles(r.model()) ? " (Claude backup researcher; Gemini was unavailable)" : "");
+                com.projectv.agents.ClaudeChat.handles(r.model()) ? " (Claude researcher)" : "") + checked;
         return StageResult.of(summary, json.writeValueAsString(Map.of("facts", r.facts(), "queries", r.queries())));
     }
 }

@@ -90,7 +90,10 @@ public class WriterAgent {
         if (facts == null || facts.isEmpty()) {
             return "(no research for this video)";
         }
-        return facts.stream().map(f -> "- " + f.text()).collect(Collectors.joining("\n"));
+        // Facts whose numbers weren't found on their cited page are marked so the writer treats them with care.
+        return facts.stream().map(f -> "- " + f.text() + ("unconfirmed".equals(f.check())
+                ? " [numbers not confirmed by the source page: avoid stating them, or soften]" : ""))
+                .collect(Collectors.joining("\n"));
     }
 
     static String notes(String ownerNotes) {

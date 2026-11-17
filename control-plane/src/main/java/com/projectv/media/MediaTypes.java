@@ -20,7 +20,11 @@ public final class MediaTypes {
     public record Source(String title, String uri) {
     }
 
-    public record Fact(String text, List<Source> sources) {
+    /** @param check source check: confirmed | unconfirmed | unreachable | no-numbers | null (not checked) */
+    public record Fact(String text, List<Source> sources, String check) {
+        public Fact(String text, List<Source> sources) {
+            this(text, sources, null);
+        }
     }
 
     public record ResearchRequest(String topic, String summary, List<String> mustInclude, String language, int maxFacts,
