@@ -50,6 +50,13 @@ if (Test-Port 8080) { Write-Host '  ..  already running' } else {
 Write-Host '3/4 Python media worker'
 $worker = Get-CimInstance Win32_Process -Filter "Name='python.exe'" | Where-Object { $_.CommandLine -like '*workers.main*' }
 if ($worker) { Write-Host '  ..  already running' } else {
+    # Renders and downloads go to the media SSD when .env sets PROJECTV_TMP (docs/runbooks/ssd-move.md, rule 12).
+    $tmpLine = Get-Content "$root\.env" -ErrorAction SilentlyContinue | Where-Object { $_ -match '^\s*PROJECTV_TMP\s*=' } | Select-Object -First 1
+    if ($tmpLine) {
+        $tmp = ($tmpLine -split '=', 2)[1].Trim().Trim('"')
+        if (Test-Path $tmp) { $env:TEMP = $tmp; $env:TMP = $tmp; Write-Host "  ..  worker temp files on $tmp" }
+        else { Write-Host "  !!  PROJECTV_TMP=$tmp does not exist; using the default temp folder" -ForegroundColor Yellow }
+    }
     $p = Start-Process -FilePath 'uv' -ArgumentList 'run', 'python', '-m', 'workers.main' -WorkingDirectory $root `
         -RedirectStandardOutput "$root\logs\worker.log" -RedirectStandardError "$root\logs\worker.err.log" -WindowStyle Hidden -PassThru
     $p.Id | Set-Content "$root\.run\worker.pid"
