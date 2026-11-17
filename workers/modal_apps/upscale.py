@@ -29,6 +29,7 @@ DIT = "seedvr2_ema_7b_fp16.safetensors"
 VAE = "ema_vae_fp16.safetensors"
 CODE = "/opt/seedvr2"
 MODELS = "/models"
+FIT_MAX_FRAMES = 101  # one-batch "fit" mode tested at 85 frames (18 Nov 2026); longer clips keep 61-frame batches
 PREPEND = 4  # reversed lead-in frames that steady the first frames; cut again after the run
 
 app = modal.App(APP_NAME)
@@ -51,6 +52,11 @@ image = (
 )
 
 progress = modal.Dict.from_name("projectv-progress", create_if_missing=True)
+
+
+def fit_batch(frames: int) -> int:
+    """Smallest 4n+1 batch that holds the whole clip: one batch, no padding (66 frames -> 69)."""
+    return ((max(frames, 1) + 2) // 4) * 4 + 1
 
 
 def batch_size_for(frames: int, cap: int = 61) -> int:
@@ -84,7 +90,7 @@ class Upscale:
 
     @modal.method(is_generator=True)
     def upscale_stream(self, jobs: list[dict], resolution: int = 1080, batch_size: int = 61,
-                       stop_key: str | None = None, group: int = 8):
+                       stop_key: str | None = None, group: int = 8, fit: bool = False):
         """Clips in groups (one CLI run each, model loaded once per group), so progress shows and Stop works between
         groups; each finished clip is yielded with its share of its group's time."""
         for i in range(0, len(jobs), group):
@@ -95,9 +101,9 @@ class Upscale:
                 continue
             for job in chunk:
                 progress[job["id"]] = {"state": "upscaling", "step": 0, "steps": 1}
-            yield from self._group(chunk, resolution, batch_size)
+            yield from self._group(chunk, resolution, batch_size, fit)
 
-    def _group(self, jobs: list[dict], resolution: int, batch_size: int):
+    def _group(self, jobs: list[dict], resolution: int, batch_size: int, fit: bool = False):
         t0 = time.time()
         src, out = "/tmp/up-in", "/tmp/up-out"
         for d in (src, out):
@@ -109,14 +115,22 @@ class Upscale:
                 f.write(job["mp4"])
             todo.append(job)
         frames = max(frame_count(f"{src}/{j['id']}.mp4") for j in todo) + PREPEND
+        fit = fit and frames <= FIT_MAX_FRAMES
+        # fit (on test, 18 Nov 2026): every clip is one batch sized to the longest clip in the group, so nothing is
+        # padded and no clip has a second batch that could "pop"; the default keeps 61-frame batches with padding.
+        batching = (["--batch_size", str(fit_batch(frames))] if fit
+                    else ["--batch_size", str(batch_size_for(frames, batch_size)), "--uniform_batch_size"])
         cmd = ["python", "inference_cli.py", src, "--output", out, "--output_format", "mp4", "--video_backend", "ffmpeg",
-               "--model_dir", MODELS, "--dit_model", DIT, "--resolution", str(resolution),
-               "--batch_size", str(batch_size_for(frames, batch_size)), "--uniform_batch_size",
+               "--model_dir", MODELS, "--dit_model", DIT, "--resolution", str(resolution), *batching,
                "--temporal_overlap", "4", "--prepend_frames", str(PREPEND), "--color_correction", "lab",
                # VAE tiles (1024 px, 128 px blended overlap) keep the 1080p decode of a long batch within memory.
                "--vae_encode_tiled", "--vae_decode_tiled", "--cache_dit", "--cache_vae"]
         print(" ".join(cmd))
         run = subprocess.run(cmd, cwd=CODE, capture_output=True, text=True)
+        if fit and run.returncode != 0:  # e.g. out of memory on a long batch: redo this group the proven way
+            print("fit mode failed; re-running this group with 61-frame batches")
+            yield from self._group(jobs, resolution, batch_size, False)
+            return
         log = (run.stdout + run.stderr)[-3000:]
         print(log)
         seconds = round(time.time() - t0, 2)

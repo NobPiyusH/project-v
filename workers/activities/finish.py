@@ -9,6 +9,7 @@ clips (upscale) (CLAUDE.md rule 8).
 
 from __future__ import annotations
 
+import os
 import queue
 import threading
 import uuid
@@ -113,5 +114,8 @@ def upscale_clips(req: dict) -> dict:
     """req: {videoId, progressUrl, jobs:[{shotId, shotNumber, sourceAssetId, uri}]} (same shape as smooth_clips).
     Clips are restored to a 1080 px short side (1080x1920 for a Short) by SeedVR2 7B."""
     up = modal.Cls.from_name("projectv-upscale", "Upscale")()
+    # One batch per clip (no padding): same quality in the A/B of 18 Nov 2026, ~40% less H100 time. Set
+    # PROJECTV_SHARPEN_FIT=0 to go back to 61-frame batches.
+    fit = os.getenv("PROJECTV_SHARPEN_FIT", "1") != "0"
     return _stream(req, "sharp", "sharp", lambda j: {},
-                   lambda payloads, stop_key: up.upscale_stream.remote_gen(payloads, 1080, 61, stop_key))
+                   lambda payloads, stop_key: up.upscale_stream.remote_gen(payloads, 1080, 61, stop_key, 8, fit))

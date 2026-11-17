@@ -30,9 +30,10 @@ import java.util.UUID;
 @Component
 public class SharpenStage extends StageSupport {
 
-    /** Measured 17 Nov on the 2-clip test: ~95 s of H100 per 2-4 s clip (two 61-frame batches), ~30 s to load the
-     * model per group of 8 clips, plus container start and the 30 s idle before it shuts down. */
-    static final double SECONDS_PER_CLIP = 95;
+    /** H100 seconds per 2-4 s clip in one-batch "fit" mode (18 Nov A/B: 2 clips in 136 s incl. one model load; the
+     * old 61-frame batches with padding took ~80-95 s per clip), ~30 s to load the model per group of 8 clips, plus
+     * container start and the 30 s idle before it shuts down. Re-check against the next real video. */
+    static final double SECONDS_PER_CLIP = 60;
     static final double SECONDS_PER_GROUP = 30;
     static final double START_SECONDS = 90;
     static final int GROUP = 8;
