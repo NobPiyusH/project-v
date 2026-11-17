@@ -70,7 +70,7 @@ class Smooth:
         missing, unexpected = net.load_state_dict(state, strict=False)
         if missing:  # every weight the code needs must be present; extras (training-only) are fine
             raise RuntimeError(f"RIFE weights don't match the code: {len(missing)} missing, e.g. {missing[:3]}")
-        self.net = net.to("cuda").eval().half()
+        self.net = net.to("cuda").eval()  # full precision: RIFE mixes dtypes internally
         self.load_seconds = round(time.time() - t, 1)
         print(f"RIFE v4.25 loaded in {self.load_seconds}s ({len(unexpected)} unused keys)")
 
@@ -78,7 +78,8 @@ class Smooth:
         import torch
 
         with torch.no_grad():
-            return self.net(torch.cat((a, b), 1), timestep=t, scale_list=[8, 4, 2, 1])[2][-1]
+            # Same call as upstream RIFE_HDv3.inference at scale 1.0: v4.25 has five refinement blocks.
+            return self.net(torch.cat((a, b), 1), t, [16, 8, 4, 2, 1])[2][-1]
 
     def _run(self, job: dict) -> dict:
         import imageio.v2 as imageio
@@ -88,7 +89,11 @@ class Smooth:
 
         t0 = time.time()
         try:
-            reader = imageio.get_reader(io.BytesIO(job["mp4"]), format="ffmpeg")
+            # imageio's FFmpeg reader needs a real file (it can't read from memory).
+            src_path = f"/tmp/in-{job['id']}.mp4"
+            with open(src_path, "wb") as f:
+                f.write(job["mp4"])
+            reader = imageio.get_reader(src_path, format="ffmpeg")
             meta = reader.get_meta_data()
             src_fps = float(job.get("srcFps") or meta.get("fps") or 16)
             frames = [f for f in reader]
@@ -98,7 +103,7 @@ class Smooth:
             ph, pw = ((h - 1) // 128 + 1) * 128, ((w - 1) // 128 + 1) * 128
 
             def tensor(f):
-                x = torch.from_numpy(np.ascontiguousarray(f)).to("cuda").permute(2, 0, 1).unsqueeze(0).half() / 255.0
+                x = torch.from_numpy(np.ascontiguousarray(f)).to("cuda").permute(2, 0, 1).unsqueeze(0).float() / 255.0
                 return F.pad(x, (0, pw - w, 0, ph - h))
 
             src = [tensor(f) for f in frames]
