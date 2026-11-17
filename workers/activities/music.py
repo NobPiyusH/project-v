@@ -5,14 +5,17 @@ from __future__ import annotations
 from pathlib import Path
 
 import librosa
+from google.genai import types
 import numpy as np
 from temporalio import activity
 
-from workers.common import gemini, media_duration, model_list, put_file, run_ffmpeg, usage_dict, with_models, workdir
+from workers.common import MEDIA_TIMEOUT_MS, gemini, media_duration, model_list, put_file, run_ffmpeg, usage_dict, with_models, workdir
 
 
 def _generate(model: str, prompt: str, dest: Path) -> tuple[Path, dict]:
-    _, response = with_models(model, lambda m: gemini().models.generate_content(model=m, contents=prompt), what="music")
+    _, response = with_models(model, lambda m: gemini().models.generate_content(
+        model=m, contents=prompt, config=types.GenerateContentConfig(http_options=types.HttpOptions(timeout=MEDIA_TIMEOUT_MS))),
+        what="music")
     for part in response.candidates[0].content.parts:
         if part.inline_data and (part.inline_data.mime_type or "").startswith("audio"):
             dest.write_bytes(part.inline_data.data)

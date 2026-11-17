@@ -10,7 +10,7 @@ import modal
 from google.genai import types
 from temporalio import activity
 
-from workers.common import gemini, put_bytes, usage_dict, with_models
+from workers.common import MEDIA_TIMEOUT_MS, gemini, put_bytes, usage_dict, with_models
 
 MODAL_BATCH = 8  # images per Modal call; heartbeat between batches
 
@@ -23,6 +23,7 @@ def _nano_banana(req: dict, job: dict) -> dict:
         config=types.GenerateContentConfig(
             response_modalities=["IMAGE"],
             image_config=types.ImageConfig(aspect_ratio=job.get("aspectRatio", "16:9"), image_size=job.get("imageSize", "1K")),
+            http_options=types.HttpOptions(timeout=MEDIA_TIMEOUT_MS),
         ),
     ), what=f"image {job['shotId']}")
     for part in response.candidates[0].content.parts:

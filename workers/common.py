@@ -99,8 +99,9 @@ def gemini() -> genai.Client:
             if not key:
                 raise RuntimeError("GEMINI_API_KEY is not set in .env")
             # v1beta: Lyria, Nano Banana and the TTS models are only served there (the SDK defaults to v1).
-            # Generous timeout: media models (music, images) can take a while. Value is in milliseconds.
-            _client = genai.Client(api_key=key, http_options=types.HttpOptions(api_version="v1beta", timeout=300_000))
+            # 2 minutes per call (owner, 18 Nov 2026: "keep time for gemini less and try other"); music and image
+            # generation pass their own longer MEDIA_TIMEOUT_MS. Value is in milliseconds.
+            _client = genai.Client(api_key=key, http_options=types.HttpOptions(api_version="v1beta", timeout=120_000))
         return _client
 
 
@@ -128,10 +129,15 @@ class RateLimiter:
             time.sleep(start - now)
 
 
-def with_retry(fn, *, attempts: int = 6, what: str = "Gemini call"):
-    """Retries 429 (rate/quota per minute) and 5xx with the server's retryDelay or exponential backoff.
+OVERLOAD_RETRIES = 2  # 5xx: two quick retries (3 s, 8 s), then the next model in the list (was 6 tries, up to 2 min)
+
+
+def with_retry(fn, *, attempts: int = 4, what: str = "Gemini call"):
+    """Retries 429 (rate/quota per minute) with the server's retryDelay, and 5xx (overload) only briefly, so a
+    struggling model hands over to the next one within seconds instead of tens of minutes (18 Nov 2026).
     Daily-quota or billing errors still fail after the attempts are used up, so the stage waits for the owner."""
-    delay = 4.0
+    delay = 3.0
+    overloads = 0
     for i in range(attempts):
         try:
             return fn()
@@ -145,6 +151,10 @@ def with_retry(fn, *, attempts: int = 6, what: str = "Gemini call"):
             code = getattr(e, "code", None) or getattr(e, "status_code", None)
             if code not in (429, 500, 503, 504) or i == attempts - 1:
                 raise
+            if code != 429:
+                overloads += 1
+                if overloads > OVERLOAD_RETRIES:
+                    raise
             m = re.search(r"retryDelay'?:\s*'?(\d+(?:\.\d+)?)s", str(e))
             wait = max(float(m.group(1)) + 1.0, delay) if m else delay
             if wait > MAX_RETRY_WAIT:
@@ -153,10 +163,11 @@ def with_retry(fn, *, attempts: int = 6, what: str = "Gemini call"):
                 raise QuotaExhausted(f"{what}: quota used up, Google asks to wait {wait:.0f}s") from e
             log.warning("%s got %s, retrying in %.0fs (%d/%d)", what, code, wait, i + 1, attempts)
             time.sleep(wait + random.uniform(0, 1.5))
-            delay = min(delay * 2, 60.0)
+            delay = min(delay * 2.5, 30.0)
 
 
-MAX_RETRY_WAIT = 120.0  # seconds; a longer server-requested wait is treated as an exhausted quota
+MAX_RETRY_WAIT = 60.0  # seconds; a longer server-requested wait is treated as an exhausted quota (next model)
+MEDIA_TIMEOUT_MS = 300_000  # music and image generation genuinely take longer than text
 
 
 class QuotaExhausted(RuntimeError):

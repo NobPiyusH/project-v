@@ -89,3 +89,25 @@ def test_used_up_daily_quota_moves_to_next_model_instead_of_sleeping(monkeypatch
 
     assert common.with_models("tts-a,tts-b", call, what="TTS") == ("tts-b", "ok")
     assert calls == ["tts-a", "tts-b"]
+
+
+class Overloaded(Exception):
+    code = 503
+
+
+def test_an_overloaded_model_hands_over_after_two_quick_retries(monkeypatch):
+    """18 Nov 2026: Gemini 503s kept a stage waiting ~30 min per model. Now: 3 tries in seconds, then the next model."""
+    monkeypatch.setattr(common.genai_errors, "ServerError", Overloaded)
+    slept = []
+    monkeypatch.setattr(common.time, "sleep", lambda s: slept.append(s))
+    calls = []
+
+    def call(m):
+        calls.append(m)
+        if m == "busy":
+            raise Overloaded("503 UNAVAILABLE high demand")
+        return "ok"
+
+    assert common.with_models("busy,spare", call, what="text") == ("spare", "ok")
+    assert calls == ["busy", "busy", "busy", "spare"]
+    assert sum(slept) < 15, f"waited {sum(slept):.0f}s before handing over"
