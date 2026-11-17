@@ -1,0 +1,25 @@
+[project]
+name = "projectv-chatterbox"
+version = "0.1.0"
+description = "Isolated environment for Chatterbox TTS (it pins torch 2.6 / numpy < 2, which would break the worker's)"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "chatterbox-tts==0.1.7",          # Resemble AI, MIT
+    "torch==2.6.0",
+    "torchaudio==2.6.0",
+    "huggingface_hub>=0.30",
+    # Perth (the inaudible AI-audio watermark) imports pkg_resources; without it the watermark silently fails.
+    "setuptools<81",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu124" }
+torchaudio = { index = "pytorch-cu124" }
+
+[[tool.uv.index]]
+name = "pytorch-cu124"
+url = "https://download.pytorch.org/whl/cu124"
+explicit = true
