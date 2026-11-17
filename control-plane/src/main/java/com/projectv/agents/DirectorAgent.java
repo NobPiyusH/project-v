@@ -51,10 +51,14 @@ public class DirectorAgent {
                 - shotType: extreme_wide, wide, medium, close_up, macro, aerial, pov
                 - priority: "hero" for the 10-20%% of shots that matter most (opening, reveals, climax, ending), else "standard"
                 - overlayText: short on-screen text such as the clock value ("13.8 billion years ago"), or empty
-                - footageQuery: only when REAL NASA footage would show this line better and truer than a generated
-                  image (the real Sun, Earth from orbit, a rocket launch, the ISS, planets or galaxies as telescopes
-                  saw them): 2-5 search words such as "solar flare SDO" or "Earth night lights ISS". Otherwise empty.
-                  Never for imaginary, abstract or historical scenes.
+                - footageQuery: only when REAL footage would show this line better and truer than a generated image:
+                  space (the real Sun, Earth from orbit, launches, telescope views) from NASA, or real nature, animals,
+                  places and expeditions (e.g. NOAA deep-sea dives) from Wikimedia Commons. 2-5 exact search words,
+                  such as "solar flare SDO", "Okeanos Explorer", "deep sea". Otherwise empty. Always for a real event
+                  or "first ever" claim. Never for imaginary or abstract scenes.
+                - referenceQuery: for a shot showing a real creature, object or place that must look accurate, its
+                  name for finding real reference photos, scientific name when it has one (e.g. "Melanocetus
+                  johnsonii", "Architeuthis dux", "Hubble Space Telescope"). Otherwise empty.
                 Keep a continuous visual flow between consecutive shots (scale, direction, colour).
                 Return only the JSON object.""".formatted(preset.name(), preset.description(), totalSec, pacing, bpm,
                 bpm > 0 ? 60.0 / bpm : 0.5);

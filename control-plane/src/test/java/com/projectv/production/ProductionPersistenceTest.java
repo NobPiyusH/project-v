@@ -128,8 +128,8 @@ class ProductionPersistenceTest {
 
     @Test
     void allMigrationsApplyAndLicencesAreSeeded() {
-        assertEquals(9, jdbc.sql("SELECT count(*) FROM licence").query(Integer.class).single());
-        assertEquals(13, jdbc.sql("SELECT count(*) FROM flyway_schema_history WHERE success").query(Integer.class).single());
+        assertEquals(10, jdbc.sql("SELECT count(*) FROM licence").query(Integer.class).single());
+        assertEquals(14, jdbc.sql("SELECT count(*) FROM flyway_schema_history WHERE success").query(Integer.class).single());
     }
 
     @Test
@@ -284,7 +284,7 @@ class ProductionPersistenceTest {
                 "GSFC, Joy Ng", "2016-06-24", "t", "p");
         var saved = footage.saveCandidates(video, new com.projectv.media.MediaTypes.FootageSearchResponse(List.of(
                 new com.projectv.media.MediaTypes.FootageSearchResult(sun.toString(), "solar flare SDO", List.of(candidate), null))));
-        assertTrue(saved.summary().startsWith("Found 1 free NASA clip"), saved.summary());
+        assertTrue(saved.summary().startsWith("Found 1 free real clip (NASA, Wikimedia Commons)"), saved.summary());
 
         var req = footage.fetchRequest(video, sun, "GSFC_SDO_1", null);
         assertEquals("9:16", req.aspectRatio());

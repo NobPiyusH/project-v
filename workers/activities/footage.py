@@ -1,4 +1,4 @@
-"""Free real footage from the NASA Image and Video Library (images-api.nasa.gov; no key needed).
+"""Free real footage: the NASA Image and Video Library (images-api.nasa.gov) and Wikimedia Commons (no keys needed).
 
 NASA media is generally a US Government work, not copyrighted in the US and usable commercially, as long as it doesn't
 imply NASA endorsement and doesn't use the NASA insignia as a logo. Some items carry third-party credits; every
@@ -30,7 +30,7 @@ TARGET = {"9:16": (1080, 1920), "16:9": (1920, 1080), "1:1": (1080, 1080), "4:5"
 
 
 def _get_json(url: str) -> dict:
-    with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "projectv-studio"}), timeout=30) as r:
+    with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "projectv-studio/1.0 (private documentary tool)"}), timeout=30) as r:
         return json.load(r)
 
 
@@ -61,13 +61,85 @@ def search(query: str, limit: int = 5) -> list[dict]:
     return out
 
 
+# ------------------------------------------------------------------------------------------------ Wikimedia Commons
+# Second free source (18 Nov 2026): real nature, animals, places and events, including much NOAA deep-sea footage.
+# Only licences that never bind the finished video are accepted: public domain, CC0 and CC BY (credit required).
+# Share-alike (CC BY-SA) and non-commercial licences are skipped.
+
+COMMONS = "https://commons.wikimedia.org/w/api.php"
+COMMONS_PREFIX = "commons:"
+OK_LICENCE = re.compile(r"^(public domain|pd|cc0|cc[ -]by \d(\.\d)?)", re.I)
+
+
+def _plain(html: str | None) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", html or "")).strip()
+
+
+def _commons_query(query: str, kind: str, limit: int, thumb: int) -> list[dict]:
+    q = urllib.parse.urlencode({
+        "action": "query", "format": "json", "generator": "search", "gsrnamespace": 6, "gsrlimit": limit * 3,
+        # Every word quoted: Commons search otherwise stems ("anglerfish" matched "angle grinder").
+        "gsrsearch": " ".join(f'"{w}"' for w in query.split()) + f" filetype:{kind}",
+        "prop": "imageinfo", "iiprop": "url|size|extmetadata|mime",
+        "iiurlwidth": thumb})
+    pages = (_get_json(f"{COMMONS}?{q}").get("query") or {}).get("pages") or {}
+    out = []
+    for p in sorted(pages.values(), key=lambda p: p.get("index", 0)):
+        info = (p.get("imageinfo") or [{}])[0]
+        meta = info.get("extmetadata") or {}
+        lic = _plain((meta.get("LicenseShortName") or {}).get("value"))
+        if not OK_LICENCE.match(lic) or "sa" in lic.lower().split():
+            continue
+        if min(info.get("width") or 0, info.get("height") or 0) < 480:
+            continue
+        author = _plain((meta.get("Artist") or {}).get("value")) or _plain((meta.get("Credit") or {}).get("value"))
+        out.append({"title": p.get("title", ""), "url": info.get("url"), "thumbUrl": info.get("thumburl"),
+                    "licence": lic, "licenceUrl": _plain((meta.get("LicenseUrl") or {}).get("value")),
+                    "author": author[:200], "description": _plain((meta.get("ImageDescription") or {}).get("value"))[:400],
+                    "date": _plain((meta.get("DateTimeOriginal") or {}).get("value"))[:10],
+                    "width": info.get("width"), "height": info.get("height")})
+        if len(out) >= limit:
+            break
+    return out
+
+
+def search_commons(query: str, limit: int = 4) -> list[dict]:
+    """Video candidates from Wikimedia Commons in the same shape as NASA's (the id carries the source)."""
+    out = []
+    for c in _commons_query(query, "video", limit, 480):
+        credit = f"{c['author'] or 'Wikimedia Commons'} / {c['licence']}"
+        out.append({"nasaId": COMMONS_PREFIX + c["title"], "title": c["title"].removeprefix("File:")[:200],
+                    "description": c["description"], "credit": credit[:300], "date": c["date"],
+                    "thumbUrl": c["thumbUrl"], "previewUrl": c["url"]})
+    return out
+
+
+def reference_photos(query: str, limit: int = 2) -> list[dict]:
+    """Licence-safe real photos of a subject (for AI keyframes to get anatomy and appearance right)."""
+    return _commons_query(query, "bitmap", limit, 1024)
+
+
+def _search_all(query: str) -> list[dict]:
+    """NASA first (space), then Commons (nature, animals, places); a failing source never hides the other."""
+    out, errors = [], []
+    for fn, n in ((search, 4), (search_commons, 4)):
+        try:
+            out += fn(query, n)
+        except Exception as e:  # noqa: BLE001
+            errors.append(f"{fn.__name__}: {type(e).__name__}")
+    if not out and errors:
+        raise RuntimeError("; ".join(errors))
+    return out
+
+
 @activity.defn(name="search_footage")
 def search_footage(req: dict) -> dict:
     """req: {queries:[{shotId, query}]} -> {results:[{shotId, query, candidates:[...] , error}]}. Free."""
     results = []
     for q in req.get("queries") or []:
         try:
-            results.append({"shotId": q["shotId"], "query": q["query"], "candidates": search(q["query"]), "error": None})
+            results.append({"shotId": q["shotId"], "query": q["query"], "candidates": _search_all(q["query"]),
+                            "error": None})
         except Exception as e:  # noqa: BLE001 - one failed search must not lose the others
             results.append({"shotId": q["shotId"], "query": q["query"], "candidates": [],
                             "error": f"{type(e).__name__}: {str(e)[:200]}"})
@@ -104,8 +176,16 @@ def _probe(url_or_path: str) -> dict:
 @activity.defn(name="fetch_footage")
 def fetch_footage(req: dict) -> dict:
     """req: {videoId, shotId, shotNumber, nasaId, startSec (null = auto), durationSec, aspectRatio}
-    -> {uri, width, height, durationSec, sourceWidth, sourceHeight, upscale, startSec, sourceUrl}"""
-    src = _best_source(req["nasaId"])
+    -> {uri, width, height, durationSec, sourceWidth, sourceHeight, upscale, startSec, sourceUrl}
+    A Commons candidate's id starts with "commons:"; its original file is used."""
+    if req["nasaId"].startswith(COMMONS_PREFIX):
+        title = req["nasaId"].removeprefix(COMMONS_PREFIX)
+        q = urllib.parse.urlencode({"action": "query", "format": "json", "titles": title, "prop": "imageinfo",
+                                    "iiprop": "url"})
+        pages = _get_json(f"{COMMONS}?{q}")["query"]["pages"]
+        src = next(iter(pages.values()))["imageinfo"][0]["url"]
+    else:
+        src = _best_source(req["nasaId"])
     info = _probe(src)
     tw, th = TARGET.get(req.get("aspectRatio") or "16:9", (1920, 1080))
     want = max(1.0, float(req.get("durationSec") or 4))

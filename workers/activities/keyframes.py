@@ -5,21 +5,46 @@ from __future__ import annotations
 
 import concurrent.futures
 import time
+import urllib.request
 
 import modal
 from google.genai import types
 from temporalio import activity
 
-from workers.common import MEDIA_TIMEOUT_MS, gemini, put_bytes, usage_dict, with_models
+from workers.common import MEDIA_TIMEOUT_MS, gemini, log, put_bytes, usage_dict, with_models
 
 MODAL_BATCH = 8  # images per Modal call; heartbeat between batches
 
 
+def _references(query: str) -> tuple[list, list[str]]:
+    """Up to 2 licence-safe real photos of the subject (Wikimedia Commons) as image parts, plus their credit lines.
+    A failed lookup just means no references: the keyframe is still made."""
+    if not query:
+        return [], []
+    from workers.activities.footage import reference_photos
+
+    parts, credits = [], []
+    try:
+        for r in reference_photos(query, 2):
+            req = urllib.request.Request(r["thumbUrl"], headers={"User-Agent": "projectv-studio/1.0 (private documentary tool)"})
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                parts.append(types.Part.from_bytes(data=resp.read(), mime_type="image/jpeg"))
+            credits.append(f"{r['title']} ({r['author'] or 'Wikimedia Commons'}, {r['licence']})")
+    except Exception as e:  # noqa: BLE001
+        log.warning("Reference photos for %r unavailable (%s)", query, type(e).__name__)
+    return parts, credits
+
+
 def _nano_banana(req: dict, job: dict) -> dict:
     t = time.time()
+    refs, credits = _references(job.get("referenceQuery") or "")
+    # Real photos teach the model what the subject really looks like; the composition stays the prompt's own.
+    contents = ([*refs, f"The image(s) above are real reference photos of {job['referenceQuery']}. Use them ONLY for "
+                 "the subject's true anatomy, shape and colours; do not copy their composition, background or "
+                 "lighting.\n\n" + job["prompt"]] if refs else job["prompt"])
     used, response = with_models(req["geminiImageModel"], lambda m: gemini().models.generate_content(
         model=m,
-        contents=job["prompt"],
+        contents=contents,
         config=types.GenerateContentConfig(
             response_modalities=["IMAGE"],
             image_config=types.ImageConfig(aspect_ratio=job.get("aspectRatio", "16:9"), image_size=job.get("imageSize", "1K")),
@@ -33,7 +58,8 @@ def _nano_banana(req: dict, job: dict) -> dict:
             uri = put_bytes(f"videos/{req['videoId']}/keyframes/{job['shotId']}-{job['attempt']}.{ext}",
                             part.inline_data.data, mime)
             return {"shotId": job["shotId"], "uri": uri, "provider": "gemini_api", "model": used,
-                    "seed": None, "seconds": round(time.time() - t, 2), "usage": usage_dict(response), "error": None}
+                    "seed": None, "seconds": round(time.time() - t, 2), "usage": usage_dict(response), "error": None,
+                    "references": credits}
     raise RuntimeError("Image model returned no image")
 
 

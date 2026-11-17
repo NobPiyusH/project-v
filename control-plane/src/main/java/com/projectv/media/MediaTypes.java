@@ -73,16 +73,18 @@ public final class MediaTypes {
     }
 
     // ---- keyframes
+    /** @param referenceQuery subject to fetch real reference photos for (Gemini only; empty = none) */
     public record KeyframeJob(String shotId, int attempt, String provider, String prompt, int width, int height,
-                              String aspectRatio, String imageSize, long seed) {
+                              String aspectRatio, String imageSize, String referenceQuery, long seed) {
     }
 
     public record KeyframeRequest(String videoId, String geminiImageModel, String modalApp, String modalClass,
                                   List<KeyframeJob> jobs) {
     }
 
+    /** @param references credit lines of the real reference photos the image model was given (rule 6) */
     public record KeyframeOutput(String shotId, String uri, String provider, String model, Long seed, Double seconds,
-                                 Usage usage, String error) {
+                                 Usage usage, String error, List<String> references) {
     }
 
     public record KeyframeResult(List<KeyframeOutput> results, double modalGpuSeconds) {

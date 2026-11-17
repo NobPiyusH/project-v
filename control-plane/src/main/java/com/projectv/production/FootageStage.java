@@ -75,7 +75,7 @@ public class FootageStage extends StageSupport {
             shotsWith += n > 0 ? 1 : 0;
         }
         String summary = r.results().isEmpty() ? "No shots asked for real footage."
-                : "Found %d free NASA clip%s for %d of %d shots that could use real footage. Pick any to use it instead of a generated clip (free; no GPU)."
+                : "Found %d free real clip%s (NASA, Wikimedia Commons) for %d of %d shots that could use real footage. Pick any to use it instead of a generated clip (free; no GPU)."
                 .formatted(total, total == 1 ? "" : "s", shotsWith, r.results().size());
         return StageResult.of(summary, json.writeValueAsString(Map.of("shots", r.results().size(), "candidates", total)));
     }
@@ -95,11 +95,15 @@ public class FootageStage extends StageSupport {
     public StageResult saveFootage(UUID videoId, FootageFetchRequest req, FootageFetchResult r) {
         Map<String, Object> shot = shot(videoId, UUID.fromString(req.shotId()));
         FootageCandidate c = candidates(shot).stream().filter(x -> req.nasaId().equals(x.nasaId())).findFirst().orElse(null);
-        String credit = "NASA" + (c == null || c.credit() == null || c.credit().isBlank() ? "" : " / " + c.credit());
+        boolean commons = req.nasaId().startsWith("commons:");
+        String source = commons ? "Wikimedia Commons" : "NASA";
+        String credit = commons ? (c == null || c.credit() == null ? "Wikimedia Commons" : c.credit())
+                : "NASA" + (c == null || c.credit() == null || c.credit().isBlank() ? "" : " / " + c.credit());
+        // Commons: the file's own licence (public domain, CC0 or CC BY) and author are kept in the credit line.
         UUID assetId = assets.create(new NewAsset(videoId, "video", r.uri(), "video/mp4", r.width(), r.height(),
-                r.durationSec(), "nasa", "NASA Image and Video Library " + req.nasaId(),
+                r.durationSec(), commons ? "wikimedia" : "nasa", source + " " + req.nasaId(),
                 (c == null ? req.nasaId() : c.title()) + " | credit: " + credit + " | from " + r.startSec() + "s of " + r.sourceUrl(),
-                null, AssetStore.LICENCE_NASA, false));
+                null, commons ? AssetStore.LICENCE_COMMONS : AssetStore.LICENCE_NASA, false));
         jdbc.sql("UPDATE asset SET shot_id = :s, clip_kind = 'footage' WHERE id = :a")
                 .param("s", UUID.fromString(req.shotId())).param("a", assetId).update();
         jdbc.sql("UPDATE shot SET footage_asset_id = :a, clip_status = 'READY', clip_error = NULL, updated_at = now() WHERE id = :s")
@@ -107,8 +111,8 @@ public class FootageStage extends StageSupport {
         String soft = r.upscale() != null && r.upscale() > 1.5
                 ? " Note: the source is %dx%d, so this crop is enlarged %.1fx and may look soft.".formatted(r.sourceWidth(),
                 r.sourceHeight(), r.upscale()) : "";
-        return StageResult.of("Shot %d now uses real NASA footage (%.1fs, credit: %s).%s".formatted(req.shotNumber(),
-                r.durationSec(), credit, soft), json.writeValueAsString(r));
+        return StageResult.of("Shot %d now uses real %s footage (%.1fs, credit: %s).%s".formatted(req.shotNumber(),
+                source, r.durationSec(), credit, soft), json.writeValueAsString(r));
     }
 
     /** Back to the generated clip for this shot. */

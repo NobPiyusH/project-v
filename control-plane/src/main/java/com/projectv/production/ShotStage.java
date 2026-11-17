@@ -116,6 +116,9 @@ public class ShotStage extends StageSupport {
             prompt.put("keyframePrompt", s.keyframePrompt());
             prompt.put("motionPrompt", s.motionPrompt());
             prompt.put("lineIndex", s.lineIndex());
+            if (s.referenceQuery() != null && !s.referenceQuery().isBlank()) {
+                prompt.put("referenceQuery", s.referenceQuery().strip());
+            }
             if (s.footageQuery() != null && !s.footageQuery().isBlank()) {
                 prompt.put("footageQuery", s.footageQuery().strip());
             }
@@ -179,7 +182,9 @@ public class ShotStage extends StageSupport {
                 available = available.subtract(perImage);
             }
             String shotId = id.toString();
-            jobs.add(new KeyframeJob(shotId, attempt, provider, prompt, width, height, plan.aspectRatio(), "1K",
+            // Real reference photos only help the image model that accepts them (Gemini), on hero shots.
+            String reference = "gemini_api".equals(provider) ? java.util.Objects.toString(p.get("referenceQuery"), "") : "";
+            jobs.add(new KeyframeJob(shotId, attempt, provider, prompt, width, height, plan.aspectRatio(), "1K", reference,
                     Math.abs((long) shotId.hashCode()) + attempt));
         }
         if (jobs.isEmpty()) {
@@ -255,7 +260,9 @@ public class ShotStage extends StageSupport {
             KeyframeJob job = jobs.get(o.shotId());
             boolean isGemini = "gemini_api".equals(o.provider());
             UUID assetId = assets.create(new NewAsset(videoId, "image", o.uri(), o.uri().endsWith(".png") ? "image/png" : "image/jpeg",
-                    job.width(), job.height(), null, o.provider(), o.model(), job.prompt(), o.seed(),
+                    job.width(), job.height(), null, o.provider(), o.model(), job.prompt()
+                            + (o.references() == null || o.references().isEmpty() ? "" : " | reference photos: "
+                            + String.join("; ", o.references())), o.seed(),
                     isGemini ? AssetStore.LICENCE_GEMINI : AssetStore.LICENCE_ZIMAGE, true));
             jdbc.sql("UPDATE asset SET shot_id = :s WHERE id = :a").param("s", UUID.fromString(o.shotId())).param("a", assetId).update();
             jdbc.sql("UPDATE shot SET keyframe_asset_id = :a, status = 'READY', error = NULL, updated_at = now() WHERE id = :s")
