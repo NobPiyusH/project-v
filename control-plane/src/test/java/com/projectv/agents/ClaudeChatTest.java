@@ -24,7 +24,7 @@ class ClaudeChatTest {
         Pricing pricing = new Pricing("../config");
         // 4,000 in + 3,000 out on Sonnet 5.5 = $0.008 + $0.030 = $0.038 = ₹3.344 at 88/$
         assertEquals(0, new BigDecimal("3.3440").compareTo(pricing.claudeInr(4_000, 3_000)));
-        assertEquals(0, new BigDecimal("440.0000").compareTo(pricing.claudeMonthlyCapInr()));
+        assertEquals(0, new BigDecimal("704.0000").compareTo(pricing.claudeMonthlyCapInr()));
     }
 
     @Test

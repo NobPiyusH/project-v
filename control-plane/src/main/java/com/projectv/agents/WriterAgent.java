@@ -47,7 +47,8 @@ public class WriterAgent {
                 %s
                 %s""".formatted(prompt, plan.title(), plan.durationSec(), plan.tone(), plan.language(), plan.narration(),
                 String.join(", ", plan.mustInclude()), factsText(facts), notes(ownerNotes));
-        return llm.call(videoId, "CONCEPT", system, user, Concept.class);
+        // Claude first: it carries the research's corrections into the acts (A/B, 17 Nov 2026: concept 9 vs 7).
+        return llm.call(videoId, "CONCEPT", system, user, Concept.class, storyModel);
     }
 
     public Script script(UUID videoId, String prompt, VideoPlan plan, Concept concept, List<Fact> facts, String ownerNotes) {

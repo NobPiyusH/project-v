@@ -68,6 +68,13 @@ public class VideoProductionWorkflowImpl implements VideoProductionWorkflow {
                             .build())
                     .build());
 
+    // Claude research: one attempt only (a retry would pay for the web searches again); Gemini is the backup.
+    private final VideoActivities claudeOnce = Workflow.newActivityStub(VideoActivities.class,
+            ActivityOptions.newBuilder()
+                    .setStartToCloseTimeout(Duration.ofMinutes(6))
+                    .setRetryOptions(RetryOptions.newBuilder().setMaximumAttempts(1).build())
+                    .build());
+
     // Python media worker. Long schedule-to-close so a stage simply waits if the worker is offline;
     // heartbeats detect a worker that died mid-job. Paid calls inside, so few retries.
     private final MediaActivities media = Workflow.newActivityStub(MediaActivities.class,
@@ -379,6 +386,16 @@ public class VideoProductionWorkflowImpl implements VideoProductionWorkflow {
                 return activities.plan(videoId, prompt, notes, attempt);
             case RESEARCH:
                 var research = agents.researchRequest(videoId, notes);
+                // Claude first (blind A/B on the deep-ocean demo, 17 Nov 2026: accuracy 10 vs 8, facts 9 vs 7), then
+                // Gemini with Google Search. Older runs replay the Gemini-first path below (determinism).
+                if (Workflow.getVersion("research-claude-first", Workflow.DEFAULT_VERSION, 1) != Workflow.DEFAULT_VERSION) {
+                    try {
+                        return activities.saveResearch(videoId, claudeOnce.claudeResearch(videoId, research));
+                    } catch (ActivityFailure failure) {
+                        log.warn("Claude research failed ({}); using Gemini with Google Search", rootMessage(failure));
+                        return activities.saveResearch(videoId, media.researchTopic(research));
+                    }
+                }
                 try {
                     return activities.saveResearch(videoId, media.researchTopic(research));
                 } catch (ActivityFailure failure) {

@@ -80,7 +80,7 @@ pricing:
     music: { perSongUsd: 0.08 }                                     # lyria-3.5 per generated song (verify)
     groundingPerQueryUsd: 0.014                                     # Google Search grounding (verify)
   anthropic:
-    monthlyCapUsd: 5             # owner-funded credit (17 Nov 2026): hard stop; over the cap, Gemini takes over
+    monthlyCapUsd: 8             # owner-funded (17 Nov 2026: $5 credit; $8 cap once research + concept moved to Claude): hard stop, then Gemini
     sonnet: { inputPerMTokUsd: 2.00, outputPerMTokUsd: 10.00 }   # claude-sonnet-5-5 (verify on claude.com/pricing)
     webSearchPer1000Usd: 10.00   # server-side web search, backup researcher (verify on claude.com/pricing)
   elevenlabs:
