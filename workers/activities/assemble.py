@@ -20,6 +20,7 @@ from pathlib import Path
 
 from temporalio import activity
 
+from workers.activities import sfx
 from workers.activities.mixing import mix_audio
 from workers.common import download, log, media_duration, put_file, run_ffmpeg, workdir
 
@@ -236,8 +237,10 @@ def assemble_video(req: dict) -> dict:
         run_ffmpeg(["-f", "concat", "-safe", "0", "-i", str(listing), "-c", "copy", str(picture)])
         total = media_duration(picture)
 
+        # Sound effects (Freesound, CC0 / CC BY) for shots with an sfxQuery; none without a key.
+        fx, sfx_credits = sfx.fetch(sfx.segments(shots), tmp)
         mix = mix_audio(req.get("narration") or [], req.get("musicUri"), total, tmp, tmp / "mix.wav",
-                        lufs=-14.0, true_peak=-1.0, two_pass=True)
+                        lufs=-14.0, true_peak=-1.0, two_pass=True, sfx=fx)
         _beat("mix")
 
         # Captions: the script's words, timed by Whisper per line.
@@ -282,4 +285,4 @@ def assemble_video(req: dict) -> dict:
     log.info("Master for %s: %.1fs %dx%d, %d shots, %d caption chunks", req["videoId"], duration, w, h, len(shots), len(chunks))
     return {"masterUri": master_uri, "packageUri": package_uri, "srtUri": srt_uri, "durationSec": round(duration, 3),
             "width": w, "height": h, "fps": FPS, "fits": fits, "captionChunks": len(chunks),
-            "linesTimedByWhisper": timed}
+            "linesTimedByWhisper": timed, "sfxCredits": sfx_credits}

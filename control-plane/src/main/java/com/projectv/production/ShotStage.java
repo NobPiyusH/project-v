@@ -116,6 +116,9 @@ public class ShotStage extends StageSupport {
             prompt.put("keyframePrompt", s.keyframePrompt());
             prompt.put("motionPrompt", s.motionPrompt());
             prompt.put("lineIndex", s.lineIndex());
+            if (s.sfxQuery() != null && !s.sfxQuery().isBlank()) {
+                prompt.put("sfxQuery", s.sfxQuery().strip());
+            }
             if (s.referenceQuery() != null && !s.referenceQuery().isBlank()) {
                 prompt.put("referenceQuery", s.referenceQuery().strip());
             }

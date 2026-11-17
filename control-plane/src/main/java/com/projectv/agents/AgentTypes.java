@@ -37,12 +37,14 @@ public final class AgentTypes {
      * @param priority  hero | standard | filler
      * @param footageQuery 2-5 exact search words when real footage (NASA, Wikimedia Commons) would show this
      *                  better, else empty
+     * @param sfxQuery    2-4 words for a background sound (e.g. "underwater ambience"), else empty
      * @param referenceQuery name (scientific when possible) of a real subject that must look accurate, for real
      *                  reference photos given to the image model, else empty
      */
     public record PlannedShot(String sceneTitle, Integer lineIndex, double durationSec, String shotType,
                               String cameraMove, String description, String keyframePrompt, String motionPrompt,
-                              String priority, String overlayText, String footageQuery, String referenceQuery) {
+                              String priority, String overlayText, String footageQuery, String referenceQuery,
+                              String sfxQuery) {
     }
 
     public record ShotPlan(List<PlannedShot> shots) {

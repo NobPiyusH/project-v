@@ -56,6 +56,9 @@ public class DirectorAgent {
                   places and expeditions (e.g. NOAA deep-sea dives) from Wikimedia Commons. 2-5 exact search words,
                   such as "solar flare SDO", "Okeanos Explorer", "deep sea". Otherwise empty. Always for a real event
                   or "first ever" claim. Never for imaginary or abstract scenes.
+                - sfxQuery: 2-4 words for a quiet background sound that makes the shot feel real ("underwater
+                  ambience", "train interior", "wind over grass", "crackling fire"); keep the same words across
+                  consecutive shots in one place so the ambience flows. Empty for silence or pure music moments.
                 - referenceQuery: for a shot showing a real creature, object or place that must look accurate, its
                   name for finding real reference photos, scientific name when it has one (e.g. "Melanocetus
                   johnsonii", "Architeuthis dux", "Hubble Space Telescope"). Otherwise empty.

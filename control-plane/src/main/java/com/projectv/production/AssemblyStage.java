@@ -76,7 +76,8 @@ public class AssemblyStage extends StageSupport {
                 missing.add("shot " + n);
                 continue;
             }
-            shots.add(new AssemblyShot(n, uris.get(assetId), kind, round(start), round(dur), (String) s.get("overlay_text")));
+            shots.add(new AssemblyShot(n, uris.get(assetId), kind, round(start), round(dur), (String) s.get("overlay_text"),
+                    p.get("sfxQuery") instanceof String q && !q.isBlank() ? q : null));
             if (p.get("lineIndex") instanceof Number li) {
                 lineStart.putIfAbsent(li.intValue(), start);
             }
@@ -101,7 +102,7 @@ public class AssemblyStage extends StageSupport {
         if (needed > end && !shots.isEmpty()) {
             AssemblyShot last = shots.removeLast();
             shots.add(new AssemblyShot(last.n(), last.uri(), last.kind(), last.startSec(),
-                    round(last.durationSec() + needed - end), last.overlayText()));
+                    round(last.durationSec() + needed - end), last.overlayText(), last.sfxQuery()));
             end = needed;
         }
         String musicUri = jdbc.sql("""
@@ -113,8 +114,10 @@ public class AssemblyStage extends StageSupport {
 
     @Transactional
     public StageResult saveMaster(UUID videoId, AssemblyResult r) {
+        // Sound-effect credits (Freesound CC BY needs the author) travel with the master for the video description.
+        String sfx = r.sfxCredits() == null || r.sfxCredits().isEmpty() ? null : "Sound effects: " + String.join("; ", r.sfxCredits());
         UUID master = assets.create(new NewAsset(videoId, "video", r.masterUri(), "video/mp4", r.width(), r.height(),
-                r.durationSec(), "projectv", "ffmpeg assembly (rough cut)", null, null, AssetStore.LICENCE_OWN_RENDER, false));
+                r.durationSec(), "projectv", "ffmpeg assembly (rough cut)", sfx, null, AssetStore.LICENCE_OWN_RENDER, false));
         UUID pack = assets.create(new NewAsset(videoId, "timeline", r.packageUri(), "application/zip", null, null, null,
                 "projectv", "OpenTimelineIO FCP7 XML + media", null, null, AssetStore.LICENCE_OWN_RENDER, false));
         UUID captions = r.srtUri() == null ? null : assets.create(new NewAsset(videoId, "subtitle", r.srtUri(),

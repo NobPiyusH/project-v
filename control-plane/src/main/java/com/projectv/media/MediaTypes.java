@@ -216,7 +216,12 @@ public final class MediaTypes {
     // ---- M2c part 1: assembly (the edit)
 
     /** @param kind footage | final | draft (which clip the shot uses) */
-    public record AssemblyShot(int n, String uri, String kind, double startSec, double durationSec, String overlayText) {
+    /** @param sfxQuery a sound for this shot on Freesound (e.g. "underwater ambience"), or null */
+    public record AssemblyShot(int n, String uri, String kind, double startSec, double durationSec, String overlayText,
+                               String sfxQuery) {
+        public AssemblyShot(int n, String uri, String kind, double startSec, double durationSec, String overlayText) {
+            this(n, uri, kind, startSec, durationSec, overlayText, null);
+        }
     }
 
     public record AssemblyLine(String uri, double startSec, double tempo, String text, double durationSec) {
@@ -229,7 +234,12 @@ public final class MediaTypes {
     /** @param fits per shot: which clip, its length, how it was fitted (trimmed / slowed) */
     public record AssemblyResult(String masterUri, String packageUri, String srtUri, double durationSec, int width,
                                  int height, int fps, List<Map<String, Object>> fits, int captionChunks,
-                                 int linesTimedByWhisper) {
+                                 int linesTimedByWhisper, List<String> sfxCredits) {
+        public AssemblyResult(String masterUri, String packageUri, String srtUri, double durationSec, int width,
+                              int height, int fps, List<Map<String, Object>> fits, int captionChunks,
+                              int linesTimedByWhisper) {
+            this(masterUri, packageUri, srtUri, durationSec, width, height, fps, fits, captionChunks, linesTimedByWhisper, null);
+        }
     }
 
     // ---- M2c part 2a: smooth motion (RIFE 16 -> 24 fps on Modal)
