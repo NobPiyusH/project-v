@@ -90,7 +90,7 @@ def smooth(src: Path, dst: Path, src_fps: float = 16, dst_fps: float = 24) -> di
     w, h = _probe(src)
     raw = subprocess.run([ffmpeg_bin(), "-v", "error", "-i", str(src), "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
                          capture_output=True, check=True).stdout
-    frames = np.frombuffer(raw, np.uint8).reshape(-1, h, w, 3)
+    frames = np.frombuffer(raw, np.uint8).reshape(-1, h, w, 3).copy()  # writable, for torch.from_numpy
     ph, pw = ((h - 1) // 128 + 1) * 128, ((w - 1) // 128 + 1) * 128
 
     def tensor(f):
