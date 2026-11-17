@@ -216,6 +216,7 @@ export function VideoDetail({ id, stages }: { id: string; stages: StageInfo[] })
       {current === 'plan' && (
         <>
           <PlanCard video={video} />
+          <TimeCostCard video={video} stages={stages} />
           <CostsCard video={video} />
         </>
       )}
@@ -373,6 +374,70 @@ function PlanCard({ video }: { video: Detail }) {
       <dl className="kv">{rows.map(([k, v]) => (<Fragment key={k}><dt>{k}</dt><dd>{v}</dd></Fragment>))}</dl>
       {plan.rationale && <p className="muted small">{plan.rationale}</p>}
       {fallbackReason && <p className="muted small">Fallback reason: {fallbackReason}</p>}
+    </section>
+  )
+}
+
+/** Cost-ledger notes start with a tag; these tags belong to a differently named stage. */
+const COST_STAGE: Record<string, string> = {
+  DRAFT: 'DRAFT_GEN', Wan: 'DRAFT_GEN', FINAL: 'FINAL_GEN', KEYFRAME: 'KEYFRAMES', SHARPEN: 'UPSCALE', SMOOTH: 'UPSCALE',
+  CREATIVE_REVIEW: 'SHOT_PLAN', 'VOICE': 'NARRATION',
+}
+const WASTED = new Set(['FAILED', 'INSPECTION_FAILED', 'REJECTED'])
+
+/**
+ * Where a video's time and money went, per stage: time spent (incl. waiting for your approval), time lost on failed
+ * or redone attempts, and cost. The three slowest stages are highlighted (efficiency pass, 18 Nov 2026).
+ */
+function TimeCostCard({ video, stages }: { video: Detail; stages: StageInfo[] }) {
+  const rows = new Map<string, { secs: number; wasted: number; attempts: number; inr: number }>()
+  const row = (s: string) => rows.get(s) ?? rows.set(s, { secs: 0, wasted: 0, attempts: 0, inr: 0 }).get(s)!
+  for (const r of video.stageRuns) {
+    if (!r.finished_at) continue
+    const secs = Math.max(0, (Date.parse(r.finished_at) - Date.parse(r.started_at)) / 1000)
+    const x = row(r.stage)
+    x.secs += secs
+    x.attempts += 1
+    if (WASTED.has(r.status)) x.wasted += secs
+  }
+  for (const c of video.costs) {
+    const tag = (c.note ?? '').split(/[ (]/)[0]
+    const stage = COST_STAGE[tag] ?? tag
+    if (stages.some((s) => s.id === stage)) row(stage).inr += Number(c.amount_inr)
+  }
+  const used = stages.filter((s) => (rows.get(s.id)?.secs ?? 0) >= 1 || (rows.get(s.id)?.inr ?? 0) > 0)
+  const total = [...rows.values()].reduce((a, r) => ({ secs: a.secs + r.secs, wasted: a.wasted + r.wasted, inr: a.inr + r.inr }),
+    { secs: 0, wasted: 0, inr: 0 })
+  const slowest = new Set([...used].sort((a, b) => rows.get(b.id)!.secs - rows.get(a.id)!.secs).slice(0, 3).map((s) => s.id))
+  const mins = (s: number) => (s < 60 ? `${Math.round(s)} s` : `${(s / 60).toFixed(1)} min`)
+  if (used.length === 0) return null
+  return (
+    <section className="card">
+      <div className="card-head">
+        <h2>Time &amp; cost by stage</h2>
+        <span className="pill">{mins(total.secs)} · ₹{total.inr.toFixed(2)}</span>
+      </div>
+      <p className="muted small">
+        Stage time includes waiting for your approval. Lost to failed or redone attempts: <b>{mins(total.wasted)}</b>
+        {total.secs > 0 ? ` (${Math.round((100 * total.wasted) / total.secs)}%)` : ''}. Slowest stages are marked ★.
+      </p>
+      <table>
+        <thead><tr><th>Stage</th><th>Time</th><th>Lost</th><th className="hide-sm">Attempts</th><th>₹</th></tr></thead>
+        <tbody>
+          {used.map((s) => {
+            const r = rows.get(s.id)!
+            return (
+              <tr key={s.id}>
+                <td>{slowest.has(s.id) ? '★ ' : ''}{s.label}</td>
+                <td>{mins(r.secs)}</td>
+                <td className={r.wasted > 0 ? 'error' : 'muted'}>{r.wasted > 0 ? mins(r.wasted) : '—'}</td>
+                <td className="hide-sm">{r.attempts}</td>
+                <td>{r.inr > 0 ? r.inr.toFixed(2) : '—'}</td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
     </section>
   )
 }
