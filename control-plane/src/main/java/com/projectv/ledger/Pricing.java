@@ -43,26 +43,35 @@ public class Pricing {
         return BigDecimal.valueOf(num(gemini(), "reserveInr"));
     }
 
+    /**
+     * Google's bill vs the studio's estimates (Nov 1-17 2026: ₹372.62 billed before savings vs ₹243.43 in the ledger,
+     * ×1.53 incl. some untracked test calls): every Gemini estimate is scaled so the ₹400 cap protects real spend.
+     */
+    private BigDecimal calibrated(BigDecimal inr) {
+        Object c = gemini().get("calibration");
+        return c instanceof Number n ? inr.multiply(BigDecimal.valueOf(n.doubleValue())) : inr;
+    }
+
     public BigDecimal textInr(Usage u) {
-        return tokensInr(map(gemini(), "text"), u);
+        return calibrated(tokensInr(map(gemini(), "text"), u));
     }
 
     public BigDecimal ttsInr(Usage u) {
-        return tokensInr(map(gemini(), "tts"), u);
+        return calibrated(tokensInr(map(gemini(), "tts"), u));
     }
 
     public BigDecimal imageInr(String size) {
         Map<String, Object> per = map(map(gemini(), "image"), "perImageUsd");
         Object v = per.getOrDefault(size, per.get("1K"));
-        return inr(((Number) v).doubleValue());
+        return calibrated(inr(((Number) v).doubleValue()));
     }
 
     public BigDecimal musicInr(int songs) {
-        return inr(num(map(gemini(), "music"), "perSongUsd") * songs);
+        return calibrated(inr(num(map(gemini(), "music"), "perSongUsd") * songs));
     }
 
     public BigDecimal groundingInr(int queries) {
-        return inr(num(gemini(), "groundingPerQueryUsd") * queries);
+        return calibrated(inr(num(gemini(), "groundingPerQueryUsd") * queries));
     }
 
     public BigDecimal modalGpuInr(String gpu, double seconds) {
