@@ -35,3 +35,6 @@ drop/
 logs/
 .run/
 research_notes/
+
+# Windows shell crash dumps
+*.stackdump
