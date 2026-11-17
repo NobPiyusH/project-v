@@ -51,7 +51,7 @@ def test_a_short_is_assembled_mastered_captioned_and_packaged(local):
     run_ffmpeg(["-f", "lavfi", "-i", "sine=f=440:d=12", "-af", "volume=-20dB", str(music)])
     out = A.assemble_video({
         "videoId": "v1", "title": "Night sky", "aspectRatio": "9:16", "language": "en", "captions": True,
-        "shots": [{"n": 1, "uri": clips[0], "kind": "draft", "startSec": 0.0, "durationSec": 2.5, "overlayText": "13.8 billion years"},
+        "shots": [{"n": 1, "uri": clips[0], "kind": "draft", "startSec": 0.0, "durationSec": 2.5, "overlayText": "90% of 13.8 billion years: it's dark"},
                   {"n": 2, "uri": clips[1], "kind": "draft", "startSec": 2.5, "durationSec": 3.0},
                   {"n": 3, "uri": clips[2], "kind": "footage", "startSec": 5.5, "durationSec": 3.5}],
         "narration": [{"uri": str(voice), "startSec": 0.4, "tempo": 1.0, "durationSec": 4.0,

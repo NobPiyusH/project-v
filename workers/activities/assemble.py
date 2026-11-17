@@ -38,7 +38,8 @@ def _beat(detail) -> None:
 
 
 def _esc(text: str) -> str:
-    return text.replace("\\", "\\\\").replace(":", "\\:").replace("'", "’").replace("%", "\\%")
+    # Used with drawtext expansion=none, so "%" is plain text (escaping it broke the animatic on "90% make light").
+    return text.replace("\\", "\\\\").replace(":", "\\:").replace("'", "’")
 
 
 # ------------------------------------------------------------------------------------------------ word timings
@@ -155,7 +156,7 @@ def _shot_clip(shot: dict, src: Path, out: Path, w: int, h: int) -> dict:
           f"scale={w}:{h}:force_original_aspect_ratio=increase:flags=lanczos", f"crop={w}:{h}", f"fps={FPS}",
           "format=yuv420p"]
     if shot.get("overlayText"):
-        vf.append(f"drawtext=fontfile='{FONT}':text='{_esc(shot['overlayText'])}':x=(w-text_w)/2:y=h*0.12:"
+        vf.append(f"drawtext=fontfile='{FONT}':text='{_esc(shot['overlayText'])}':expansion=none:x=(w-text_w)/2:y=h*0.12:"
                   f"fontsize={round(h * 0.035)}:fontcolor=white:shadowcolor=black@0.7:shadowx=2:shadowy=2")
     run_ffmpeg(["-i", str(src), "-an", "-vf", ",".join(vf), "-t", f"{slot:.3f}", "-c:v", "libx264",
                 "-preset", "medium", "-crf", "14", str(out)])

@@ -16,7 +16,8 @@ FONT = "C\\:/Windows/Fonts/segoeui.ttf"
 
 
 def _esc(text: str) -> str:
-    return text.replace("\\", "\\\\").replace(":", "\\:").replace("'", "’").replace("%", "\\%")
+    # Used with drawtext expansion=none, so "%" is plain text (escaping it broke the animatic on "90% make light").
+    return text.replace("\\", "\\\\").replace(":", "\\:").replace("'", "’")
 
 
 @activity.defn(name="render_animatic")
@@ -41,10 +42,10 @@ def render_animatic(req: dict) -> dict:
                 f"scale={W * 2}:{H * 2}:force_original_aspect_ratio=increase,crop={W * 2}:{H * 2},"
                 f"zoompan=z='min(1+0.06*on/{frames},1.06)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={frames}:s={W}x{H}:fps={FPS},"
                 f"drawbox=x=0:y=ih-56:w=iw:h=56:color=black@0.55:t=fill,"
-                f"drawtext=fontfile='{FONT}':text='{label}':x=24:y=h-40:fontsize=24:fontcolor=white@0.85"
+                f"drawtext=fontfile='{FONT}':text='{label}':expansion=none:x=24:y=h-40:fontsize=24:fontcolor=white@0.85"
             )
             if shot.get("overlayText"):
-                vf += (f",drawtext=fontfile='{FONT}':text='{_esc(shot['overlayText'])}':x=(w-text_w)/2:y=h*0.12:"
+                vf += (f",drawtext=fontfile='{FONT}':text='{_esc(shot['overlayText'])}':expansion=none:x=(w-text_w)/2:y=h*0.12:"
                        "fontsize=56:fontcolor=white:shadowcolor=black@0.7:shadowx=2:shadowy=2")
             clip = tmp / f"c{n}.mp4"
             run_ffmpeg(["-loop", "1", "-framerate", str(FPS), "-i", str(img), "-vf", vf, "-frames:v", str(frames),
