@@ -9,6 +9,32 @@ CFG = {"key": "k", "model": "eleven_v4_turbo", "voiceId": "v", "voiceName": "Geo
 LINES = [{"index": i, "text": "x" * 300} for i in range(3)]  # 900 characters -> 900 * 0.5 * 1.3 = 585 credits
 
 
+@pytest.fixture(autouse=True)
+def _paid_elevenlabs_no_chatterbox(monkeypatch):
+    """The ElevenLabs rules below apply to a paid (commercial) plan; Chatterbox is checked separately."""
+    monkeypatch.setenv("ELEVENLABS_COMMERCIAL", "1")
+    monkeypatch.setattr(V, "chatterbox_available", lambda language: False)
+
+
+def test_chatterbox_is_the_main_voice_and_free_elevenlabs_is_never_used_automatically(monkeypatch):
+    monkeypatch.setattr(V, "chatterbox_available", lambda language: True)
+    assert V.choose_provider({"lines": LINES, "language": "en"}, 9000, CFG) == "chatterbox"
+    monkeypatch.setattr(V, "chatterbox_available", lambda language: False)
+    monkeypatch.setenv("ELEVENLABS_COMMERCIAL", "0")
+    assert V.choose_provider({"lines": LINES}, 9000, CFG) == "gemini", "free ElevenLabs plan is non-commercial"
+    assert V.choose_provider({"lines": LINES, "voiceProvider": "chatterbox"}, None, CFG) == "chatterbox"
+
+
+def test_when_chatterbox_fails_gemini_voices_the_whole_video(monkeypatch):
+    monkeypatch.setattr(V, "chatterbox_available", lambda language: True)
+    monkeypatch.setattr(V, "_chatterbox_result", lambda req: (_ for _ in ()).throw(RuntimeError("CUDA out of memory")))
+    monkeypatch.setattr(V, "_speak", lambda req, line: {"index": line["index"], "uri": "u", "durationSec": 1.0,
+                                                        "usage": None, "takes": 1, "passed": True, "check": "ok"})
+    monkeypatch.setattr(V.activity, "heartbeat", lambda *a: None)
+    out = V.synthesize_narration({"videoId": "v", "model": "gemini-tts", "language": "en", "lines": LINES})
+    assert out["model"] == "gemini-tts" and len(out["lines"]) == 3
+
+
 def test_elevenlabs_only_when_the_whole_video_fits_with_headroom_and_reserve():
     assert V.eleven_needed(LINES, 0.5) == 586
     assert V.choose_provider({"lines": LINES}, 2100, CFG) == "elevenlabs"   # 2100 - 1500 >= 586

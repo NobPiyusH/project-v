@@ -58,6 +58,11 @@ public final class MediaTypes {
             return model != null && model.startsWith("elevenlabs:");
         }
 
+        /** Chatterbox on the laptop GPU: the channel's main voice (free, MIT). */
+        public boolean chatterbox() {
+            return model != null && model.startsWith("chatterbox:");
+        }
+
         /** Kokoro on the laptop: the free last-resort voice. */
         public boolean kokoro() {
             return model != null && model.startsWith("kokoro:");

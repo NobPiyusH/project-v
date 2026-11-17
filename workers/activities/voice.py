@@ -13,15 +13,20 @@ import io
 import json
 import os
 import re
+import shutil
+import subprocess
+import tempfile
 import threading
 import urllib.request
 import uuid
 import wave
+from pathlib import Path
 
 from google.genai import types
 from temporalio import activity
 
-from workers.common import RateLimiter, gemini, log, model_list, pcm_to_wav, put_bytes, usage_dict, with_models
+from workers.common import (RateLimiter, gemini, log, model_list, pcm_to_wav, put_bytes, run_ffmpeg, usage_dict,
+                            with_models)
 
 # Gemini TTS allows 10 requests/minute per model on the owner's tier; stay just under it.
 TTS_LIMIT = RateLimiter(per_minute=9)
@@ -202,8 +207,14 @@ def eleven_needed(lines: list[dict], multiplier: float = 1.0) -> int:
 def choose_provider(req: dict, remaining: int | None, cfg: dict) -> str:
     """'elevenlabs' or 'gemini' for the whole request. A redo keeps the video's provider ('elevenlabs' asked)."""
     wanted = (req.get("voiceProvider") or "auto").lower()
-    if wanted == "kokoro":
-        return "kokoro"
+    if wanted in ("kokoro", "chatterbox"):
+        return wanted
+    # Owner, 18 Nov 2026: Chatterbox is the channel voice (free, MIT, fine for monetised videos). ElevenLabs' free
+    # plan is non-commercial, so it is only used automatically when ELEVENLABS_COMMERCIAL=1 (a paid plan).
+    if wanted == "auto" and chatterbox_available(req.get("language")):
+        return "chatterbox"
+    if wanted == "auto" and os.getenv("ELEVENLABS_COMMERCIAL", "0") != "1":
+        return "gemini"
     if wanted == "gemini" or not cfg["key"]:
         if wanted == "elevenlabs":
             raise RuntimeError("This video was voiced by ElevenLabs but no ELEVENLABS_API_KEY is set")
@@ -311,6 +322,89 @@ def _kokoro_result(req: dict) -> dict:
             "characters": 0}
 
 
+# ------------------------------------------------------------------------------------------------ Chatterbox
+# Main voice (owner, 18 Nov 2026): Resemble AI Chatterbox (MIT, pinned weights, Perth watermark) on the laptop GPU.
+# It pins torch 2.6 / numpy < 2, so it lives in its own environment (tools/chatterbox) and runs as a subprocess;
+# all lines go in one call so the model loads once. CHATTERBOX_VOICE_REF (a 10-20 s recording) clones a voice
+# the owner has the rights to (his own).
+
+CHATTERBOX_DIR = Path(__file__).resolve().parents[2] / "tools" / "chatterbox"
+CHATTERBOX_TAKES = 2
+
+
+def chatterbox_available(language: str | None) -> bool:
+    if os.getenv("PROJECTV_CHATTERBOX", "1") == "0" or (language or "en")[:2].lower() != "en":
+        return False
+    return (CHATTERBOX_DIR / ".venv").exists() and shutil.which("uv") is not None
+
+
+def _chatterbox_run(lines: list[dict], tmp: Path) -> dict[int, Path]:
+    """Voice lines in one subprocess call. Returns {line index: wav path} for the lines that were produced."""
+    job = {"lines": [{"text": l["text"], "out": str(tmp / f"cb-{l['index']:03d}.wav")} for l in lines],
+           "voiceRef": os.getenv("CHATTERBOX_VOICE_REF") or None,
+           "exaggeration": float(os.getenv("CHATTERBOX_EXAGGERATION", "0.5")), "cfgWeight": 0.5}
+    job_path = tmp / "job.json"
+    job_path.write_text(json.dumps(job), encoding="utf-8")
+    proc = subprocess.run(["uv", "run", "--no-sync", "--project", str(CHATTERBOX_DIR), "python",
+                           str(CHATTERBOX_DIR / "speak.py"), str(job_path)],
+                          capture_output=True, text=True, timeout=60 * 30)
+    done = {l["index"]: tmp / f"cb-{l['index']:03d}.wav" for l in lines if (tmp / f"cb-{l['index']:03d}.wav").exists()}
+    if proc.returncode != 0 and not done:
+        raise RuntimeError(f"Chatterbox failed: {proc.stderr[-400:]}")
+    return done
+
+
+def _chatterbox_result(req: dict) -> dict:
+    """Every line voiced (retakes only for lines the transcript check rejects), then stored like any narration."""
+    out: dict[int, dict] = {}
+    todo = list(req["lines"])
+    with tempfile.TemporaryDirectory(prefix="projectv-chatterbox-") as tmp:
+        for take in range(1, CHATTERBOX_TAKES + 1):
+            if not todo:
+                break
+            take_dir = Path(tmp) / f"t{take}"
+            take_dir.mkdir()
+            wavs = _chatterbox_run(todo, take_dir)
+            retry = []
+            for line in todo:
+                path = wavs.get(line["index"])
+                if path is None:
+                    retry.append(line)
+                    continue
+                wav = _to_wav24(path.read_bytes())
+                heard, _ = _transcribe(req, wav)
+                ok, why = judge(line["text"], heard)
+                out[line["index"]] = {"line": line, "wav": wav, "ok": ok, "why": why, "takes": take}
+                if not ok:
+                    retry.append(line)
+                    log.warning("Chatterbox line %s take %d rejected: %s | heard: %r", line["index"], take, why, heard[:120])
+            todo = retry
+            try:
+                activity.heartbeat(len(out))
+            except RuntimeError:
+                pass
+    missing = [l["index"] for l in req["lines"] if l["index"] not in out]
+    if missing:
+        raise RuntimeError(f"Chatterbox produced no audio for lines {missing}")
+    lines = []
+    for idx in sorted(out):
+        r = out[idx]
+        uri = put_bytes(f"videos/{req['videoId']}/narration/line-{idx:03d}.wav", r["wav"], "audio/wav")
+        lines.append({"index": idx, "uri": uri, "durationSec": round(_wav_seconds(r["wav"]), 3), "usage": None,
+                      "takes": r["takes"], "passed": r["ok"], "check": r["why"]})
+    voice = "cloned" if os.getenv("CHATTERBOX_VOICE_REF") else "default"
+    return {"lines": lines, "model": f"chatterbox:{voice}", "voiceName": f"Chatterbox {voice}", "characters": 0}
+
+
+def _to_wav24(data: bytes) -> bytes:
+    """Chatterbox writes float WAVs; the edit expects 16-bit PCM like the other voices."""
+    with tempfile.TemporaryDirectory() as t:
+        src, dst = Path(t, "in.wav"), Path(t, "out.wav")
+        src.write_bytes(data)
+        run_ffmpeg(["-i", str(src), "-ac", "1", "-ar", "24000", "-sample_fmt", "s16", str(dst)])
+        return dst.read_bytes()
+
+
 def _run(req: dict, speak) -> list[dict]:
     results = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
@@ -332,6 +426,14 @@ def synthesize_narration(req: dict) -> dict:
         remaining = eleven_remaining(cfg["key"])
         cfg["multiplier"] = eleven_multiplier(cfg["key"], cfg["model"])
     provider = choose_provider(req, remaining, cfg)
+    if provider == "chatterbox":
+        try:
+            return _chatterbox_result(req)
+        except Exception as e:  # noqa: BLE001
+            if (req.get("voiceProvider") or "auto") == "chatterbox":
+                raise  # a redo must keep the video's voice: let the owner decide
+            log.warning("Chatterbox failed (%s: %s); voicing the whole video with Gemini", type(e).__name__, e)
+            provider = "gemini"
     if provider == "elevenlabs":
         try:
             lines = _run(req, lambda line: _speak_eleven(req, cfg, line))

@@ -128,8 +128,8 @@ class ProductionPersistenceTest {
 
     @Test
     void allMigrationsApplyAndLicencesAreSeeded() {
-        assertEquals(10, jdbc.sql("SELECT count(*) FROM licence").query(Integer.class).single());
-        assertEquals(14, jdbc.sql("SELECT count(*) FROM flyway_schema_history WHERE success").query(Integer.class).single());
+        assertEquals(11, jdbc.sql("SELECT count(*) FROM licence").query(Integer.class).single());
+        assertEquals(15, jdbc.sql("SELECT count(*) FROM flyway_schema_history WHERE success").query(Integer.class).single());
     }
 
     @Test
