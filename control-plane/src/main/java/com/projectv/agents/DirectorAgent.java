@@ -43,7 +43,9 @@ public class DirectorAgent {
                 For each shot write:
                 - description: what we see, in plain words
                 - keyframePrompt: a rich, self-contained image prompt for the FIRST frame (subject, composition, lens,
-                  light, colour, atmosphere). Never mention the camera move, text or captions. Never depict real people.
+                  light, colour, atmosphere). Never mention the camera move. Never ask for text, words, letters,
+                  numbers, titles, signs, logos, or clock or screen digits: image and video models can't spell, so
+                  anything the viewer must read goes in overlayText (the edit draws it). Never depict real people.
                 - motionPrompt: how the shot moves over its duration (camera move + motion in the scene), for a video model
                 - cameraMove: one of push_in, pull_out, orbit, drift_left, drift_right, crane_up, crane_down, static, flythrough
                 - shotType: extreme_wide, wide, medium, close_up, macro, aerial, pov

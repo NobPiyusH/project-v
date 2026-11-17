@@ -173,7 +173,7 @@ class ProductionPersistenceTest {
                         """).param("id", shot).param("s", scene).update();
         var review = new com.projectv.agents.AgentTypes.CreativeReview(
                 new com.projectv.agents.AgentTypes.VideoCritique(4, 4, 4, 4, "", ""), List.of(),
-                List.of(new com.projectv.agents.AgentTypes.ShotCritique(1, 1, 4, 4, true, "a torch, not starlight",
+                List.of(new com.projectv.agents.AgentTypes.ShotCritique(1, 1, 4, 4, true, false, "a torch, not starlight",
                         "ancient light leaving a distant galaxy")));
         var findings = creative.saveImageReview(video, 1, new com.projectv.media.MediaTypes.ImageReviewResult(review,
                 "gemini-3.6-flash", new Usage(5000, 800, 0, 5800), 1));

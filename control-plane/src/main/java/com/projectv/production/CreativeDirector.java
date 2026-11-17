@@ -74,7 +74,7 @@ public class CreativeDirector extends StageSupport {
         Set<Integer> rewritten = new HashSet<>();
         for (ShotCritique c : safe(review.shots())) {
             Map<String, Object> shot = byN.get(c.shot());
-            if (shot != null && worst(c) <= WARN_AT && !blank(c.fixPrompt()) && rewritePrompt(shot, c.fixPrompt(), false)) {
+            if (shot != null && needsFix(c) && !blank(c.fixPrompt()) && rewritePrompt(shot, c.fixPrompt(), false)) {
                 rewritten.add(c.shot());
             }
         }
@@ -131,7 +131,7 @@ public class CreativeDirector extends StageSupport {
         Map<Integer, Map<String, Object>> byN = byNumber(shots(videoId));
         for (ShotCritique c : safe(r.review().shots())) {
             Map<String, Object> shot = byN.get(c.shot());
-            if (shot != null && worst(c) <= WARN_AT && !blank(c.fixPrompt())) {
+            if (shot != null && needsFix(c) && !blank(c.fixPrompt())) {
                 rewritePrompt(shot, c.fixPrompt(), true); // kept as a suggestion until the shot is redone
             }
         }
@@ -216,15 +216,19 @@ public class CreativeDirector extends StageSupport {
             }
             int worst = worst(c);
             boolean literal = c.literal() && c.meaning() <= WARN_AT;
-            if (worst > WARN_AT && !literal) {
+            // Garbled generated lettering is never acceptable output, whatever the other scores.
+            boolean must = literal || c.writing();
+            if (worst > WARN_AT && !must) {
                 continue;
             }
             String ref = "shot " + c.shot();
-            String msg = "meaning %d/5, accuracy %d/5, continuity %d/5%s: %s".formatted(c.meaning(), c.accuracy(),
-                    c.continuity(), c.literal() ? ", shows one word instead of the idea" : "", text(c.problem(), "weak"));
+            String msg = "meaning %d/5, accuracy %d/5, continuity %d/5%s%s: %s".formatted(c.meaning(), c.accuracy(),
+                    c.continuity(), c.literal() ? ", shows one word instead of the idea" : "",
+                    c.writing() ? ", has generated lettering (it comes out garbled; on-screen words belong in the edit)" : "",
+                    text(c.problem(), "weak"));
             if (rewritten.contains(c.shot())) {
                 out.add(new Finding("INFO", "CD_PROMPT_IMPROVED", msg + " Prompt rewritten.", ref, id(shot)));
-            } else if (worst <= FAIL_AT || literal) {
+            } else if (worst <= FAIL_AT || must) {
                 out.add(new Finding(imageStage && !blank(c.fixPrompt()) ? "FAIL" : imageStage ? "WARN" : "FAIL",
                         "CD_SHOT", msg, ref, imageStage && !blank(c.fixPrompt()) ? id(shot) : null));
             } else {
@@ -337,6 +341,10 @@ public class CreativeDirector extends StageSupport {
 
     private static String id(Map<String, Object> shot) {
         return String.valueOf(shot.get("id"));
+    }
+
+    private static boolean needsFix(ShotCritique c) {
+        return worst(c) <= WARN_AT || c.writing();
     }
 
     private static int worst(ShotCritique c) {

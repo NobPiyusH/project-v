@@ -31,7 +31,11 @@ public class CreativeDirectorAgent {
             - continuity: does it belong with its neighbours (style, palette, scale, direction of motion, same subject
               looking the same)?
             - literal: true if it depicts a single word instead of the line's meaning.
-            - For any score of 3 or less, write fixPrompt: a complete, self-contained replacement image prompt (subject,
+            - writing: true if the picture shows, or its prompt/description asks for, any letters, words, numbers,
+              titles, signs, logos, or clock or screen digits. Generated pictures can't spell (a planned title came
+              out as "NO KO"); words a viewer must read are overlayText, which the edit draws. When true, write a
+              fixPrompt that shows the same idea with no writing at all.
+            - For any score of 3 or less, or writing true, write fixPrompt: a complete, self-contained replacement image prompt (subject,
               composition, lens, light, colour, atmosphere) that fixes the problem. Never ask for text, captions or
               real people in the image. Otherwise leave fixPrompt empty.
 

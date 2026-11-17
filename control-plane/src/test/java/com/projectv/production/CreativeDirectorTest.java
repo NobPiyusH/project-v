@@ -23,11 +23,21 @@ class CreativeDirectorTest {
     private static final VideoCritique GOOD_VIDEO = new VideoCritique(4, 5, 4, 4, "strong", "");
 
     private static ShotCritique shot(int n, int meaning, boolean literal, String fix) {
-        return new ShotCritique(n, meaning, 5, 5, literal, "problem " + n, fix);
+        return new ShotCritique(n, meaning, 5, 5, literal, false, "problem " + n, fix);
     }
 
     private static List<String> sev(List<Finding> f) {
         return f.stream().map(x -> x.severity() + ":" + x.code() + ":" + x.ref()).toList();
+    }
+
+    @Test
+    void generatedLetteringFailsEvenWhenEverythingElseScoresWell() {
+        var garbled = new ShotCritique(3, 5, 5, 5, false, true, "the title reads NO KO", "a lone figure in a sea of stars...");
+        var review = new CreativeReview(GOOD_VIDEO, List.of(), List.of(garbled, shot(1, 5, false, "")));
+        List<Finding> f = CreativeDirector.findings(review, SHOTS, true, Set.of());
+        assertEquals(List.of("FAIL:CD_SHOT:shot 3"), sev(f));
+        assertEquals("s3", f.getFirst().targetId(), "only that shot is redone");
+        assertTrue(f.getFirst().message().contains("generated lettering"));
     }
 
     @Test

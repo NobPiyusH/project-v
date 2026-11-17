@@ -30,6 +30,10 @@ import com.projectv.production.ProductionService.*;
 @Service
 public class ShotStage extends StageSupport {
 
+    /** Image and video models can't spell (a planned "text overlay" came out as "NO KO"); words a viewer must read are
+     * overlayText, drawn by the edit. Every keyframe prompt ends with this. */
+    static final String NO_WRITING = ". No text, letters, numbers, logos or writing anywhere in the picture";
+
     public ShotStage(ProductionDeps d) {
         super(d);
     }
@@ -162,7 +166,7 @@ public class ShotStage extends StageSupport {
             }
             Map<String, Object> p = json.readValue((String) shot.get("prompt_json"), new TypeReference<>() {
             });
-            String prompt = p.get("keyframePrompt") + ". Visual style: " + preset.visualStyle()
+            String prompt = p.get("keyframePrompt") + ". Visual style: " + preset.visualStyle() + NO_WRITING
                     + (ownerNotes == null || ownerNotes.isBlank() ? "" : ". Director's notes: " + ownerNotes);
             boolean wantPremium = switch (policy) {
                 case PREMIUM -> true;

@@ -54,10 +54,11 @@ public final class AgentTypes {
      * @param accuracy   is what we see factually/scientifically right?
      * @param continuity does it belong with its neighbours (style, colour, scale, direction)?
      * @param literal    true when the shot illustrates a single word of the line instead of its meaning
+     * @param writing    true when the picture shows (or its prompt asks for) generated lettering, which comes out garbled
      * @param fixPrompt  for any score of 3 or less: a complete replacement image prompt, else empty
      */
-    public record ShotCritique(int shot, int meaning, int accuracy, int continuity, boolean literal, String problem,
-                               String fixPrompt) {
+    public record ShotCritique(int shot, int meaning, int accuracy, int continuity, boolean literal, boolean writing,
+                               String problem, String fixPrompt) {
     }
 
     /**

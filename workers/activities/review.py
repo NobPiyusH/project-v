@@ -28,6 +28,7 @@ class ShotCritique(BaseModel):
     accuracy: int
     continuity: int
     literal: bool
+    writing: bool = False
     problem: str
     fixPrompt: str
 
