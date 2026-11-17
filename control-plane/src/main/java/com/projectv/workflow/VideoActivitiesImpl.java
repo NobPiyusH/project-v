@@ -44,6 +44,7 @@ public class VideoActivitiesImpl implements VideoActivities {
     private final com.projectv.production.AssemblyStage assembly;
     private final com.projectv.production.FinishStage finish;
     private final com.projectv.production.SharpenStage sharpen;
+    private final com.projectv.agents.ClaudeResearcher researcher;
 
     public VideoActivitiesImpl(JdbcClient jdbc, Planner planner, CostLedger ledger, ObjectMapper json,
                                ProductionService production, Pricing pricing,
@@ -53,7 +54,8 @@ public class VideoActivitiesImpl implements VideoActivities {
                                com.projectv.production.FootageStage footage,
                                com.projectv.production.AssemblyStage assembly,
                                com.projectv.production.FinishStage finish,
-                               com.projectv.production.SharpenStage sharpen) {
+                               com.projectv.production.SharpenStage sharpen,
+                               com.projectv.agents.ClaudeResearcher researcher) {
         this.jdbc = jdbc;
         this.planner = planner;
         this.ledger = ledger;
@@ -68,6 +70,7 @@ public class VideoActivitiesImpl implements VideoActivities {
         this.assembly = assembly;
         this.finish = finish;
         this.sharpen = sharpen;
+        this.researcher = researcher;
     }
 
     @Override
@@ -247,6 +250,11 @@ public class VideoActivitiesImpl implements VideoActivities {
     @Override
     public ResearchRequest researchRequest(String videoId, String ownerNotes) {
         return production.researchRequest(UUID.fromString(videoId), ownerNotes);
+    }
+
+    @Override
+    public ResearchResult claudeResearch(String videoId, ResearchRequest request) {
+        return researcher.research(UUID.fromString(videoId), request);
     }
 
     @Override

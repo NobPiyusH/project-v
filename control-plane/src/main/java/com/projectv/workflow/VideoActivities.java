@@ -28,6 +28,9 @@ public interface VideoActivities {
 
     StageResult saveResearch(String videoId, ResearchResult result);
 
+    /** Backup researcher (Claude + web search), used only when the Gemini research activity failed. */
+    ResearchResult claudeResearch(String videoId, ResearchRequest request);
+
     StageResult concept(String videoId, String ownerNotes);
 
     StageResult script(String videoId, String ownerNotes);

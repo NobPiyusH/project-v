@@ -378,7 +378,17 @@ public class VideoProductionWorkflowImpl implements VideoProductionWorkflow {
             case PLAN:
                 return activities.plan(videoId, prompt, notes, attempt);
             case RESEARCH:
-                return activities.saveResearch(videoId, media.researchTopic(agents.researchRequest(videoId, notes)));
+                var research = agents.researchRequest(videoId, notes);
+                try {
+                    return activities.saveResearch(videoId, media.researchTopic(research));
+                } catch (ActivityFailure failure) {
+                    // Versioned after the failure, so a run already waiting on Gemini gets the backup too.
+                    if (Workflow.getVersion("research-backup", Workflow.DEFAULT_VERSION, 1) == Workflow.DEFAULT_VERSION) {
+                        throw failure;
+                    }
+                    log.warn("Gemini research failed ({}); trying the Claude backup researcher", rootMessage(failure));
+                    return activities.saveResearch(videoId, agents.claudeResearch(videoId, research));
+                }
             case CONCEPT:
                 return agents.concept(videoId, notes);
             case SCRIPT:

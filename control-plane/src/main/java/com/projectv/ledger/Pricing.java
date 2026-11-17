@@ -81,6 +81,11 @@ public class Pricing {
         return inr(inputTokens / 1e6 * num(rates, "inputPerMTokUsd") + outputTokens / 1e6 * num(rates, "outputPerMTokUsd"));
     }
 
+    /** Claude's server-side web search, billed per search. */
+    public BigDecimal claudeSearchInr(long searches) {
+        return inr(searches / 1000.0 * num(map(pricing, "anthropic"), "webSearchPer1000Usd"));
+    }
+
     /** Hard monthly cap on GPU work (Modal), in rupees. Default: the free credit. */
     public BigDecimal gpuMonthlyCapInr() {
         return inr(num(map(pricing, "modal"), "monthlyCapUsd"));

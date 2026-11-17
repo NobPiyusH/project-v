@@ -226,6 +226,12 @@ class VideoProductionWorkflowTest {
         }
 
         @Override
+        public com.projectv.media.MediaTypes.ResearchResult claudeResearch(String videoId,
+                                                                          com.projectv.media.MediaTypes.ResearchRequest request) {
+            return new com.projectv.media.MediaTypes.ResearchResult(List.of(), List.of(), List.of(), "claude:test", null);
+        }
+
+        @Override
         public com.projectv.media.MediaTypes.ClipEstimate sharpEstimate(String videoId) {
             return new com.projectv.media.MediaTypes.ClipEstimate("sharp", 0, 0, java.math.BigDecimal.ZERO, 0, 0, false,
                     "Every clip is already sharp.");

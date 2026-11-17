@@ -46,6 +46,14 @@ public class ClaudeChat {
         return client != null;
     }
 
+    /** A raw request (e.g. with server-side web search); the caller records the cost from the response's usage. */
+    public Message send(MessageCreateParams params) {
+        if (client == null) {
+            throw new IllegalStateException("not supported: no ANTHROPIC_API_KEY configured");
+        }
+        return client.messages().create(params);
+    }
+
     /** @param onUsage called as soon as a response arrives (input, output tokens), so a paid call is always recorded */
     public <T> Result<T> call(String model, String system, String user, Class<T> type,
                               java.util.function.BiConsumer<Long, Long> onUsage) {
