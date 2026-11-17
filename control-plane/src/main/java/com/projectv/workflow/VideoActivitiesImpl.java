@@ -42,6 +42,7 @@ public class VideoActivitiesImpl implements VideoActivities {
     private final com.projectv.video.ClipProgress clipProgress;
     private final com.projectv.production.FootageStage footage;
     private final com.projectv.production.AssemblyStage assembly;
+    private final com.projectv.production.FinishStage finish;
 
     public VideoActivitiesImpl(JdbcClient jdbc, Planner planner, CostLedger ledger, ObjectMapper json,
                                ProductionService production, Pricing pricing,
@@ -49,7 +50,8 @@ public class VideoActivitiesImpl implements VideoActivities {
                                com.projectv.production.CreativeDirector creative,
                                com.projectv.production.VideoStage video, com.projectv.video.ClipProgress clipProgress,
                                com.projectv.production.FootageStage footage,
-                               com.projectv.production.AssemblyStage assembly) {
+                               com.projectv.production.AssemblyStage assembly,
+                               com.projectv.production.FinishStage finish) {
         this.jdbc = jdbc;
         this.planner = planner;
         this.ledger = ledger;
@@ -62,6 +64,23 @@ public class VideoActivitiesImpl implements VideoActivities {
         this.clipProgress = clipProgress;
         this.footage = footage;
         this.assembly = assembly;
+        this.finish = finish;
+    }
+
+    @Override
+    public com.projectv.media.MediaTypes.ClipEstimate smoothEstimate(String videoId) {
+        return finish.estimate(UUID.fromString(videoId));
+    }
+
+    @Override
+    public com.projectv.media.MediaTypes.SmoothRequest smoothRequest(String videoId) {
+        return finish.request(UUID.fromString(videoId));
+    }
+
+    @Override
+    public StageResult saveSmooth(String videoId, com.projectv.media.MediaTypes.SmoothRequest request,
+                                  com.projectv.media.MediaTypes.SmoothResult result) {
+        return finish.save(UUID.fromString(videoId), request, result);
     }
 
     @Override

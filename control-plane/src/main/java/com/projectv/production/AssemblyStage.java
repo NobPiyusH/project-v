@@ -39,6 +39,9 @@ public class AssemblyStage extends StageSupport {
             throw new IllegalStateException("There is no shot plan yet");
         }
         Map<String, String> uris = clipUris(videoId);
+        Map<String, String> smoothFrom = new LinkedHashMap<>();
+        jdbc.sql("SELECT id, derived_from FROM asset WHERE video_id = :v AND clip_kind = 'smooth'").param("v", videoId)
+                .query().listOfRows().forEach(r -> smoothFrom.put(String.valueOf(r.get("id")), String.valueOf(r.get("derived_from"))));
         List<AssemblyShot> shots = new ArrayList<>();
         List<String> missing = new ArrayList<>();
         Map<Integer, Double> lineStart = new LinkedHashMap<>();
@@ -56,6 +59,12 @@ public class AssemblyStage extends StageSupport {
                 case "final" -> "final_clip_asset_id";
                 default -> "draft_clip_asset_id";
             }));
+            // The smoothed (RIFE 24 fps) version is used only while it was made from the clip still in use.
+            if (kind != null && !"footage".equals(kind) && s.get("smooth_clip_asset_id") != null && assetId.equals(smoothFrom.get(
+                    String.valueOf(s.get("smooth_clip_asset_id"))))) {
+                assetId = String.valueOf(s.get("smooth_clip_asset_id"));
+                kind = kind + "+smooth";
+            }
             if (kind == null || uris.get(assetId) == null) {
                 missing.add("shot " + n);
                 continue;

@@ -57,7 +57,7 @@ def test_a_short_is_assembled_mastered_captioned_and_packaged(local):
         "narration": [{"uri": str(voice), "startSec": 0.4, "tempo": 1.0, "durationSec": 4.0,
                        "text": "Why is the night sky dark when the universe is full of stars?"}],
         "musicUri": str(music), "totalSec": 9.0})
-    assert (out["width"], out["height"], out["fps"]) == (1080, 1920, 30)
+    assert (out["width"], out["height"], out["fps"]) == (1080, 1920, 24)
     assert out["durationSec"] == pytest.approx(9.0, abs=0.15)
     assert [f["fit"] for f in out["fits"]] == ["trimmed", "slowed 2.00x (looks slow-motion)", "trimmed"]
     assert out["captionChunks"] >= 4 and out["srtUri"].endswith("captions.srt")

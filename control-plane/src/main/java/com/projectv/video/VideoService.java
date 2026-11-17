@@ -43,6 +43,7 @@ public class VideoService {
             // Clips cost GPU money: each runs alone, after showing its estimate (finals follow drafts on request).
             Map.entry(Stage.DRAFT_GEN, List.of(Stage.DRAFT_GEN)),
             Map.entry(Stage.FINAL_GEN, List.of(Stage.FINAL_GEN)),
+            Map.entry(Stage.UPSCALE, List.of(Stage.UPSCALE, Stage.ASSEMBLY)),
             Map.entry(Stage.ASSEMBLY, List.of(Stage.ASSEMBLY)));
 
     private final JdbcClient jdbc;

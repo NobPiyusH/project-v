@@ -207,6 +207,24 @@ class VideoProductionWorkflowTest {
             events.add("CLIPS:" + shotIds + ":" + status);
         }
 
+        // ---- M2c part 2a smooth motion
+        @Override
+        public com.projectv.media.MediaTypes.ClipEstimate smoothEstimate(String videoId) {
+            return new com.projectv.media.MediaTypes.ClipEstimate("smooth", 0, 0, java.math.BigDecimal.ZERO, 0, 0, false,
+                    "Every clip is already smooth.");
+        }
+
+        @Override
+        public com.projectv.media.MediaTypes.SmoothRequest smoothRequest(String videoId) {
+            return new com.projectv.media.MediaTypes.SmoothRequest(videoId, "u", 24, List.of(), java.math.BigDecimal.ZERO);
+        }
+
+        @Override
+        public StageResult saveSmooth(String videoId, com.projectv.media.MediaTypes.SmoothRequest request,
+                                      com.projectv.media.MediaTypes.SmoothResult result) {
+            return StageResult.of("smoothed", "{}");
+        }
+
         // ---- M2c assembly
         @Override
         public com.projectv.media.MediaTypes.AssemblyRequest assemblyRequest(String videoId) {
@@ -326,6 +344,11 @@ class VideoProductionWorkflowTest {
         volatile boolean failVoice;
 
         volatile boolean failInspector;
+
+        @Override
+        public com.projectv.media.MediaTypes.SmoothResult smoothClips(com.projectv.media.MediaTypes.SmoothRequest request) {
+            return new com.projectv.media.MediaTypes.SmoothResult(List.of(), 1, false);
+        }
 
         @Override
         public com.projectv.media.MediaTypes.AssemblyResult assembleVideo(com.projectv.media.MediaTypes.AssemblyRequest request) {

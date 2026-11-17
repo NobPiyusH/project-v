@@ -84,7 +84,7 @@ pricing:
     sonnet: { inputPerMTokUsd: 2.00, outputPerMTokUsd: 10.00 }   # claude-sonnet-5-5 (verify on claude.com/pricing)
   modal:
     monthlyFreeUsd: 30
-    gpuPerSecondUsd: { L40S: 0.000542, H100: 0.001097 }             # ~$1.95/h, ~$3.95/h (verify on modal.com/pricing)
+    gpuPerSecondUsd: { L40S: 0.000542, H100: 0.001097, L4: 0.000222 }             # ~$1.95/h, ~$3.95/h (verify on modal.com/pricing)
     monthlyCapUsd: 30            # hard stop for GPU work (default: the free credit only); raise to allow paid GPU
     containerStartSeconds: 140   # Wan container start + model load, billed once per container (measured 16 Nov)
     wanSecondsPer81Frames: { draft: 30, final: 480 }   # H100 render time per 5 s clip: fast@480p (measured 17 Nov: ~12 s for 33 frames), hybrid@720p (measured 483)

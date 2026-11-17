@@ -417,6 +417,9 @@ public class VideoProductionWorkflowImpl implements VideoProductionWorkflow {
             default:
                 break;
         }
+        if (stage == Stage.UPSCALE && smoothEnabled()) {
+            return runSmooth(videoId, stage, attempt, notes);
+        }
         if (stage == Stage.ASSEMBLY && assemblyEnabled()) {
             return activities.saveMaster(videoId, media.assembleVideo(activities.assemblyRequest(videoId)));
         }
@@ -474,6 +477,35 @@ public class VideoProductionWorkflowImpl implements VideoProductionWorkflow {
         List<Finding> findings = new ArrayList<>(files == null || files.findings() == null ? List.of() : files.findings());
         findings.addAll(more);
         return new MediaInspectResult(findings, files == null || files.checked() == null ? List.of() : files.checked());
+    }
+
+    /**
+     * Smooth motion (GPU): estimated first; the owner approves the spend unless it is under the auto-approve amount;
+     * declining skips the stage (the edit then repeats frames instead).
+     */
+    private StageResult runSmooth(String videoId, Stage stage, int attempt, String notes) {
+        ClipEstimate estimate = activities.smoothEstimate(videoId);
+        if (estimate.clips() == 0) {
+            skipStage = true;
+            return StageResult.of(estimate.summary(), null);
+        }
+        if (estimate.needsApproval()) {
+            Decision d = awaitOwner(videoId, stage, attempt, "WAITING_APPROVAL", estimate.summary(),
+                    estimate.summary() + " Approve to start, or Reject to skip (nothing is spent).", null, notes, false);
+            if (!d.approve()) {
+                skipStage = true;
+                return StageResult.of("Skipped: the owner didn't approve the GPU spend (" + estimate.summary() + ")", null);
+            }
+            activities.recordStage(videoId, stage, attempt, modeOf(stage), "RUNNING", null, null, notes);
+            views.put(stage, new StageView(stage, modeOf(stage), "RUNNING", attempt, null));
+        }
+        var request = agents.smoothRequest(videoId);
+        return activities.saveSmooth(videoId, request, clipMedia.smoothClips(request));
+    }
+
+    /** Workflows started before smooth motion existed replay the old placeholder Upscale (determinism). */
+    private boolean smoothEnabled() {
+        return Workflow.getVersion("smooth", Workflow.DEFAULT_VERSION, 1) != Workflow.DEFAULT_VERSION;
     }
 
     /** Workflows started before M2c replay the old placeholder Assembly (Temporal determinism). */

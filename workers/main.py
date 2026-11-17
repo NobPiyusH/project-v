@@ -12,6 +12,7 @@ from temporalio.worker import Worker
 from workers.activities.animatic import render_animatic
 from workers.activities.assemble import assemble_video
 from workers.activities.clips import generate_clips
+from workers.activities.finish import smooth_clips
 from workers.activities.footage import fetch_footage, search_footage
 from workers.activities.inspect import inspect_media
 from workers.activities.keyframes import generate_keyframes
@@ -41,7 +42,8 @@ async def main() -> None:
             task_queue=MEDIA_TASK_QUEUE,
             activities=[tool_versions, research_topic, synthesize_narration, generate_music,
                         generate_keyframes, render_animatic, inspect_media, review_images,
-                        generate_clips, search_footage, fetch_footage, assemble_video],
+                        generate_clips, search_footage, fetch_footage, assemble_video,
+                        smooth_clips],
             activity_executor=pool,
             max_concurrent_activities=8,
         )

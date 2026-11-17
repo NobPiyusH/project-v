@@ -206,4 +206,20 @@ public final class MediaTypes {
                                  int height, int fps, List<Map<String, Object>> fits, int captionChunks,
                                  int linesTimedByWhisper) {
     }
+
+    // ---- M2c part 2a: smooth motion (RIFE 16 -> 24 fps on Modal)
+
+    public record SmoothJob(String shotId, int shotNumber, String sourceAssetId, String uri, double srcFps) {
+    }
+
+    public record SmoothRequest(String videoId, String progressUrl, double dstFps, List<SmoothJob> jobs,
+                                java.math.BigDecimal estimateInr) {
+    }
+
+    public record SmoothOutput(String shotId, String sourceAssetId, String uri, double gpuSeconds, int frames, double fps,
+                               String error) {
+    }
+
+    public record SmoothResult(List<SmoothOutput> clips, int containers, boolean stopped) {
+    }
 }

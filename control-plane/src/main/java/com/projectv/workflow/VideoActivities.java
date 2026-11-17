@@ -121,6 +121,15 @@ public interface VideoActivities {
 
     StageResult saveMaster(String videoId, com.projectv.media.MediaTypes.AssemblyResult result);
 
+    // ---- M2c part 2a: smooth motion
+
+    com.projectv.media.MediaTypes.ClipEstimate smoothEstimate(String videoId);
+
+    com.projectv.media.MediaTypes.SmoothRequest smoothRequest(String videoId);
+
+    StageResult saveSmooth(String videoId, com.projectv.media.MediaTypes.SmoothRequest request,
+                           com.projectv.media.MediaTypes.SmoothResult result);
+
     /** Upsert the stage_run row and the video's status / current stage. */
     void recordStage(String videoId, Stage stage, int attempt, StageMode mode, String status,
                      String summary, String artifactJson, String ownerNotes);

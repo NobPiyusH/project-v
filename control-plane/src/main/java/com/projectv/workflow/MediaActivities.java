@@ -57,6 +57,10 @@ public interface MediaActivities {
     @ActivityMethod(name = "assemble_video")
     com.projectv.media.MediaTypes.AssemblyResult assembleVideo(com.projectv.media.MediaTypes.AssemblyRequest request);
 
+    /** M2c part 2a: RIFE 16 -> 24 fps on one Modal L4; saved per clip; honours Stop. */
+    @ActivityMethod(name = "smooth_clips")
+    com.projectv.media.MediaTypes.SmoothResult smoothClips(com.projectv.media.MediaTypes.SmoothRequest request);
+
     /** Inspector file checks (Whisper, FFmpeg, image statistics). Free to run; reports findings, changes nothing. */
     @ActivityMethod(name = "inspect_media")
     com.projectv.media.MediaTypes.MediaInspectResult inspectMedia(com.projectv.media.MediaTypes.MediaInspectRequest request);
