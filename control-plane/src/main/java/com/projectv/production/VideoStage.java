@@ -109,6 +109,12 @@ public class VideoStage extends StageSupport {
                     : "Ready to make %d %s: about ₹%s ($%.2f) of Gemini and %.0f min. ₹%s of this month's Gemini cap left."
                     .formatted(jobs.size(), what, inr.setScale(0, RoundingMode.HALF_UP), inr.doubleValue() / pricing.fx(),
                             Math.ceil(wall), budget.geminiRemaining().max(BigDecimal.ZERO).setScale(0, RoundingMode.HALF_UP));
+            if (FINAL.equals(kind) && !jobs.isEmpty()) {
+                // Owner's choice (18 Nov): Omni only where the Wan draft isn't good enough. Before approving, mark
+                // "keep the draft" on any of these shots whose draft already looks right: it then costs nothing.
+                summary += " Shots: " + String.join(", ", jobs.stream().map(j -> "#" + j.shotNumber()).distinct().toList())
+                        + ". Mark \"keep the draft\" on any whose Wan draft already looks right (₹0), then approve.";
+            }
             return new ClipEstimate(kind, jobs.size(), 0, inr, inr.doubleValue() / pricing.fx(), wall,
                     !jobs.isEmpty() && inr.compareTo(autoApproveInr) > 0, summary);
         }
