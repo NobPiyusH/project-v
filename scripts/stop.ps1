@@ -13,13 +13,16 @@ function Stop-Port($port, $name) {
 }
 
 Stop-Port 8080 'control plane'
-$workers = Get-CimInstance Win32_Process -Filter "Name='python.exe'" | Where-Object { $_.CommandLine -like '*workers.main*' }
+# Only this folder's worker (its .venv): a second copy of the studio (e.g. the dream-shorts test) keeps running.
+$all = Get-CimInstance Win32_Process -Filter "Name='python.exe'" | Where-Object { $_.CommandLine -like '*workers.main*' }
+$mine = @($all | Where-Object { $_.ExecutablePath -like "$root\*" })          # the .venv launcher
+$workers = $all | Where-Object { $mine.ProcessId -contains $_.ProcessId -or $mine.ProcessId -contains $_.ParentProcessId }
 foreach ($w in $workers) { Stop-Process -Id $w.ProcessId -Force -Confirm:$false -ErrorAction SilentlyContinue }
 if ($workers) { Write-Host '  stopped media worker' } else { Write-Host '  media worker was not running' }
 if (-not $Backend) { Stop-Port 5173 'dashboard' }
 
-# Gradle daemons started by bootRun keep memory; stop only this project's daemon.
-if (Test-Path "$root\gradlew.bat") { & "$root\gradlew.bat" --stop *> $null }
+# No 'gradlew --stop': it stops every Gradle daemon on the PC, including another copy's control plane.
+# Idle daemons exit by themselves after 3 hours.
 Remove-Item "$root\.run\*.pid" -ErrorAction SilentlyContinue
 
 if ($All) {
