@@ -170,6 +170,21 @@ class RouterTest {
     }
 
     @Test
+    void aBatchWhereEveryJobFailedCoolsTheProviderAndAnySuccessClearsIt() {
+        router.reportBatch("gemini_omni", 0, 3, "503 overloaded");
+        assertNotNull(router.cooldownUntil("gemini_omni"));
+        assertEquals("modal_wan", router.choose(video, "FINAL_GEN", CAP, both(40, 90), null, false).providerId());
+        router.reportBatch("gemini_omni", 1, 2, "one failed");
+        assertEquals("gemini_omni", router.choose(video, "FINAL_GEN", CAP, both(40, 90), null, false).providerId());
+    }
+
+    @Test
+    void workerDecisionsAreLoggedToo() {
+        router.recordExternal(video, "NARRATION", "tts.narration", "chatterbox", "the channel voice", null);
+        assertEquals(1, logged());
+    }
+
+    @Test
     void previewDecisionsAreNotLogged() {
         router.choose(video, "FINAL_GEN", CAP, both(40, 90), null, false);
         assertEquals(0, logged());

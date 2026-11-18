@@ -19,6 +19,23 @@ providers:
     budget: gpu
     enabled: true
 
+  - id: gemini_image
+    name: Gemini image (Nano Banana, keyframes)
+    kind: api
+    capabilities: [image.keyframe.hero, image.keyframe.standard]
+    quality: 8                     # better composition and reference-photo support than Z-Image
+    budget: gemini
+    secret_ref: GEMINI_API_KEY
+    enabled: true
+
+  - id: modal_zimage
+    name: Z-Image Turbo (Modal L40S, keyframes)
+    kind: gpu_serverless
+    capabilities: [image.keyframe.hero, image.keyframe.standard]
+    quality: 6
+    budget: gpu
+    enabled: true
+
   - id: gemini_omni
     name: Gemini Omni 1.2 Flash (image-to-video)
     kind: api
@@ -98,6 +115,8 @@ pricing:
     jobs:
       video.i2v.draft: { minQuality: 4, enoughQuality: 4 }   # drafts only judge motion
       video.i2v.final: { minQuality: 7, enoughQuality: 10 }
+      image.keyframe.hero: { minQuality: 7, enoughQuality: 10 }      # opening, reveals, climax, ending
+      image.keyframe.standard: { minQuality: 5, enoughQuality: 6 }   # the rest: good enough is enough
   gemini:
     monthlyCapInr: 1000         # owner's cap; the app stops paid Gemini calls at this amount (Google budgets only alert)
     reserveInr: 20              # keep this much back for voice/music when deciding hero images
@@ -122,5 +141,6 @@ pricing:
     monthlyFreeUsd: 30
     gpuPerSecondUsd: { L40S: 0.000542, H100: 0.001097, L4: 0.000222 }             # ~$1.95/h, ~$3.95/h (verify on modal.com/pricing)
     monthlyCapUsd: 30            # hard stop for GPU work (default: the free credit only); raise to allow paid GPU
+    zimageSecondsPerImage: 6     # L40S render time per keyframe, router estimate only (verify on the ledger)
     containerStartSeconds: 140   # Wan container start + model load, billed once per container (measured 16 Nov)
     wanSecondsPer81Frames: { draft: 30, final: 480 }   # H100 render time per 5 s clip: fast@480p (measured 17 Nov: ~12 s for 33 frames), hybrid@720p (measured 483)

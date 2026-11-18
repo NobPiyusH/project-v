@@ -29,6 +29,16 @@ public class RoutingController {
         return router.decisions(id);
     }
 
+    public record ExternalDecision(UUID videoId, String stage, String capability, String chosen, String reason,
+                                   List<Map<String, Object>> candidates) {
+    }
+
+    // Called by the local media worker for choices it makes itself (rule 6: every routing choice is logged).
+    @org.springframework.web.bind.annotation.PostMapping("/internal/routing")
+    public void external(@org.springframework.web.bind.annotation.RequestBody ExternalDecision d) {
+        router.recordExternal(d.videoId(), d.stage(), d.capability(), d.chosen(), d.reason(), d.candidates());
+    }
+
     @GetMapping("/routing/health")
     public List<Map<String, Object>> health() {
         return jdbc.sql("SELECT provider_id, fails, cooldown_until, last_error, updated_at FROM provider_health ORDER BY provider_id")

@@ -106,6 +106,11 @@ public class Pricing {
         return new double[]{min, enough};
     }
 
+    /** Router estimate for Z-Image keyframes on the L40S (modal.zimageSecondsPerImage). */
+    public BigDecimal zimageInr(int images) {
+        return modalGpuInr("L40S", num(map(pricing, "modal"), "zimageSecondsPerImage") * images);
+    }
+
     /** Hard monthly cap on Claude (owner-funded), in rupees. */
     public BigDecimal claudeMonthlyCapInr() {
         return inr(num(map(pricing, "anthropic"), "monthlyCapUsd"));

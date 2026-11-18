@@ -329,6 +329,10 @@ public class VideoStage extends StageSupport {
                             r.containers() == 1 ? "" : "s"));
         }
         String kind = request.jobs().isEmpty() ? DRAFT : request.jobs().getFirst().kind();
+        if (router != null) { // M3a health: a batch where every clip failed cools the provider down
+            router.reportBatch("omni".equals(request.provider()) ? OMNI : WAN, ok, errors.size(),
+                    errors.isEmpty() ? null : errors.getFirst());
+        }
         if (ok == 0 && stopped == 0) {
             throw new IllegalStateException("No " + kind + " clips were made: " + String.join(" | ", errors));
         }

@@ -426,6 +426,13 @@ def synthesize_narration(req: dict) -> dict:
         remaining = eleven_remaining(cfg["key"])
         cfg["multiplier"] = eleven_multiplier(cfg["key"], cfg["model"])
     provider = choose_provider(req, remaining, cfg)
+    from workers.routing_log import log_decision
+    wanted = (req.get("voiceProvider") or "auto").lower()
+    log_decision(req.get("videoId"), "NARRATION", "tts.narration", provider,
+                 f"owner asked for {wanted}" if wanted not in ("auto", provider)
+                 else "Chatterbox: the channel voice (free, local)" if provider == "chatterbox"
+                 else f"{provider}: auto choice (Chatterbox unavailable for this language or turned off)",
+                 [{"provider": p} for p in ("chatterbox", "elevenlabs", "gemini", "kokoro")])
     if provider == "chatterbox":
         try:
             return _chatterbox_result(req)

@@ -177,6 +177,20 @@ public class Router {
                 .param("u", OffsetDateTime.now().plus(Duration.ofSeconds(sec))).param("p", providerId).update();
     }
 
+    /**
+     * A finished batch: any success clears the provider's cooldown; a batch where EVERY job failed cools it down.
+     * Its own transaction, so it is kept even when the caller then fails and rolls back.
+     */
+    @org.springframework.transaction.annotation.Transactional(
+            propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW)
+    public void reportBatch(String providerId, int ok, int failed, String sampleError) {
+        if (ok > 0) {
+            reportSuccess(providerId);
+        } else if (failed > 0) {
+            reportFailure(providerId, sampleError);
+        }
+    }
+
     public void reportSuccess(String providerId) {
         jdbc.sql("UPDATE provider_health SET fails = 0, cooldown_until = NULL, updated_at = now() WHERE provider_id = :p AND fails > 0")
                 .param("p", providerId).update();
@@ -204,6 +218,20 @@ public class Router {
                                COALESCE(config_json->>'budget', 'none') AS budget
                         FROM provider WHERE id = :id
                         """).param("id", id).query().listOfRows().stream().findFirst().orElse(null);
+    }
+
+    /** A decision made elsewhere (the media worker: voice engine, laptop vs cloud smoothing), logged the same way. */
+    public UUID recordExternal(UUID videoId, String stage, String capability, String chosen, String reason,
+                               List<Map<String, Object>> candidates) {
+        UUID id = UUID.randomUUID();
+        jdbc.sql("""
+                        INSERT INTO routing_decision (id, video_id, stage, capability, candidates_json, chosen_provider_id, reason_text)
+                        VALUES (:id, :v, :s, :c, CAST(:cands AS jsonb), :chosen, :r)
+                        """)
+                .param("id", id).param("v", videoId).param("s", stage).param("c", capability)
+                .param("cands", json.writeValueAsString(candidates == null ? List.of() : candidates))
+                .param("chosen", chosen).param("r", reason).update();
+        return id;
     }
 
     private UUID logDecision(UUID videoId, String stage, String capability, List<Map<String, Object>> considered,

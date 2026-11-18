@@ -139,6 +139,10 @@ def smooth_clips(req: dict) -> dict:
     if req.get("jobs") and os.getenv("PROJECTV_LOCAL_RIFE", "1") != "0":
         from workers.local import rife
         if rife.available():
+            from workers.routing_log import log_decision
+            log_decision(req.get("videoId"), "UPSCALE", "interp.rife", "local_laptop",
+                         "laptop GPU first: free; Modal L4 takes anything it can't finish",
+                         [{"provider": "local_laptop"}, {"provider": "modal_l4"}])
             done, left = _smooth_local(req)
             if not left:
                 _post(f"{(req.get('progressUrl') or 'http://127.0.0.1:8080').rstrip('/')}/api/internal/clips/progress",
@@ -146,6 +150,9 @@ def smooth_clips(req: dict) -> dict:
                 return {"clips": done, "containers": 0, "stopped": False}
             rest = _modal_smooth({**req, "jobs": left})
             return {**rest, "clips": done + rest["clips"]}
+    from workers.routing_log import log_decision
+    log_decision(req.get("videoId"), "UPSCALE", "interp.rife", "modal_l4",
+                 "laptop RIFE off or unavailable", [{"provider": "local_laptop"}, {"provider": "modal_l4"}])
     return _modal_smooth(req)
 
 

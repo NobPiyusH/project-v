@@ -34,8 +34,44 @@ public class ShotStage extends StageSupport {
      * overlayText, drawn by the edit. Every keyframe prompt ends with this. */
     static final String NO_WRITING = ". No text, letters, numbers, logos or writing anywhere in the picture";
 
+    private final com.projectv.routing.Router router;
+
     public ShotStage(ProductionDeps d) {
+        this(d, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public ShotStage(ProductionDeps d, com.projectv.routing.Router router) {
         super(d);
+        this.router = router;
+    }
+
+    static final String GEMINI_IMAGE = "gemini_image";
+    static final String ZIMAGE = "modal_zimage";
+
+    /**
+     * M3a: one routed decision per class of shot (hero / standard) instead of a fixed rule. The owner's image policy
+     * is the preference (PREMIUM = Gemini, FREE = Z-Image); in AUTO the router's floors decide: hero keyframes need
+     * quality 7 (Gemini), standard ones are fine at 5-6 (Z-Image, cheaper). Gemini's estimate includes the reserve kept
+     * for voice and music, so a batch never eats it. Returns the job-level provider id the media worker expects.
+     */
+    String routeKeyframes(UUID videoId, boolean hero, int images, ImagePolicy policy) {
+        if (router == null) { // tests without a router: the pre-M3 rule
+            return policy == ImagePolicy.PREMIUM || (policy == ImagePolicy.AUTO && hero) ? "gemini_api" : "modal_zimage";
+        }
+        BigDecimal gemini = pricing.imageInr("1K").multiply(BigDecimal.valueOf(images));
+        if (policy != ImagePolicy.PREMIUM) {
+            gemini = gemini.add(pricing.geminiReserveInr());
+        }
+        var choice = router.choose(videoId, "KEYFRAMES", hero ? "image.keyframe.hero" : "image.keyframe.standard",
+                List.of(new com.projectv.routing.Router.Candidate(GEMINI_IMAGE, gemini),
+                        new com.projectv.routing.Router.Candidate(ZIMAGE, pricing.zimageInr(images))),
+                switch (policy) {
+                    case PREMIUM -> GEMINI_IMAGE;
+                    case FREE -> ZIMAGE;
+                    case AUTO -> null;
+                }, true);
+        return GEMINI_IMAGE.equals(choice.providerId()) ? "gemini_api" : "modal_zimage";
     }
 
     @Transactional
@@ -161,29 +197,22 @@ public class ShotStage extends StageSupport {
         boolean vertical = "9:16".equals(plan.aspectRatio());
         int width = vertical ? 768 : 1344;
         int height = vertical ? 1344 : 768;
-        BigDecimal perImage = pricing.imageInr("1K");
-        BigDecimal available = budget.geminiRemaining().subtract(pricing.geminiReserveInr());
         List<KeyframeJob> jobs = new ArrayList<>();
         int attempt = nextKeyframeAttempt(videoId);
-        for (Map<String, Object> shot : shots(videoId)) {
+        List<Map<String, Object>> wanted = shots(videoId).stream()
+                .filter(s -> only == null || only.contains((UUID) s.get("id"))).toList();
+        long heroes = wanted.stream().filter(s -> "hero".equals(s.get("priority"))).count();
+        // M3a: the router picks the image provider per class of shot (logged; budget- and failure-aware)
+        String heroProvider = heroes == 0 ? null : routeKeyframes(videoId, true, (int) heroes, policy);
+        String standardProvider = heroes == wanted.size() ? null
+                : routeKeyframes(videoId, false, (int) (wanted.size() - heroes), policy);
+        for (Map<String, Object> shot : wanted) {
             UUID id = (UUID) shot.get("id");
-            if (only != null && !only.contains(id)) {
-                continue;
-            }
             Map<String, Object> p = json.readValue((String) shot.get("prompt_json"), new TypeReference<>() {
             });
             String prompt = p.get("keyframePrompt") + ". Visual style: " + preset.visualStyle() + NO_WRITING
                     + (ownerNotes == null || ownerNotes.isBlank() ? "" : ". Director's notes: " + ownerNotes);
-            boolean wantPremium = switch (policy) {
-                case PREMIUM -> true;
-                case FREE -> false;
-                case AUTO -> "hero".equals(shot.get("priority"));
-            };
-            String provider = "modal_zimage";
-            if (wantPremium && (policy == ImagePolicy.PREMIUM || available.compareTo(perImage) >= 0)) {
-                provider = "gemini_api";
-                available = available.subtract(perImage);
-            }
+            String provider = "hero".equals(shot.get("priority")) ? heroProvider : standardProvider;
             String shotId = id.toString();
             // Real reference photos only help the image model that accepts them (Gemini), on hero shots.
             String reference = "gemini_api".equals(provider) ? java.util.Objects.toString(p.get("referenceQuery"), "") : "";
@@ -281,6 +310,26 @@ public class ShotStage extends StageSupport {
             ledger.record(videoId, "modal_l40s", pricing.modalGpuInr("L40S", r.modalGpuSeconds()),
                     BigDecimal.valueOf(r.modalGpuSeconds()), "gpu_seconds", true,
                     "KEYFRAMES Z-Image (free Modal credit; excludes container start-up)");
+        }
+        if (router != null) { // M3a health, per provider: a provider whose every image failed cools down
+            for (String prov : List.of("gemini_api", "modal_zimage")) {
+                int good = 0;
+                int bad = 0;
+                String sample = null;
+                for (KeyframeOutput o : r.results()) {
+                    KeyframeJob job = jobs.get(o.shotId());
+                    if (job == null || !prov.equals(job.provider())) {
+                        continue;
+                    }
+                    if (o.uri() != null) {
+                        good++;
+                    } else {
+                        bad++;
+                        sample = sample == null ? o.error() : sample;
+                    }
+                }
+                router.reportBatch("gemini_api".equals(prov) ? GEMINI_IMAGE : ZIMAGE, good, bad, sample);
+            }
         }
         if (ok == 0) {
             throw new IllegalStateException("No keyframes were produced: " + String.join(" | ", errors));
