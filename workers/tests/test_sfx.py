@@ -31,3 +31,17 @@ def test_a_short_sound_loops_to_fill_its_segment_under_the_voice(monkeypatch, tm
     out = mix_audio([{"uri": str(voice), "startSec": 0, "tempo": 1.0}], None, 6.0, tmp_path, tmp_path / "m.wav",
                     sfx=[{"path": fx, "startSec": 1.0, "durationSec": 4.0}])
     assert out is not None and I.loudness(out)["lufs"] > -40
+
+
+def test_several_sound_effects_point_at_their_own_inputs(tmp_path, monkeypatch):
+    """Regression (18 Nov 2026, firefly Short): each sfx input adds -stream_loop -1 -i, so input numbers must count -i."""
+    from workers.activities import mixing
+    monkeypatch.setattr(mixing, "download", lambda uri, dest: dest)
+    narration = [{"uri": f"s3://b/n{i}.wav", "startSec": i * 5.0} for i in range(3)]
+    sfx = [{"path": tmp_path / f"fx{k}.wav", "startSec": k * 2.0, "durationSec": 3.0} for k in range(3)]
+    inputs, filters, label = mixing._graph(narration, tmp_path / "music.wav", 20.0, tmp_path, sfx)
+    files = [inputs[i + 1] for i, a in enumerate(inputs) if a == "-i"]
+    for k in range(3):
+        f = next(x for x in filters if x.endswith(f"[fx{k}]"))
+        idx = int(f[1:f.index(":")])
+        assert files[idx] == str(tmp_path / f"fx{k}.wav"), f"fx{k} reads input {idx}"

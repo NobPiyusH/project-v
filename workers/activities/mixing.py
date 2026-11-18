@@ -38,7 +38,7 @@ def _graph(narration: list[dict], music: Path | None, total: float, tmp: Path,
         filters.append(f"[{n_voice}:a]aresample=48000,aformat=channel_layouts=stereo,apad,atrim=0:{total:.3f},volume=0.9[mus]")
         bed.append("[mus]")
     for k, fx in enumerate(sfx or []):
-        idx = len(inputs) // 2
+        idx = inputs.count("-i")  # input number; sfx inputs carry extra -stream_loop args, so count -i, not len/2
         inputs += ["-stream_loop", "-1", "-i", str(fx["path"])]  # short sounds loop to fill their segment
         dur, ms = max(0.5, float(fx["durationSec"])), int(float(fx["startSec"]) * 1000)
         fade = min(0.6, dur / 4)
