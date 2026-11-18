@@ -89,6 +89,21 @@ public class VideoProductionWorkflowImpl implements VideoProductionWorkflow {
                             .build())
                     .build());
 
+    // AI Producer (P1): what to review + saving its advice (control queue), and the review itself on the media worker.
+    private final ProducerActivities producerActs = Workflow.newActivityStub(ProducerActivities.class,
+            ActivityOptions.newBuilder()
+                    .setStartToCloseTimeout(Duration.ofMinutes(2))
+                    .setRetryOptions(RetryOptions.newBuilder().setMaximumAttempts(5).build())
+                    .build());
+    private final ProducerMediaActivities producerMedia = Workflow.newActivityStub(ProducerMediaActivities.class,
+            ActivityOptions.newBuilder()
+                    .setTaskQueue(TaskQueues.MEDIA)
+                    .setStartToCloseTimeout(Duration.ofMinutes(20))
+                    .setHeartbeatTimeout(Duration.ofMinutes(5))
+                    .setRetryOptions(RetryOptions.newBuilder().setInitialInterval(Duration.ofSeconds(20))
+                            .setMaximumAttempts(2).build()) // a paid review: one retry at most
+                    .build());
+
     // Inspector file checks on the media worker: free (FFmpeg + Groq Whisper), so a couple of retries are fine.
     private final MediaActivities inspectorMedia = Workflow.newActivityStub(MediaActivities.class,
             ActivityOptions.newBuilder()
@@ -258,6 +273,31 @@ public class VideoProductionWorkflowImpl implements VideoProductionWorkflow {
                 continue;
             }
 
+            if (modeOf(stage) == StageMode.PRODUCER) {
+                // AI Producer, P1 advise-only: it reviews (reads, looks, watches, listens) and recommends; the owner
+                // decides with the recommendation in front of them. Stages it doesn't review pass like AUTO.
+                com.projectv.media.MediaTypes.ProducerAdvice advice = producerAdvice(videoId, stage, attempt);
+                if (advice == null) {
+                    finish(videoId, stage, attempt, "AUTO_PASSED", result, notes);
+                    return result;
+                }
+                String text = result.summary() + " " + advice.summary();
+                Decision pd = awaitOwner(videoId, stage, attempt, "WAITING_APPROVAL", text,
+                        text + " Approve to accept, or Reject (with notes; empty notes = use the Producer's redo notes).",
+                        result.artifactJson(), notes, true);
+                if (pd == null) { // switched to AUTO while waiting
+                    finish(videoId, stage, attempt, "AUTO_PASSED", result, notes);
+                    return result;
+                }
+                if (pd.approve()) {
+                    finish(videoId, stage, attempt, "APPROVED", result, notes);
+                    return result;
+                }
+                finish(videoId, stage, attempt, "REJECTED", result, notes);
+                notes = pd.notes() == null || pd.notes().isBlank() ? advice.redoNotes() : pd.notes();
+                continue;
+            }
+
             if (modeOf(stage) == StageMode.AUTO) {
                 finish(videoId, stage, attempt, "AUTO_PASSED", result, notes);
                 return result;
@@ -347,6 +387,29 @@ public class VideoProductionWorkflowImpl implements VideoProductionWorkflow {
         return true;
     }
 
+    /** The Producer's review of this stage as advice; null when it reviews nothing here. Never fails the stage. */
+    private com.projectv.media.MediaTypes.ProducerAdvice producerAdvice(String videoId, Stage stage, int attempt) {
+        try {
+            var request = producerActs.reviewRequest(videoId, stage.name());
+            if (request == null) {
+                return null;
+            }
+            return producerActs.saveReview(videoId, stage.name(), attempt, producerMedia.review(request));
+        } catch (ActivityFailure failure) {
+            log.warn("AI Producer review of {} failed: {}", stage, rootMessage(failure));
+            return new com.projectv.media.MediaTypes.ProducerAdvice("ask", 0,
+                    "AI Producer could not review this stage (" + rootMessage(failure) + "); please decide.", null, null);
+        }
+    }
+
+    /** P1: the Producer's opinion on a money step, shown with the estimate (advice only, no AI call). */
+    private String withSpendAdvice(String videoId, Stage stage, String summary, java.math.BigDecimal inr) {
+        if (modeOf(stage) != StageMode.PRODUCER) {
+            return summary;
+        }
+        return summary + " " + producerActs.spendAdvice(videoId, inr);
+    }
+
     private StageFix takeFix(Stage stage) {
         StageFix fix = pendingFix != null && pendingFix.stage() == stage ? pendingFix : null;
         pendingFix = null;
@@ -367,8 +430,9 @@ public class VideoProductionWorkflowImpl implements VideoProductionWorkflow {
             return StageResult.of(estimate.summary(), null);
         }
         if (estimate.needsApproval()) {
-            Decision d = awaitOwner(videoId, stage, attempt, "WAITING_APPROVAL", estimate.summary(),
-                    estimate.summary() + " Approve to start, or Reject to skip this stage (nothing is spent).", null, notes, false);
+            String ask = withSpendAdvice(videoId, stage, estimate.summary(), estimate.inr());
+            Decision d = awaitOwner(videoId, stage, attempt, "WAITING_APPROVAL", ask,
+                    ask + " Approve to start, or Reject to skip this stage (nothing is spent).", null, notes, false);
             if (!d.approve()) {
                 skipStage = true;
                 return StageResult.of("Skipped: the owner didn't approve the GPU spend (" + estimate.summary() + ")", null);
@@ -525,8 +589,9 @@ public class VideoProductionWorkflowImpl implements VideoProductionWorkflow {
             return StageResult.of(summary, null);
         }
         if (smooth.needsApproval() || (sharp != null && sharp.needsApproval())) {
-            Decision d = awaitOwner(videoId, stage, attempt, "WAITING_APPROVAL", summary,
-                    summary + " Approve to start, or Reject to skip (nothing is spent).", null, notes, false);
+            String ask = withSpendAdvice(videoId, stage, summary, smooth.inr().add(sharp == null ? java.math.BigDecimal.ZERO : sharp.inr()));
+            Decision d = awaitOwner(videoId, stage, attempt, "WAITING_APPROVAL", ask,
+                    ask + " Approve to start, or Reject to skip (nothing is spent).", null, notes, false);
             if (!d.approve()) {
                 skipStage = true;
                 return StageResult.of("Skipped: the owner didn't approve the GPU spend (" + summary + ")", null);

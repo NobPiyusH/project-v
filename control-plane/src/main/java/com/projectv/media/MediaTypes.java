@@ -266,4 +266,27 @@ public final class MediaTypes {
 
     public record SmoothResult(List<SmoothOutput> clips, int containers, boolean stopped) {
     }
+
+    // ---- AI Producer (P1, owner 18 Nov 2026): it reads, looks at, watches and LISTENS to a stage's output
+
+    /** One thing to judge: kind = text | image | video | audio; uri for media, text for text; expect = what it should be. */
+    public record ProducerItem(String id, String label, String kind, String uri, String text, String expect) {
+    }
+
+    /** @param rules  the owner's learned rules and recent feedback, applied to every judgement */
+    public record ProducerReviewRequest(String videoId, String stage, String model, String rubric, String context,
+                                        List<String> rules, List<ProducerItem> items) {
+    }
+
+    public record ProducerItemVerdict(String id, int score, boolean ok, String problem, String fix) {
+    }
+
+    /** verdict approve | redo | ask; redoNotes = precise instructions for a redo (prompts, delivery). */
+    public record ProducerReviewResult(String verdict, double confidence, String summary, String redoNotes,
+                                       List<ProducerItemVerdict> items, String model, Usage usage) {
+    }
+
+    /** What the workflow shows the owner (advise-only in P1). */
+    public record ProducerAdvice(String verdict, double confidence, String summary, String redoNotes, String decisionId) {
+    }
 }

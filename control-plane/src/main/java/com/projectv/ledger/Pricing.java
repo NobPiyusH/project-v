@@ -90,6 +90,16 @@ public class Pricing {
         return inr(num(map(modal, "gpuPerSecondUsd"), gpu) * seconds);
     }
 
+    /** AI Producer: what it may approve per video (Short or long-form). */
+    public BigDecimal producerBudgetInr(boolean shortVideo) {
+        return BigDecimal.valueOf(num(map(pricing, "producer"), shortVideo ? "budgetPerShortInr" : "budgetPerLongInr"));
+    }
+
+    /** AI Producer: any single decision above this goes to the owner. */
+    public BigDecimal producerAskAboveInr() {
+        return BigDecimal.valueOf(num(map(pricing, "producer"), "askAboveInr"));
+    }
+
     /** Router: quality points one rupee is worth with a full budget (pricing.routing.lambdaPerInr). */
     public double routingLambdaPerInr() {
         return num(map(pricing, "routing"), "lambdaPerInr");

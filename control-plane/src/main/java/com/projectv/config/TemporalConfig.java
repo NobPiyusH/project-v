@@ -33,13 +33,14 @@ public class TemporalConfig {
     }
 
     @Bean
-    public WorkerFactory workerFactory(WorkflowClient client, VideoActivitiesImpl activities) {
+    public WorkerFactory workerFactory(WorkflowClient client, VideoActivitiesImpl activities,
+                                       com.projectv.workflow.ProducerActivitiesImpl producer) {
         WorkerFactory factory = WorkerFactory.newInstance(client);
         Worker worker = factory.newWorker(TaskQueues.CONTROL);
         worker.registerWorkflowImplementationTypes(VideoProductionWorkflowImpl.class, com.projectv.workflow.ShotRedoWorkflowImpl.class,
                 com.projectv.workflow.VoiceRedoWorkflowImpl.class, com.projectv.workflow.CreativeReviewWorkflowImpl.class,
                 com.projectv.workflow.ClipRedoWorkflowImpl.class, com.projectv.workflow.FootageWorkflowImpl.class);
-        worker.registerActivitiesImplementations(activities);
+        worker.registerActivitiesImplementations(activities, producer);
         return factory;
     }
 

@@ -30,6 +30,7 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -56,6 +57,7 @@ class ProductionPersistenceTest {
     static FinishStage finish;
     static SharpenStage sharpen;
     static BudgetGuard budget;
+    static ProducerService producer;
 
     UUID video;
 
@@ -70,6 +72,7 @@ class ProductionPersistenceTest {
         var deps = new ProductionDeps(jdbc, json, null, null, new AssetStore(jdbc), new CostLedger(jdbc), pricing, budget,
                 new StylePresets("../config"), "gemini-3.6-flash", "gemini-3.8-flash-tts", "img", "music", "Charon", "app", "cls");
         voice = new VoiceStage(deps);
+        producer = new ProducerService(deps, "gemini-3.6-flash");
         shots = new ShotStage(deps);
         inspector = new Inspector(deps);
         creative = new CreativeDirector(deps, null, "gemini-3.6-flash");
@@ -129,7 +132,7 @@ class ProductionPersistenceTest {
     @Test
     void allMigrationsApplyAndLicencesAreSeeded() {
         assertEquals(11, jdbc.sql("SELECT count(*) FROM licence").query(Integer.class).single());
-        assertEquals(17, jdbc.sql("SELECT count(*) FROM flyway_schema_history WHERE success").query(Integer.class).single());
+        assertEquals(18, jdbc.sql("SELECT count(*) FROM flyway_schema_history WHERE success").query(Integer.class).single());
     }
 
     @Test
@@ -459,5 +462,49 @@ class ProductionPersistenceTest {
         assertFalse(budget.canSpend(BigDecimal.valueOf(6)));
         assertThrows(BudgetGuard.BudgetExceededException.class, () -> budget.require(BigDecimal.TEN, "test"));
         jdbc.sql("DELETE FROM cost_entry WHERE video_id = :v AND provider_id = 'gemini_api' AND amount_inr > 5").param("v", video).update();
+    }
+
+    // ---- AI Producer (P1)
+
+    @Test
+    void producerListensToEveryVoicedLineWithItsDeliveryAndTheOwnersFeedback() {
+        StoredScript voiced = new StoredScript(2, List.of(
+                new StoredLine(0, "A star is born.", "Act 1", "hook", true, null, "s3://b/l0.wav", 2.0, "READY", false,
+                        false, null, List.of(), null, "hushed, awe-struck"),
+                new StoredLine(1, "Silence.", "Act 1", "beat", false)), "Aoede", "warm", "strings", null, null);
+        jdbc.sql("INSERT INTO script (id, video_id, version, beat_sheet_json) VALUES (:id, :v, 2, CAST(:b AS jsonb))")
+                .param("id", UUID.randomUUID()).param("v", video).param("b", json.writeValueAsString(voiced)).update();
+        jdbc.sql("INSERT INTO approval (id, video_id, stage, decision, notes, actor) VALUES (:id, :v, 'NARRATION', 'reject', 'voice not good', 'owner')")
+                .param("id", UUID.randomUUID()).param("v", video).update();
+        var req = producer.reviewRequest(video, "NARRATION");
+        assertEquals(1, req.items().size(), "only spoken lines with audio");
+        var item = req.items().getFirst();
+        assertEquals("audio", item.kind());
+        assertTrue(item.expect().contains("A star is born.") && item.expect().contains("hushed, awe-struck"), item.expect());
+        assertTrue(req.rules().stream().anyMatch(r -> r.contains("voice not good")), "the owner's feedback goes into the review");
+        assertNull(producer.reviewRequest(video, "MUSIC"), "stages it doesn't review: null");
+    }
+
+    @Test
+    void producerAdviceIsLoggedCostedAndComparedWithTheOwnersDecision() {
+        var result = new com.projectv.media.MediaTypes.ProducerReviewResult("redo", 0.8, "Line 1 sounds rushed.",
+                "Line 1: slower, hushed.", List.of(new com.projectv.media.MediaTypes.ProducerItemVerdict("line-0", 4, false,
+                "rushed", "slower, hushed")), "gemini-3.6-flash", new Usage(5000, 300, 0, 5300));
+        var advice = producer.saveReview(video, "NARRATION", 1, result);
+        assertTrue(advice.summary().contains("REDO of 1 item") && advice.summary().contains("80% sure"), advice.summary());
+        assertEquals("Line 1: slower, hushed.", advice.redoNotes());
+        assertTrue(jdbc.sql("SELECT count(*) FROM cost_entry WHERE video_id = :v AND note LIKE 'PRODUCER review%'")
+                .param("v", video).query(Integer.class).single() >= 1, "the review is a cost entry (rule 6)");
+        ProducerService.recordOwnerDecision(jdbc, video, "NARRATION", "reject", "yes, too fast");
+        var d = producer.decisions(video).getFirst();
+        assertEquals("reject", d.get("owner_decision"));
+        assertEquals(Boolean.TRUE, d.get("agreed"), "it recommended a redo and the owner rejected: agreement");
+        assertEquals(1L, ((Number) producer.agreement().get("agreed")).longValue());
+    }
+
+    @Test
+    void producerSpendAdviceFollowsTheOwnersLimits() {
+        assertTrue(producer.spendAdvice(video, new BigDecimal("30")).contains("would APPROVE"));
+        assertTrue(producer.spendAdvice(video, new BigDecimal("60")).contains("would ASK YOU"), "above the Rs 50 line");
     }
 }

@@ -20,6 +20,7 @@ export const MODE_HELP: Record<Mode, string> = {
   AUTO: 'Auto: does the stage and moves on',
   REVIEW: 'Review: does the stage, waits the review window for you, then moves on by itself',
   MANUAL: 'Manual: does the stage and waits until you approve',
+  PRODUCER: 'AI Producer: an AI reviews the stage (reads, looks, watches, listens) and recommends approve or redo; you decide (advise-only for now)',
 }
 
 export function StatusBadge({ status }: { status: string }) {
@@ -29,10 +30,10 @@ export function StatusBadge({ status }: { status: string }) {
 export function ModeSwitch({ value, onChange, disabled }: { value: Mode; onChange: (m: Mode) => void; disabled?: boolean }) {
   return (
     <div className="seg" role="group" aria-label="Stage mode">
-      {(['AUTO', 'REVIEW', 'MANUAL'] as Mode[]).map((m) => (
+      {(['AUTO', 'REVIEW', 'MANUAL', 'PRODUCER'] as Mode[]).map((m) => (
         <button key={m} type="button" className={value === m ? 'on' : ''} disabled={disabled}
           aria-pressed={value === m} onClick={() => value !== m && onChange(m)} title={MODE_HELP[m]}>
-          {m === 'AUTO' ? 'Auto' : m === 'REVIEW' ? 'Review' : 'Manual'}
+          {m === 'AUTO' ? 'Auto' : m === 'REVIEW' ? 'Review' : m === 'MANUAL' ? 'Manual' : 'AI Producer'}
         </button>
       ))}
     </div>

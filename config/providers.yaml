@@ -110,6 +110,14 @@ pricing:
   # Router scoring (M3a, owner 18 Nov 2026): a provider must reach minQuality for the job; among those,
   # score = min(quality, enoughQuality) - lambda x cost, where lambda = lambdaPerInr / (share of that budget left,
   # floor 0.1): quality first, the cheaper tool when extra quality isn't needed, thriftier as a cap runs low.
+  # AI Producer mode (docs/plans/ai-producer.md, owner 18 Nov 2026). P1 = advise-only: it recommends, the owner decides.
+  producer:
+    budgetPerShortInr: 100       # owner set: what the Producer may approve per Short (never above the monthly caps)
+    budgetPerLongInr: 500        # per long-form video (default; owner can change)
+    askAboveInr: 50              # any single decision above this goes to the owner
+    redosPerItem: 2
+    roundsPerStage: 3
+    adviseOnly: true             # P1: recommend only; switch to deciding once agreement is high (P2)
   routing:
     lambdaPerInr: 0.02            # quality points one rupee is worth with a full budget
     jobs:

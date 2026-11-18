@@ -1,6 +1,6 @@
 // Typed client for the control-plane REST API (/api, proxied by Vite in dev).
 
-export type Mode = 'AUTO' | 'REVIEW' | 'MANUAL'
+export type Mode = 'AUTO' | 'REVIEW' | 'MANUAL' | 'PRODUCER'
 
 export interface StageInfo { id: string; label: string; description: string; redoWith: string[] }
 
@@ -163,6 +163,11 @@ export interface RouterProvider {
   quality: number; budget: string; fails: number | null; cooldown_until: string | null; last_error: string | null
   chosen_this_month: number
 }
+export interface ProducerDecision {
+  id: string; stage: string; attempt: number; verdict: 'approve' | 'redo' | 'ask'; confidence: number | null
+  summary: string | null; redo_notes: string | null; items: string; model: string | null; cost_inr: number | null
+  owner_decision: string | null; owner_notes: string | null; agreed: boolean | null; created_at: string
+}
 export interface RoutingDecision {
   id: string; stage: string; capability: string; chosen_provider_id: string | null; reason_text: string
   candidates: string; overridden_by_owner: boolean; created_at: string
@@ -218,5 +223,6 @@ export const api = {
   setProviderOn: (id: string, on: boolean) => call<void>('PUT', `/routing/providers/${id}/enabled?on=${on}`),
   resetProvider: (id: string) => call<void>('POST', `/routing/providers/${id}/reset`),
   routing: (videoId: string) => call<RoutingDecision[]>('GET', `/videos/${videoId}/routing`),
+  producer: (videoId: string) => call<{ decisions: ProducerDecision[]; agreement: { decided: number; agreed: number; rate: number } }>('GET', `/videos/${videoId}/producer`),
   resume: (id: string) => call<void>('POST', `/videos/${id}/resume`),
 }

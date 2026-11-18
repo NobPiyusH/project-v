@@ -300,6 +300,11 @@ public class VideoService {
                 .param("pid", UUID.randomUUID()).param("kind", kind).param("id", id)
                 .param("ctx", json.writeValueAsString(Map.of("stage", stageName, "decision", decision)))
                 .param("chosen", notes).update();
+        // AI Producer (P1): the owner's decision on a stage the Producer reviewed is compared with its recommendation
+        // (agreement score) and kept with the owner's notes as a lesson for later reviews.
+        if (stage != null && (decision.equals("approve") || decision.equals("reject"))) {
+            com.projectv.production.ProducerService.recordOwnerDecision(jdbc, id, stageName, decision, notes);
+        }
     }
 
     private String modesJson(StageMode defaultMode, Map<Stage, StageMode> modes) {
