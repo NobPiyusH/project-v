@@ -48,7 +48,7 @@ public class FinishStage extends StageSupport {
         for (Map<String, Object> s : jdbc.sql("""
                         SELECT s.id, s.ord, s.duration_target_sec, s.footage_asset_id,
                                COALESCE(s.final_clip_asset_id, s.draft_clip_asset_id) AS chosen,
-                               c.uri_hot AS chosen_uri, sm.derived_from AS smoothed_from
+                               c.uri_hot AS chosen_uri, c.fps AS chosen_fps, sm.derived_from AS smoothed_from
                         FROM shot s JOIN scene sc ON sc.id = s.scene_id
                         LEFT JOIN asset c ON c.id = COALESCE(s.final_clip_asset_id, s.draft_clip_asset_id)
                         LEFT JOIN asset sm ON sm.id = s.smooth_clip_asset_id
@@ -57,6 +57,9 @@ public class FinishStage extends StageSupport {
             Object chosen = s.get("chosen");
             if (s.get("footage_asset_id") != null || chosen == null || s.get("chosen_uri") == null) {
                 continue; // real footage is already smooth; no clip yet = nothing to smooth
+            }
+            if (s.get("chosen_fps") instanceof Number f && f.doubleValue() >= TARGET_FPS - 0.1) {
+                continue; // already 24 fps (Gemini Omni): nothing to re-time
             }
             if (chosen.equals(s.get("smoothed_from"))) {
                 continue; // already smoothed from exactly this clip

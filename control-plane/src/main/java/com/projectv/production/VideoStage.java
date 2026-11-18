@@ -35,8 +35,9 @@ import java.util.UUID;
  * Every batch is estimated first; the owner approves it unless it is under the auto-approve amount, and the monthly
  * GPU cap stops it either way. Every clip is an asset with provenance + licence, and every clip a cost entry.
  * <p>
- * {@code projectv.video.provider=omni} (owner, 18 Nov 2026) makes the clips on Gemini Omni Flash instead: drafts at
- * 720p, finals at 1080p, 3-10 s at 24 fps, priced per output token and held to the monthly Gemini cap.
+ * Hybrid (owner, 18 Nov 2026): drafts on Wan (a few rupees, to judge motion), finals on Gemini Omni Flash at 720p
+ * (~40 s instead of ~8 min, better motion, about the same price as a Wan final; SeedVR2 takes it to 4K). Set per kind
+ * with {@code projectv.video.provider-draft / provider-final} (wan | omni); Omni is held to the monthly Gemini cap.
  */
 @Component
 public class VideoStage extends StageSupport {
@@ -53,7 +54,8 @@ public class VideoStage extends StageSupport {
     private final String publicUrl;
     private final BigDecimal autoApproveInr;
     private final int heroTakes;
-    private final String provider;
+    private final String draftProvider;
+    private final String finalProvider;
     private final String omniModel;
 
     public VideoStage(ProductionDeps d,
@@ -62,7 +64,8 @@ public class VideoStage extends StageSupport {
                       @Value("${projectv.public-url:http://127.0.0.1:8080}") String publicUrl,
                       @Value("${projectv.video.auto-approve-inr:0}") BigDecimal autoApproveInr,
                       @Value("${projectv.video.hero-draft-takes:2}") int heroTakes,
-                      @Value("${projectv.video.provider:wan}") String provider,
+                      @Value("${projectv.video.provider-draft:wan}") String draftProvider,
+                      @Value("${projectv.video.provider-final:omni}") String finalProvider,
                       @Value("${projectv.video.omni-model:gemini-omni-flash-preview}") String omniModel) {
         super(d);
         this.wanApp = wanApp;
@@ -70,16 +73,18 @@ public class VideoStage extends StageSupport {
         this.publicUrl = publicUrl;
         this.autoApproveInr = autoApproveInr;
         this.heroTakes = Math.max(1, Math.min(4, heroTakes));
-        this.provider = provider == null ? "wan" : provider.strip().toLowerCase();
+        this.draftProvider = draftProvider == null ? "wan" : draftProvider.strip().toLowerCase();
+        this.finalProvider = finalProvider == null ? "wan" : finalProvider.strip().toLowerCase();
         this.omniModel = omniModel;
     }
 
-    boolean omni() {
-        return "omni".equals(provider);
+    boolean omni(String kind) {
+        return "omni".equals(DRAFT.equals(kind) ? draftProvider : finalProvider);
     }
 
+    /** 720p for drafts and finals: SeedVR2 upscales every clip to 4K, so 1080p from Omni would cost 50% more for little. */
     static String omniResolution(String kind) {
-        return DRAFT.equals(kind) ? "720p" : "1080p";
+        return "720p";
     }
 
     /** Omni clip length: the shot's length in whole seconds, 3-10 s. */
@@ -96,7 +101,7 @@ public class VideoStage extends StageSupport {
 
     public ClipEstimate estimate(UUID videoId, String kind, List<UUID> only) {
         List<ClipJob> jobs = jobs(videoId, kind, only);
-        if (omni()) {
+        if (omni(kind)) {
             BigDecimal inr = omniInr(jobs, kind).setScale(2, RoundingMode.HALF_UP);
             String what = "%s clips (Gemini Omni, %s)".formatted(kind, omniResolution(kind));
             double wall = jobs.isEmpty() ? 0 : Math.ceil(jobs.size() / 3.0) * 0.75;
@@ -128,7 +133,7 @@ public class VideoStage extends StageSupport {
             throw new IllegalStateException(DRAFT.equals(kind) ? "No shots with images to animate"
                     : "No approved drafts need a final render");
         }
-        if (omni()) {
+        if (omni(kind)) {
             BigDecimal inr = omniInr(jobs, kind);
             budget.require(inr, jobs.size() + " " + kind + " clips on Gemini Omni");
             return new ClipRequest(videoId.toString(), wanApp, wanClass, publicUrl, jobs, 0, 0,
@@ -171,15 +176,15 @@ public class VideoStage extends StageSupport {
             // Renders vary like seeds (owner, 17 Nov: one FA3 render "had better motion"): hero shots get several draft
             // takes with different seeds, so the best motion can be picked. Finals render the chosen draft once.
             int takes = draft && "hero".equals(s.get("priority")) ? heroTakes : 1;
-            if (omni()) {
-                longSide = draft ? 1280 : 1920;
-                shortSide = draft ? 720 : 1080;
+            if (omni(kind)) {
+                longSide = 1280;
+                shortSide = 720;
             }
             for (int take = first; take < first + takes; take++) {
                 jobs.add(new ClipJob(id, ((Number) s.get("ord")).intValue() + 1, take, kind,
-                        omni() ? "omni" : draft ? "fast" : "hybrid",
+                        omni(kind) ? "omni" : draft ? "fast" : "hybrid",
                         (String) s.get("keyframe_uri"), prompt, vertical ? shortSide : longSide, vertical ? longSide : shortSide,
-                        omni() ? omniSeconds(num(s.get("duration_target_sec"))) * 24 : frames(num(s.get("duration_target_sec"))),
+                        omni(kind) ? omniSeconds(num(s.get("duration_target_sec"))) * 24 : frames(num(s.get("duration_target_sec"))),
                         Math.abs((long) id.hashCode()) + take));
             }
         }
@@ -262,8 +267,8 @@ public class VideoStage extends StageSupport {
                     "omni".equals(request.provider()) ? "gemini_omni" : "modal_wan",
                     "omni".equals(request.provider()) ? request.omniModel() + " " + request.resolution() : "wan2.2-i2v-a14b " + o.mode(),
                     job.prompt(), job.seed(), "omni".equals(request.provider()) ? AssetStore.LICENCE_GEMINI : AssetStore.LICENCE_WAN, true));
-            jdbc.sql("UPDATE asset SET shot_id = :s, clip_kind = :k WHERE id = :a")
-                    .param("s", shotId).param("k", job.kind()).param("a", assetId).update();
+            jdbc.sql("UPDATE asset SET shot_id = :s, clip_kind = :k, fps = :f WHERE id = :a")
+                    .param("s", shotId).param("k", job.kind()).param("f", o.fps() > 0 ? o.fps() : FPS).param("a", assetId).update();
             if (activated.add(o.shotId())) {
                 jdbc.sql("UPDATE shot SET " + (DRAFT.equals(job.kind()) ? "draft_clip_asset_id" : "final_clip_asset_id")
                                 + " = :a, clip_status = 'READY', clip_error = NULL, updated_at = now() WHERE id = :s")

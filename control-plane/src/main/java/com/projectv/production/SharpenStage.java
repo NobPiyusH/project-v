@@ -54,7 +54,7 @@ public class SharpenStage extends StageSupport {
     List<SmoothJob> jobs(UUID videoId) {
         List<SmoothJob> jobs = new ArrayList<>();
         for (Map<String, Object> s : jdbc.sql("""
-                        SELECT s.id, s.ord, s.footage_asset_id, c.id AS chosen, c.uri_hot AS chosen_uri,
+                        SELECT s.id, s.ord, s.footage_asset_id, c.id AS chosen, c.uri_hot AS chosen_uri, c.fps AS chosen_fps,
                                sm.id AS smooth, sm.uri_hot AS smooth_uri, sm.derived_from AS smoothed_from,
                                sh.derived_from AS sharpened_from
                         FROM shot s JOIN scene sc ON sc.id = s.scene_id
@@ -73,7 +73,8 @@ public class SharpenStage extends StageSupport {
                 continue; // already sharpened from exactly the clip in use
             }
             jobs.add(new SmoothJob(String.valueOf(s.get("id")), ((Number) s.get("ord")).intValue() + 1, String.valueOf(source),
-                    (String) (smoothFresh ? s.get("smooth_uri") : s.get("chosen_uri")), smoothFresh ? FinishStage.TARGET_FPS : 16.0));
+                    (String) (smoothFresh ? s.get("smooth_uri") : s.get("chosen_uri")), smoothFresh ? FinishStage.TARGET_FPS
+                    : s.get("chosen_fps") instanceof Number f ? f.doubleValue() : 16.0));
         }
         return jobs;
     }
