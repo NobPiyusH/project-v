@@ -21,7 +21,7 @@ import java.util.UUID;
 public class DreamStudio {
 
     public record NewDream(String idea, String look, Integer shots, String quality, String defaultMode,
-                           Map<String, String> modes, Integer reviewMinutes) {
+                           Map<String, String> modes, Integer reviewMinutes, String music) {
     }
 
     private final JdbcClient jdbc;
@@ -59,9 +59,11 @@ public class DreamStudio {
             modeNames.put(s.name(), modes.getOrDefault(s, defaultMode).name());
         }
         jdbc.sql("""
-                        INSERT INTO dream_short (id, idea, look, shot_count, quality, modes_json, review_minutes, status, step, workflow_id)
-                        VALUES (:id, :idea, :look, :n, :q, CAST(:modes AS jsonb), :r, 'RUNNING', 'WRITE', :wf)
+                        INSERT INTO dream_short (id, idea, look, shot_count, quality, modes_json, review_minutes, status, step, workflow_id,
+                                                 music_source)
+                        VALUES (:id, :idea, :look, :n, :q, CAST(:modes AS jsonb), :r, 'RUNNING', 'WRITE', :wf, :music)
                         """)
+                .param("music", "lyria".equalsIgnoreCase(req.music()) ? "lyria" : "bed")
                 .param("id", id).param("idea", req.idea().strip()).param("look", look).param("n", shots).param("q", quality)
                 .param("modes", json.writeValueAsString(modeNames)).param("r", review).param("wf", workflowId).update();
         DreamShortWorkflow wf = temporal.newWorkflowStub(DreamShortWorkflow.class,

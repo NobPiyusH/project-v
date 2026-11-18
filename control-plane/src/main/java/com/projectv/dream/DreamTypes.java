@@ -48,12 +48,23 @@ public final class DreamTypes {
      * Shorts level, save one MP4.
      */
     public record DreamFinishRequest(String dreamId, String look, List<DreamFinishClip> clips, int width, int height,
-                                     int fps, double dissolveSec, String musicDir, String progressUrl, String musicUri) {
+                                     int fps, double dissolveSec, String musicDir, String progressUrl, String musicUri,
+                                     String musicName) {
     }
 
     /** @param smoothing "rife-laptop" | "ffmpeg" (how 16 fps became 24); {@code music} the track used, or null */
     public record DreamFinishResult(String uri, double durationSec, int width, int height, int fps, String smoothing,
                                     String music, String error) {
+    }
+
+    /**
+     * A piece of the owner's music bed for one Short: {@code targetSec} long, starting at a point picked from
+     * {@code seed}, away from the starts other Shorts already used ({@code usedStartsSec}), never a quiet stretch.
+     */
+    public record DreamBedRequest(String dreamId, String bedUri, double targetSec, String seed, List<Double> usedStartsSec) {
+    }
+
+    public record DreamBedResult(String uri, double durationSec, double startSec, double bedDurationSec, String bedName) {
     }
 
     /** What the workflow shows the dashboard (Temporal query). */

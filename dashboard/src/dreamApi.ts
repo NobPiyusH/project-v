@@ -17,7 +17,7 @@ export interface DreamShot {
 }
 
 export interface DreamDetail extends DreamSummary {
-  shot_count: number; quality: string; review_minutes: number; music_asset_id: string | null; modes_json: string | Record<string, DreamMode>
+  shot_count: number; quality: string; review_minutes: number; music_asset_id: string | null; music_source: 'bed' | 'lyria'; modes_json: string | Record<string, DreamMode>
   shots: DreamShot[]
   costs: { provider_id: string; amount_inr: number; units: number | null; unit_type: string | null; estimated: boolean; note: string; ts: string }[]
   decisions: { stage: string; capability: string; chosen_provider_id: string | null; reason_text: string; created_at: string }[]
@@ -27,6 +27,7 @@ export interface DreamDetail extends DreamSummary {
 
 export interface NewDream {
   idea: string; look: string; shots: number; quality: string; defaultMode: DreamMode; reviewMinutes: number
+  music: 'bed' | 'lyria'
 }
 
 async function call<T>(method: string, path: string, body?: unknown): Promise<T> {

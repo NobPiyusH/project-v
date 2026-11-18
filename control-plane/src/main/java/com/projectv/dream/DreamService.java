@@ -49,6 +49,9 @@ public class DreamService {
     static final String ZIMAGE = "modal_zimage";
     static final String WAN = "modal_wan";
     static final String LYRIA = "gemini_lyria";
+    /** Provenance provider for pieces of the owner's music bed (cut free on the laptop). */
+    static final String BED = "owner_music_bed";
+    static final UUID LICENCE_OWNER_MUSIC = UUID.fromString("00000000-0000-0000-0000-00000000a012");
     static final int FPS = 16;          // Wan's own frame rate; the finish makes it 24
     static final int MIN_FRAMES = 33;
     static final int MAX_FRAMES = 81;
@@ -88,6 +91,7 @@ public class DreamService {
     private final double shotSeconds;
     private final String musicDir;
     private final String musicModel;
+    private final String musicBed;
 
     public DreamService(JdbcClient jdbc, ObjectMapper json, Llm llm, AssetStore assets, Pricing pricing, BudgetGuard budget,
                         Router router, com.projectv.video.ClipProgress clipProgress,
@@ -99,7 +103,8 @@ public class DreamService {
                         @Value("${projectv.dream.auto-approve-inr:0}") BigDecimal autoApproveInr,
                         @Value("${projectv.dream.shot-seconds:3.5}") double shotSeconds,
                         @Value("${projectv.dream.music-dir:}") String musicDir,
-                        @Value("${projectv.models.music:lyria-3.5}") String musicModel) {
+                        @Value("${projectv.models.music:lyria-3.5}") String musicModel,
+                        @Value("${projectv.dream.music-bed:}") String musicBed) {
         this.jdbc = jdbc;
         this.json = json;
         this.llm = llm;
@@ -117,6 +122,7 @@ public class DreamService {
         this.shotSeconds = shotSeconds;
         this.musicDir = musicDir;
         this.musicModel = musicModel;
+        this.musicBed = musicBed;
     }
 
     static Look look(String id) {
@@ -410,6 +416,55 @@ public class DreamService {
         return "Music: %.0f s at about %.0f BPM (%s).".formatted(r.durationSec(), r.bpm(), r.model());
     }
 
+    public String musicSource(UUID id) {
+        return "lyria".equals(dream(id).get("music_source")) ? "lyria" : "bed";
+    }
+
+    /** A new piece of the bed each time (seeded by the Short and how many pieces it has had), away from used starts. */
+    public DreamTypes.DreamBedRequest musicBedRequest(UUID id) {
+        if (musicBed == null || musicBed.isBlank()) {
+            throw new IllegalStateException("No music bed is set: put the track's storage address in DREAM_MUSIC_BED "
+                    + "(or choose Lyria for this Short)");
+        }
+        List<Double> used = jdbc.sql("""
+                        SELECT p.seed FROM provenance p JOIN asset a ON a.provenance_id = p.id
+                        WHERE p.provider = :p AND p.model = :m AND p.seed IS NOT NULL
+                        """).param("p", BED).param("m", bedName()).query(Long.class).list()
+                .stream().map(ms -> ms / 1000.0).toList();
+        int takes = jdbc.sql("""
+                        SELECT count(*) FROM asset a JOIN provenance p ON p.id = a.provenance_id
+                        WHERE a.dream_short_id = :d AND p.provider = :p
+                        """).param("d", id).param("p", BED).query(Integer.class).single();
+        return new DreamTypes.DreamBedRequest(storageId(id), musicBed, shortSeconds(shots(id).size()), id + "#" + takes, used);
+    }
+
+    @Transactional
+    public String saveMusicBed(UUID id, DreamTypes.DreamBedResult r) {
+        UUID decision = router.recordExternal(null, "DREAM_MUSIC", "music.dream", "local_laptop",
+                "owner's music bed: free and his own track (Lyria only when chosen for this Short)",
+                List.of(Map.of("provider", "local_laptop")));
+        tag("routing_decision", decision, id);
+        cost(id, "local_laptop", BigDecimal.ZERO, r.durationSec(), "second", false,
+                "Dream Short music: the owner's music bed (" + r.bedName() + "), free");
+        UUID asset = assets.create(new NewAsset(null, "audio", r.uri(), "audio/wav", null, null, r.durationSec(),
+                BED, bedName(), "piece from %s to %s of %s".formatted(clock(r.startSec()), clock(r.startSec() + r.durationSec()), musicBed),
+                Math.round(r.startSec() * 1000), LICENCE_OWNER_MUSIC, false));
+        jdbc.sql("UPDATE asset SET dream_short_id = :d WHERE id = :a").param("d", id).param("a", asset).update();
+        jdbc.sql("UPDATE dream_short SET music_asset_id = :a, final_asset_id = NULL, updated_at = now() WHERE id = :d")
+                .param("a", asset).param("d", id).update();
+        return "Music: %.0f s of your track \"%s\" from %s (free).".formatted(r.durationSec(), r.bedName(), clock(r.startSec()));
+    }
+
+    /** The bed's file name, e.g. "7 weeks and 3 days 1 hour.m4a" (used as the provenance model). */
+    private String bedName() {
+        return musicBed.substring(musicBed.lastIndexOf('/') + 1);
+    }
+
+    private static String clock(double sec) {
+        long s = Math.round(sec);
+        return "%d:%02d".formatted(s / 60, s % 60);
+    }
+
     // ------------------------------------------------------------------------------------------- FINISH
 
     public DreamFinishRequest finishRequest(UUID id) {
@@ -425,8 +480,12 @@ public class DreamService {
         }
         Map<String, Object> d = dream(id);
         String musicUri = d.get("music_asset_id") == null ? null : assets.uriOf((UUID) d.get("music_asset_id"));
+        String musicName = d.get("music_asset_id") == null ? null : jdbc.sql("""
+                        SELECT CASE WHEN p.provider = :bed THEN 'your track (' || p.model || ')' ELSE 'Lyria score' END
+                        FROM asset a JOIN provenance p ON p.id = a.provenance_id WHERE a.id = :a
+                        """).param("bed", BED).param("a", d.get("music_asset_id")).query(String.class).optional().orElse(null);
         return new DreamFinishRequest(storageId(id), (String) d.get("look"), clips, 1080, 1920, 24, 0.5,
-                musicDir == null || musicDir.isBlank() ? null : musicDir, publicUrl, musicUri);
+                musicDir == null || musicDir.isBlank() ? null : musicDir, publicUrl, musicUri, musicName);
     }
 
     @Transactional

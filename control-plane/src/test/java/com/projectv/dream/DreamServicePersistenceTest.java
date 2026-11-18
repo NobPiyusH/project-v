@@ -54,7 +54,13 @@ class DreamServicePersistenceTest {
         var json = JsonMapper.builder().build();
         Router router = new Router(jdbc, json, budget, pricing);
         dreams = new DreamService(jdbc, json, null, new AssetStore(jdbc), pricing, budget, router, new ClipProgress(),
-                "projectv-zimage", "ZImage", "projectv-wan", "Wan", "http://127.0.0.1:8080", BigDecimal.ZERO, 3.5, "", "lyria-3.5");
+                "projectv-zimage", "ZImage", "projectv-wan", "Wan", "http://127.0.0.1:8080", BigDecimal.ZERO, 3.5, "", "lyria-3.5",
+                "s3://projectv/music-beds/my track.m4a");
+        jdbc.sql("""
+                        INSERT INTO provider (id, name, kind, capabilities_json, config_json, enabled)
+                        VALUES ('local_laptop', 'Laptop', 'local', CAST('["ffmpeg"]' AS jsonb), CAST('{}' AS jsonb), true)
+                        ON CONFLICT (id) DO NOTHING
+                        """).update();
         provider("modal_zimage", "[\"image.dream\"]");
         provider("modal_wan", "[\"video.i2v.dream\"]");
         jdbc.sql("""
@@ -156,6 +162,33 @@ class DreamServicePersistenceTest {
         jdbc.sql("UPDATE dream_shot SET clip_asset_id = (SELECT music_asset_id FROM dream_short WHERE id = :d) WHERE dream_short_id = :d")
                 .param("d", dream).update(); // any asset will do: the finish only needs every shot to have a clip
         assertEquals("s3://b/score.wav", dreams.finishRequest(dream).musicUri());
+    }
+
+    @Test
+    void theOwnersTrackIsTheFreeDefaultWithProvenanceAndFreshPieces() {
+        assertEquals("bed", dreams.musicSource(dream));
+        var req = dreams.musicBedRequest(dream);
+        assertEquals("s3://projectv/music-beds/my track.m4a", req.bedUri());
+        assertEquals(7.625, req.targetSec(), 0.01);
+        assertEquals(dream + "#0", req.seed());
+        String said = dreams.saveMusicBed(dream, new DreamTypes.DreamBedResult("s3://b/piece.wav", 8.1, 754.25, 3600, "my track.m4a"));
+        assertTrue(said.contains("12:34") && said.contains("free"), said);
+        assertEquals(1, count("SELECT count(*) FROM cost_entry WHERE dream_short_id = :d AND provider_id = 'local_laptop' AND amount_inr = 0"));
+        assertEquals(1, count("SELECT count(*) FROM routing_decision WHERE dream_short_id = :d AND capability = 'music.dream' AND chosen_provider_id = 'local_laptop'"));
+        assertEquals(1, count("""
+                SELECT count(*) FROM dream_short d JOIN asset a ON a.id = d.music_asset_id JOIN provenance p ON p.id = a.provenance_id
+                WHERE d.id = :d AND p.provider = 'owner_music_bed' AND p.model = 'my track.m4a' AND p.seed = 754250
+                  AND NOT p.ai_generated AND p.licence_id = '00000000-0000-0000-0000-00000000a012'
+                  AND p.prompt LIKE 'piece from 12:34 to 12:42 of s3://projectv/music-beds/my track.m4a'
+                """));
+        var next = dreams.musicBedRequest(dream);
+        assertEquals(dream + "#1", next.seed(), "New music asks for another piece");
+        assertTrue(next.usedStartsSec().contains(754.25), "pieces other Shorts used are avoided");
+        jdbc.sql("UPDATE dream_shot SET clip_asset_id = (SELECT music_asset_id FROM dream_short WHERE id = :d) WHERE dream_short_id = :d")
+                .param("d", dream).update();
+        assertEquals("your track (my track.m4a)", dreams.finishRequest(dream).musicName());
+        jdbc.sql("UPDATE dream_short SET music_source = 'lyria' WHERE id = :d").param("d", dream).update();
+        assertEquals("lyria", dreams.musicSource(dream));
     }
 
     @Test

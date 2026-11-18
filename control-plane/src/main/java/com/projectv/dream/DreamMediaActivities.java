@@ -1,5 +1,7 @@
 package com.projectv.dream;
 
+import com.projectv.dream.DreamTypes.DreamBedRequest;
+import com.projectv.dream.DreamTypes.DreamBedResult;
 import com.projectv.dream.DreamTypes.DreamFinishRequest;
 import com.projectv.dream.DreamTypes.DreamFinishResult;
 import io.temporal.activity.ActivityInterface;
@@ -12,4 +14,8 @@ public interface DreamMediaActivities {
     /** Laptop, free: smooth to 24 fps, soft dissolves, dream look, music, loudness; one MP4 saved to storage. */
     @ActivityMethod(name = "dream_finish")
     DreamFinishResult dreamFinish(DreamFinishRequest request);
+
+    /** Laptop, free: cut a fitting piece of the owner's music bed (soft fades), saved to storage as the Short's music. */
+    @ActivityMethod(name = "dream_music_bed")
+    DreamBedResult dreamMusicBed(DreamBedRequest request);
 }

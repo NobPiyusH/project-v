@@ -28,6 +28,7 @@ function DreamHome() {
   const [quality, setQuality] = useState('480p')
   const [mode, setMode] = useState<DreamMode>('REVIEW')
   const [review, setReview] = useState(10)
+  const [music, setMusic] = useState<'bed' | 'lyria'>('bed')
   const [busy, setBusy] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
 
@@ -38,7 +39,7 @@ function DreamHome() {
     }
     setBusy(true)
     try {
-      const r = await dreamApi.create({ idea, look, shots, quality, defaultMode: mode, reviewMinutes: review })
+      const r = await dreamApi.create({ idea, look, shots, quality, defaultMode: mode, reviewMinutes: review, music })
       window.location.hash = `#/dream/${r.id}`
     } catch (e) {
       setFormError(e instanceof Error ? e.message : String(e))
@@ -51,7 +52,7 @@ function DreamHome() {
   return (
     <>
       <section className="card">
-        <div className="card-head"><h2>New Dream Short</h2><span className="pill">Modal Wan clips · Lyria music · laptop finish</span></div>
+        <div className="card-head"><h2>New Dream Short</h2><span className="pill">Modal Wan clips · your music · laptop finish</span></div>
         <textarea rows={2} value={idea} placeholder="A pink house under a cloud at the end of a tiled pier"
           onChange={(e) => { setIdea(e.target.value); setFormError(null) }} style={{ width: '100%' }} />
         {formError && <p className="error small">{formError}</p>}
@@ -60,6 +61,8 @@ function DreamHome() {
             <option value="dreamcore">Dreamcore</option><option value="impossible">Impossible place</option></select></label>
           <label className="small">Shots <select value={shots} onChange={(e) => setShots(Number(e.target.value))}>
             {[3, 4, 5, 6].map((n) => <option key={n} value={n}>{n}</option>)}</select></label>
+          <label className="small">Music <select value={music} onChange={(e) => setMusic(e.target.value as 'bed' | 'lyria')}>
+            <option value="bed">Your track (free)</option><option value="lyria">Lyria (≈₹10)</option></select></label>
           <label className="small">Clips <select value={quality} onChange={(e) => setQuality(e.target.value)}>
             <option value="480p">480p (cheapest)</option><option value="720p">720p</option></select></label>
           <label className="small">Mode <select value={mode} onChange={(e) => setMode(e.target.value as DreamMode)}>
@@ -148,7 +151,7 @@ function DreamView({ id }: { id: string }) {
             <button className="primary" onClick={() => void act(() => dreamApi.approve(id, step))}>Approve {STEP_LABEL[step].toLowerCase()}</button>
             <input type="text" value={notes} placeholder={step === 'WRITE' ? 'More mushrooms, softer light' : 'Notes for the redo'}
               onChange={(e) => setNotes(e.target.value)} style={{ flex: 1, minWidth: 180 }} />
-            {step === 'MUSIC' && <button onClick={() => void act(() => dreamApi.redo(id, step, [], notes))}>New music (≈₹10)</button>}
+            {step === 'MUSIC' && <button onClick={() => void act(() => dreamApi.redo(id, step, [], notes))}>New music {d.music_source === 'lyria' ? '(≈₹10)' : '(another piece, free)'}</button>}
             {step !== 'FINISH' && step !== 'MUSIC' && <button onClick={() => void act(() => dreamApi.redo(id, step, picked, notes))}>
               Redo {step === 'WRITE' ? 'all' : picked.length ? `${picked.length} shot${picked.length > 1 ? 's' : ''}` : 'all'}</button>}
             {step === 'FINISH' && <button onClick={() => void act(() => dreamApi.redo(id, step, [], notes))}>Finish again</button>}
@@ -176,7 +179,7 @@ function DreamView({ id }: { id: string }) {
 
       {d.music_asset_id && (
         <section className="card">
-          <div className="card-head"><h2>Music</h2><span className="pill">Lyria</span></div>
+          <div className="card-head"><h2>Music</h2><span className="pill">{d.music_source === 'lyria' ? 'Lyria' : 'Your track'}</span></div>
           <audio src={assetUrl(d.music_asset_id)} controls style={{ width: '100%' }} />
         </section>
       )}

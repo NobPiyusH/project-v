@@ -39,6 +39,14 @@ public interface DreamActivities {
 
     String saveMusic(String dreamId, com.projectv.media.MediaTypes.MusicResult result);
 
+    /** "bed" (the owner's own track, free; the default) or "lyria" (paid), as chosen for this Short. */
+    String musicSource(String dreamId);
+
+    /** Which piece of the music bed to cut; fails clearly when no bed is set (DREAM_MUSIC_BED). */
+    DreamTypes.DreamBedRequest musicBedRequest(String dreamId);
+
+    String saveMusicBed(String dreamId, DreamTypes.DreamBedResult result);
+
     DreamFinishRequest finishRequest(String dreamId);
 
     String saveFinish(String dreamId, DreamFinishResult result);

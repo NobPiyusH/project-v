@@ -119,10 +119,10 @@ def finish(req: dict, tmp: Path) -> dict:
     length = total_duration(durations, dissolve)
     graph = dissolve_graph(durations, dissolve, width, height, fps, req.get("look"))
     track, music_name = None, None
-    if req.get("musicUri"):  # the Short's own score (Lyria)
+    if req.get("musicUri"):  # the Short's own music: a piece of the owner's track, or a Lyria score
         track = tmp / "score.wav"
         track.write_bytes(get_bytes(req["musicUri"]))
-        music_name = "Lyria score"
+        music_name = req.get("musicName") or "Lyria score"
     else:
         track = pick_track(req.get("musicDir"), dream_id)
         music_name = track.name if track else None

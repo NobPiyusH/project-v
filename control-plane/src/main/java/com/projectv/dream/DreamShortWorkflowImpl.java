@@ -172,7 +172,14 @@ public class DreamShortWorkflowImpl implements DreamShortWorkflow {
                 var req = activities.clipRequest(dreamId, only);
                 yield activities.saveClips(dreamId, req, clips.generateClips(req));
             }
-            case MUSIC -> activities.saveMusic(dreamId, music.generateMusic(activities.musicRequest(dreamId, notes)));
+            case MUSIC -> {
+                // Version 1 added the owner's music bed (free, the default); older runs replay as Lyria-only.
+                int v = Workflow.getVersion("dream-music-bed", Workflow.DEFAULT_VERSION, 1);
+                if (v == 1 && "bed".equals(activities.musicSource(dreamId))) {
+                    yield activities.saveMusicBed(dreamId, finish.dreamMusicBed(activities.musicBedRequest(dreamId)));
+                }
+                yield activities.saveMusic(dreamId, music.generateMusic(activities.musicRequest(dreamId, notes)));
+            }
             case FINISH -> activities.saveFinish(dreamId, finish.dreamFinish(activities.finishRequest(dreamId)));
         };
     }
@@ -183,7 +190,7 @@ public class DreamShortWorkflowImpl implements DreamShortWorkflow {
             case WRITE -> "Writing the world and the shots…";
             case PICTURES -> "Making the pictures…";
             case CLIPS -> "Making the clips on the GPU…";
-            case MUSIC -> "Composing the music (Lyria)…";
+            case MUSIC -> "Making the music…";
             case FINISH -> "Finishing on the laptop: smoothing, dissolves, look, music…";
         };
     }

@@ -44,6 +44,7 @@ class DreamShortWorkflowTest {
         volatile boolean askForCost;
         volatile int failPicturesTimes;
         volatile List<String> lastClipShots;
+        volatile String musicSource = "bed";
 
         @Override
         public String writeShots(String dreamId, String notes) {
@@ -94,12 +95,30 @@ class DreamShortWorkflowTest {
         @Override
         public String saveMusic(String dreamId, com.projectv.media.MediaTypes.MusicResult result) {
             events.add("music");
+            events.add("music:lyria");
+            return "music";
+        }
+
+        @Override
+        public String musicSource(String dreamId) {
+            return musicSource;
+        }
+
+        @Override
+        public DreamTypes.DreamBedRequest musicBedRequest(String dreamId) {
+            return new DreamTypes.DreamBedRequest(dreamId, "s3://b/bed.m4a", 16, dreamId + "#0", List.of());
+        }
+
+        @Override
+        public String saveMusicBed(String dreamId, DreamTypes.DreamBedResult result) {
+            events.add("music");
+            events.add("music:bed:" + result.startSec());
             return "music";
         }
 
         @Override
         public DreamFinishRequest finishRequest(String dreamId) {
-            return new DreamFinishRequest(dreamId, "dreamcore", List.of(), 1080, 1920, 24, 0.5, null, "u", null);
+            return new DreamFinishRequest(dreamId, "dreamcore", List.of(), 1080, 1920, 24, 0.5, null, "u", null, null);
         }
 
         @Override
@@ -137,6 +156,11 @@ class DreamShortWorkflowTest {
         @Override
         public DreamFinishResult dreamFinish(DreamFinishRequest request) {
             return new DreamFinishResult("s3://final", 15, 1080, 1920, 24, "ffmpeg", null, null);
+        }
+
+        @Override
+        public DreamTypes.DreamBedResult dreamMusicBed(DreamTypes.DreamBedRequest request) {
+            return new DreamTypes.DreamBedResult("s3://bed-piece", 16.5, 754.2, 3600, "bed.m4a");
         }
     }
 
@@ -188,9 +212,19 @@ class DreamShortWorkflowTest {
     void autoRunsAllFourStepsInOrder() {
         start(StageMode.AUTO, Map.of());
         assertEquals("completed", result());
-        List<String> work = dream.events.stream().filter(e -> !e.startsWith("status")).toList();
+        List<String> work = dream.events.stream().filter(e -> !e.startsWith("status") && !e.startsWith("music:")).toList();
         assertEquals(List.of("write", "pictures", "clips", "music", "finish"), work);
         assertTrue(dream.events.contains("status:FINISH:COMPLETED"));
+        assertTrue(dream.events.contains("music:bed:754.2"), "the owner's track is the default music");
+    }
+
+    @Test
+    void lyriaIsUsedOnlyWhenChosenForTheShort() {
+        dream.musicSource = "lyria";
+        start(StageMode.AUTO, Map.of());
+        assertEquals("completed", result());
+        assertTrue(dream.events.contains("music:lyria"));
+        assertTrue(dream.events.stream().noneMatch(e -> e.startsWith("music:bed")));
     }
 
     @Test
@@ -247,7 +281,7 @@ class DreamShortWorkflowTest {
         WorkflowClient.start(wf::run, new DreamRequest("00000000-0000-0000-0000-000000000001", StageMode.AUTO, Map.of(), 10,
                 DreamStep.MUSIC));
         assertEquals("completed", result());
-        assertEquals(List.of("music", "finish"), dream.events.stream().filter(e -> !e.startsWith("status")).toList());
+        assertEquals(List.of("music", "finish"), dream.events.stream().filter(e -> !e.startsWith("status") && !e.startsWith("music:")).toList());
     }
 
     @Test
