@@ -14,7 +14,6 @@ A serious, premium, privately owned studio: not a hobby prototype and not a prod
 2a. Every stage supports **Auto, Review and Manual** modes, switchable per video and mid-run. Review = semi-auto: the stage waits a review window (default 10 min, per video) for the owner, then continues by itself; switching to Manual holds it. Never build a stage that can only run one way.
 2b. A failed stage never kills a video: it waits for the owner (Retry / Continue without it). Finished stages can be redone with `REDO_WITH` dependencies (VideoService) so outputs never go stale.
 3. Secrets only in `.env` (git-ignored). Commit `.env.example`. Never log or print keys.
-4. Respect every provider's ToS: one account per provider, no free-tier farming, **no unofficial automation of Google Flow** (it's a manual provider via drop folder).
 5. Temporal workflow code must be deterministic; all I/O in activities; pass asset IDs, never media bytes, through workflows.
 6. Every generated asset gets a Provenance row; every paid job gets a CostEntry; every routing choice gets a RoutingDecision.
 7. Never hard-code market GPU prices; read them live or from config. Re-verify API prices and model IDs before integrating (the book's numbers date from Nov 2026).
