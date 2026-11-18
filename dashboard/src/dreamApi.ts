@@ -1,8 +1,8 @@
 // Client for the Dream Shorts API (/api/dream). Kept apart from api.ts so the main studio's client is untouched.
 
 export type DreamMode = 'AUTO' | 'REVIEW' | 'MANUAL'
-export type DreamStep = 'WRITE' | 'PICTURES' | 'CLIPS' | 'MUSIC' | 'FINISH'
-export const DREAM_STEPS: DreamStep[] = ['WRITE', 'PICTURES', 'CLIPS', 'MUSIC', 'FINISH']
+export type DreamStep = 'SCOUT' | 'WRITE' | 'PICTURES' | 'CLIPS' | 'MUSIC' | 'FINISH'
+export const DREAM_STEPS: DreamStep[] = ['SCOUT', 'WRITE', 'PICTURES', 'CLIPS', 'MUSIC', 'FINISH']
 
 export interface DreamSummary {
   id: string; idea: string; title: string | null; look: string; status: string; step: string | null
@@ -17,7 +17,7 @@ export interface DreamShot {
 }
 
 export interface DreamDetail extends DreamSummary {
-  shot_count: number; quality: string; review_minutes: number; music_asset_id: string | null; music_source: 'bed' | 'lyria'; modes_json: string | Record<string, DreamMode>
+  shot_count: number; quality: string; review_minutes: number; music_asset_id: string | null; music_source: 'bed' | 'lyria'; scout: boolean; scout_json: string | null; scout_angle: number; modes_json: string | Record<string, DreamMode>
   shots: DreamShot[]
   costs: { provider_id: string; amount_inr: number; units: number | null; unit_type: string | null; estimated: boolean; note: string; ts: string }[]
   decisions: { stage: string; capability: string; chosen_provider_id: string | null; reason_text: string; created_at: string }[]
@@ -30,6 +30,7 @@ export interface DreamDetail extends DreamSummary {
 export interface NewDream {
   idea: string; look: string; shots: number; quality: string; defaultMode: DreamMode; reviewMinutes: number
   music: 'bed' | 'lyria'
+  scout: boolean
 }
 
 async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -55,6 +56,7 @@ export const dreamApi = {
     call<void>('POST', `/${id}/steps/${step}/redo`, { shotIds, notes }),
   setMode: (id: string, step: DreamStep, mode: DreamMode) => call<void>('POST', `/${id}/steps/${step}/mode`, { mode }),
   retry: (id: string) => call<void>('POST', `/${id}/retry`),
+  pickAngle: (id: string, n: number) => call<void>('POST', `/${id}/scout/angle/${n}`),
   rerun: (id: string, from: DreamStep) => call<void>('POST', `/${id}/rerun/${from}`),
   stop: (id: string) => call<void>('POST', `/${id}/stop`),
   cancel: (id: string) => call<void>('POST', `/${id}/cancel`),

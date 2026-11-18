@@ -13,7 +13,7 @@ public final class DreamTypes {
     }
 
     /** The steps of a Dream Short, in order. */
-    public enum DreamStep { WRITE, PICTURES, CLIPS, MUSIC, FINISH }
+    public enum DreamStep { SCOUT, WRITE, PICTURES, CLIPS, MUSIC, FINISH }
 
     /**
      * Workflow input. Steps not listed in {@code modes} use {@code defaultMode}. {@code fromStep}: start there and keep
@@ -70,6 +70,35 @@ public final class DreamTypes {
     /** {@code model}/{@code usage} are null when nothing listened (one candidate, no model, or the call failed). */
     public record DreamBedResult(String uri, double durationSec, double startSec, double bedDurationSec, String bedName,
                                  String model, com.projectv.media.MediaTypes.Usage usage, String why, int heard) {
+    }
+
+    /** Scout: find Shorts like this idea ({@code query}), watch up to {@code maxVideos}, with {@code model} (Gemini). */
+    public record DreamScoutRequest(String dreamId, String query, String model, int maxVideos) {
+    }
+
+    /** One similar Short as Gemini saw it. {@code views}/{@code durationSec} come from YouTube when known. */
+    public record ScoutVideo(String url, String title, String channel, Long views, Double durationSec, String shows,
+                             String look, String camera, Integer shots, Double avgShotSec, String music, String hook,
+                             String tools, String works, String error) {
+    }
+
+    /** {@code source}: "youtube" (Data API) or "google" (Gemini + Google Search); {@code searches}: paid search calls. */
+    public record DreamScoutResult(List<ScoutVideo> videos, List<com.projectv.media.MediaTypes.Usage> usage, String source,
+                                   int searches, String error) {
+    }
+
+    public record ScoutAngle(String title, String idea, String why) {
+    }
+
+    /** Claude's brief: what most of them do (avoid), what none of them do, and ways to be different. */
+    public record ScoutBrief(List<String> cliches, List<String> gaps, List<ScoutAngle> angles) {
+    }
+
+    /** Shots of ours that come too close to a Short that already exists. */
+    public record Similar(List<SimilarShot> similar) {
+    }
+
+    public record SimilarShot(int shot, String like, String why) {
     }
 
     /** What the workflow shows the dashboard (Temporal query). */

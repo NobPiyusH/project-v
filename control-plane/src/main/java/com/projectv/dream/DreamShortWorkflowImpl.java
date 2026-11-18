@@ -96,10 +96,15 @@ public class DreamShortWorkflowImpl implements DreamShortWorkflow {
             modes.putAll(request.modes());
         }
         reviewWindow = Duration.ofMinutes(Math.max(1, request.reviewMinutes()));
-        DreamStep from = request.fromStep() == null ? DreamStep.WRITE : request.fromStep();
+        // Version 1 added the Scout step before Write; older runs replay without it.
+        boolean scoutable = Workflow.getVersion("dream-scout", Workflow.DEFAULT_VERSION, 1) == 1;
+        DreamStep from = request.fromStep() == null ? (scoutable ? DreamStep.SCOUT : DreamStep.WRITE) : request.fromStep();
         for (DreamStep step : DreamStep.values()) {
             if (step.ordinal() < from.ordinal()) {
                 continue; // redo from a later step: earlier results stay as they are
+            }
+            if (step == DreamStep.SCOUT && (!scoutable || !activities.scoutWanted(dreamId))) {
+                continue; // the owner switched the Scout off for this Short
             }
             if (!runStep(step)) {
                 show(step, "CANCELLED", "Cancelled by the owner.");
@@ -150,6 +155,10 @@ public class DreamShortWorkflowImpl implements DreamShortWorkflow {
 
     private String execute(DreamStep step, List<String> only, String notes) {
         return switch (step) {
+            case SCOUT -> {
+                var req = activities.scoutRequest(dreamId, notes);
+                yield activities.saveScout(dreamId, req, finish.dreamScout(req));
+            }
             case WRITE -> activities.writeShots(dreamId, notes);
             case PICTURES -> {
                 var req = activities.pictureRequest(dreamId, only, notes);
@@ -187,6 +196,7 @@ public class DreamShortWorkflowImpl implements DreamShortWorkflow {
     /** What the dashboard says while a step runs (so an old "approve" message never lingers). */
     static String working(DreamStep step) {
         return switch (step) {
+            case SCOUT -> "Finding and watching similar Shorts…";
             case WRITE -> "Writing the world and the shots…";
             case PICTURES -> "Making the pictures…";
             case CLIPS -> "Making the clips on the GPU…";

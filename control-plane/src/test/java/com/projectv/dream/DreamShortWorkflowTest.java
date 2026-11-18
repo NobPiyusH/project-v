@@ -45,6 +45,7 @@ class DreamShortWorkflowTest {
         volatile int failPicturesTimes;
         volatile List<String> lastClipShots;
         volatile String musicSource = "bed";
+        volatile boolean scout = true;
 
         @Override
         public String writeShots(String dreamId, String notes) {
@@ -97,6 +98,22 @@ class DreamShortWorkflowTest {
             events.add("music");
             events.add("music:lyria");
             return "music";
+        }
+
+        @Override
+        public boolean scoutWanted(String dreamId) {
+            return scout;
+        }
+
+        @Override
+        public DreamTypes.DreamScoutRequest scoutRequest(String dreamId, String notes) {
+            return new DreamTypes.DreamScoutRequest(dreamId, "idea" + (notes == null ? "" : " " + notes), "gemini", 6);
+        }
+
+        @Override
+        public String saveScout(String dreamId, DreamTypes.DreamScoutRequest request, DreamTypes.DreamScoutResult result) {
+            events.add("scout:" + request.query() + ":" + result.videos().size());
+            return "scouted";
         }
 
         @Override
@@ -160,6 +177,12 @@ class DreamShortWorkflowTest {
         }
 
         @Override
+        public DreamTypes.DreamScoutResult dreamScout(DreamTypes.DreamScoutRequest request) {
+            return new DreamTypes.DreamScoutResult(List.of(new DreamTypes.ScoutVideo("u", "t", "c", 1000L, 20.0, "a kiosk",
+                    null, null, 4, 4.0, null, null, null, null, null)), List.of(), "youtube", 1, null);
+        }
+
+        @Override
         public DreamTypes.DreamBedResult dreamMusicBed(DreamTypes.DreamBedRequest request) {
             return new DreamTypes.DreamBedResult("s3://bed-piece", 16.5, 754.2, 3600, "bed.m4a", null, null, null, 1);
         }
@@ -214,7 +237,7 @@ class DreamShortWorkflowTest {
         start(StageMode.AUTO, Map.of());
         assertEquals("completed", result());
         List<String> work = dream.events.stream().filter(e -> !e.startsWith("status") && !e.startsWith("music:")).toList();
-        assertEquals(List.of("write", "pictures", "clips", "music", "finish"), work);
+        assertEquals(List.of("scout:idea:1", "write", "pictures", "clips", "music", "finish"), work);
         assertTrue(dream.events.contains("status:FINISH:COMPLETED"));
         assertTrue(dream.events.contains("music:bed:754.2"), "the owner's track is the default music");
     }
@@ -288,8 +311,27 @@ class DreamShortWorkflowTest {
     @Test
     void cancelEndsTheShortWhileWaiting() {
         DreamShortWorkflow wf = start(StageMode.MANUAL, Map.of());
-        waitFor(wf, "WRITE", "WAITING");
+        waitFor(wf, "SCOUT", "WAITING"); // in Manual the Scout is the first step that waits
         wf.cancel();
         assertEquals("cancelled", result());
+    }
+
+    @Test
+    void theScoutCanBeSwitchedOffForAShort() {
+        dream.scout = false;
+        start(StageMode.AUTO, Map.of());
+        assertEquals("completed", result());
+        assertTrue(dream.events.stream().noneMatch(e -> e.startsWith("scout")));
+    }
+
+    @Test
+    void aScoutRedoSearchesAgainWithTheOwnersNotes() {
+        DreamShortWorkflow wf = start(StageMode.AUTO, Map.of(DreamStep.SCOUT, StageMode.MANUAL));
+        waitFor(wf, "SCOUT", "WAITING");
+        wf.redo(DreamStep.SCOUT, null, "at night");
+        waitFor(wf, "SCOUT", "WAITING");
+        assertTrue(dream.events.contains("scout:idea at night:1"));
+        wf.approve(DreamStep.SCOUT);
+        assertEquals("completed", result());
     }
 }

@@ -18,4 +18,8 @@ public interface DreamMediaActivities {
     /** Laptop, free: cut a fitting piece of the owner's music bed (soft fades), saved to storage as the Short's music. */
     @ActivityMethod(name = "dream_music_bed")
     DreamBedResult dreamMusicBed(DreamBedRequest request);
+
+    /** Find Shorts like the idea (YouTube, else Google Search) and have Gemini watch each one. A few rupees. */
+    @ActivityMethod(name = "dream_scout")
+    DreamTypes.DreamScoutResult dreamScout(DreamTypes.DreamScoutRequest request);
 }

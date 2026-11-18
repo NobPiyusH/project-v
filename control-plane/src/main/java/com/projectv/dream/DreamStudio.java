@@ -21,7 +21,7 @@ import java.util.UUID;
 public class DreamStudio {
 
     public record NewDream(String idea, String look, Integer shots, String quality, String defaultMode,
-                           Map<String, String> modes, Integer reviewMinutes, String music) {
+                           Map<String, String> modes, Integer reviewMinutes, String music, Boolean scout) {
     }
 
     private final JdbcClient jdbc;
@@ -60,9 +60,10 @@ public class DreamStudio {
         }
         jdbc.sql("""
                         INSERT INTO dream_short (id, idea, look, shot_count, quality, modes_json, review_minutes, status, step, workflow_id,
-                                                 music_source)
-                        VALUES (:id, :idea, :look, :n, :q, CAST(:modes AS jsonb), :r, 'RUNNING', 'WRITE', :wf, :music)
+                                                 music_source, scout)
+                        VALUES (:id, :idea, :look, :n, :q, CAST(:modes AS jsonb), :r, 'RUNNING', 'SCOUT', :wf, :music, :scout)
                         """)
+                .param("scout", req.scout() == null || req.scout())
                 .param("music", "lyria".equalsIgnoreCase(req.music()) ? "lyria" : "bed")
                 .param("id", id).param("idea", req.idea().strip()).param("look", look).param("n", shots).param("q", quality)
                 .param("modes", json.writeValueAsString(modeNames)).param("r", review).param("wf", workflowId).update();
@@ -115,6 +116,7 @@ public class DreamStudio {
     public Map<String, Object> detail(UUID id) {
         Map<String, Object> out = new LinkedHashMap<>(dreams.dream(id));
         out.remove("world_json");
+        out.put("scout_json", out.get("scout_json") == null ? null : out.get("scout_json").toString());
         out.put("shots", jdbc.sql("""
                         SELECT id, ord, scene, picture_prompt, motion_prompt, picture_asset_id, clip_asset_id, picture_takes,
                                clip_takes, error FROM dream_shot WHERE dream_short_id = :d ORDER BY ord
@@ -171,6 +173,13 @@ public class DreamStudio {
     public void stopClips(UUID id) {
         clipProgress.requestStop(id);
         dreams.evidence().event(id, "CLIPS", "stop", null, null, null);
+    }
+
+    /** The owner picks which of the Scout's angles the writer follows (1-based); then approves the Scout step. */
+    public void pickAngle(UUID id, int angle) {
+        jdbc.sql("UPDATE dream_short SET scout_angle = :a, updated_at = now() WHERE id = :id").param("a", Math.max(1, angle))
+                .param("id", id).update();
+        dreams.evidence().event(id, "SCOUT", "angle", null, null, Map.of("angle", angle));
     }
 
     public List<Map<String, Object>> calibration() {

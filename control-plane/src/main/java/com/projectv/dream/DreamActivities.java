@@ -39,6 +39,15 @@ public interface DreamActivities {
 
     String saveMusic(String dreamId, com.projectv.media.MediaTypes.MusicResult result);
 
+    /** Whether this Short runs the Scout (the owner can switch it off on the form). */
+    boolean scoutWanted(String dreamId);
+
+    /** What to search for and how many Shorts to watch; held to the Gemini cap. */
+    DreamTypes.DreamScoutRequest scoutRequest(String dreamId, String notes);
+
+    /** Costs what was watched, has Claude write the brief (clichés, gaps, angles), stores it for the writer. */
+    String saveScout(String dreamId, DreamTypes.DreamScoutRequest request, DreamTypes.DreamScoutResult result);
+
     /** "bed" (the owner's own track, free; the default) or "lyria" (paid), as chosen for this Short. */
     String musicSource(String dreamId);
 

@@ -3,7 +3,7 @@ import { assetUrl } from '../api'
 import { DREAM_STEPS, dreamApi, type DreamDetail, type DreamMode, type DreamStep, type DreamSummary } from '../dreamApi'
 import { usePoll } from '../hooks'
 
-const STEP_LABEL: Record<DreamStep, string> = { WRITE: 'Write', PICTURES: 'Pictures', CLIPS: 'Clips', MUSIC: 'Music', FINISH: 'Finish' }
+const STEP_LABEL: Record<DreamStep, string> = { SCOUT: 'Scout', WRITE: 'Write', PICTURES: 'Pictures', CLIPS: 'Clips', MUSIC: 'Music', FINISH: 'Finish' }
 
 function statusBadge(status: string) {
   const cls = status === 'COMPLETED' ? 'b-ok' : status.startsWith('WAITING') ? 'b-warn'
@@ -29,6 +29,7 @@ function DreamHome() {
   const [mode, setMode] = useState<DreamMode>('REVIEW')
   const [review, setReview] = useState(10)
   const [music, setMusic] = useState<'bed' | 'lyria'>('bed')
+  const [scout, setScout] = useState(true)
   const [busy, setBusy] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
 
@@ -39,7 +40,7 @@ function DreamHome() {
     }
     setBusy(true)
     try {
-      const r = await dreamApi.create({ idea, look, shots, quality, defaultMode: mode, reviewMinutes: review, music })
+      const r = await dreamApi.create({ idea, look, shots, quality, defaultMode: mode, reviewMinutes: review, music, scout })
       window.location.hash = `#/dream/${r.id}`
     } catch (e) {
       setFormError(e instanceof Error ? e.message : String(e))
@@ -61,6 +62,7 @@ function DreamHome() {
             <option value="lonely">Lonely object</option><option value="drive">Drive-by</option><option value="walkthrough">Walk-through</option><option value="dreamcore">Dreamcore (soft pastel)</option><option value="impossible">Impossible place</option></select></label>
           <label className="small">Shots <select value={shots} onChange={(e) => setShots(Number(e.target.value))}>
             {[3, 4, 5, 6].map((n) => <option key={n} value={n}>{n}</option>)}</select></label>
+          <label className="small"><input type="checkbox" checked={scout} onChange={(e) => setScout(e.target.checked)} /> Scout similar Shorts first (≈₹5)</label>
           <label className="small">Music <select value={music} onChange={(e) => setMusic(e.target.value as 'bed' | 'lyria')}>
             <option value="bed">Your track (free)</option><option value="lyria">Lyria (≈₹10)</option></select></label>
           <label className="small">Clips <select value={quality} onChange={(e) => setQuality(e.target.value)}>
@@ -207,6 +209,8 @@ function DreamView({ id }: { id: string }) {
         </div>
       </section>
 
+      <Scout d={d} onPick={(n) => void act(() => dreamApi.pickAngle(id, n))} />
+
       <Evidence d={d} />
 
       <section className="card">
@@ -261,6 +265,42 @@ function Evidence({ d }: { d: DreamDetail }) {
       {decisions.map((e, i) => (
         <div key={i} className="small muted">{new Date(e.created_at).toLocaleString()} · {e.kind}{e.step ? ` ${e.step}` : ''}
           {e.notes ? ` · “${e.notes}”` : ''}{e.data && e.kind === 'mode' ? ` · ${String(parse(e.data).mode)}` : ''}</div>))}
+    </section>
+  )
+}
+
+interface ScoutData {
+  source: string
+  videos: { url: string; title: string | null; channel: string | null; views: number | null; shows: string; look: string;
+    camera: string; shots: number; music: string; hook: string; tools: string; works: string }[]
+  brief: { cliches: string[]; gaps: string[]; angles: { title: string; idea: string; why: string }[] }
+}
+
+/** What the Scout watched, what to avoid, and the angle the writer will follow (pick before approving the Scout). */
+function Scout({ d, onPick }: { d: DreamDetail; onPick: (n: number) => void }) {
+  if (!d.scout_json) return null
+  const s = parse(d.scout_json) as unknown as ScoutData
+  if (!s.brief) return null
+  return (
+    <section className="card">
+      <div className="card-head"><h2>Scout</h2><span className="muted small">{s.videos.length} similar Shorts watched ({s.source})</span></div>
+      <h3 className="small">Ways to be different: the writer follows the one you pick</h3>
+      {s.brief.angles.map((a, i) => (
+        <label key={i} className="small" style={{ display: 'block', marginBottom: 8 }}>
+          <input type="radio" name="angle" checked={d.scout_angle === i + 1} onChange={() => onPick(i + 1)} />{' '}
+          <strong>{a.title}</strong>: {a.idea} <span className="muted">({a.why})</span>
+        </label>))}
+      <p className="small"><strong>Most of them do:</strong> {s.brief.cliches.join('; ')}</p>
+      <p className="small"><strong>None of them do:</strong> {s.brief.gaps.join('; ')}</p>
+      <details className="small"><summary>What the Scout watched</summary>
+        {s.videos.map((v, i) => (
+          <div key={i} style={{ marginTop: 8 }}>
+            <a href={v.url} target="_blank" rel="noreferrer">{v.title ?? v.url}</a>
+            {v.views != null && <span className="muted"> · {v.views.toLocaleString()} views</span>}
+            <div>{v.shows}</div>
+            <div className="muted">Look: {v.look} · Camera: {v.camera} · {v.shots} shots · Music: {v.music} · Hook: {v.hook} · Made with: {v.tools}</div>
+          </div>))}
+      </details>
     </section>
   )
 }

@@ -63,6 +63,21 @@ public class DreamActivitiesImpl implements DreamActivities {
     }
 
     @Override
+    public boolean scoutWanted(String dreamId) {
+        return dreams.scoutWanted(UUID.fromString(dreamId));
+    }
+
+    @Override
+    public DreamTypes.DreamScoutRequest scoutRequest(String dreamId, String notes) {
+        return dreams.scoutRequest(UUID.fromString(dreamId), notes);
+    }
+
+    @Override
+    public String saveScout(String dreamId, DreamTypes.DreamScoutRequest request, DreamTypes.DreamScoutResult result) {
+        return dreams.saveScout(UUID.fromString(dreamId), request, result);
+    }
+
+    @Override
     public String musicSource(String dreamId) {
         return dreams.musicSource(UUID.fromString(dreamId));
     }

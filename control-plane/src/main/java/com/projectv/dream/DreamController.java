@@ -78,6 +78,12 @@ public class DreamController {
         studio.rerun(id, DreamStep.valueOf(step.toUpperCase()));
     }
 
+    /** Which of the Scout's angles the writer should follow (1-based). */
+    @PostMapping("/{id}/scout/angle/{n}")
+    public void angle(@PathVariable UUID id, @PathVariable int n) {
+        studio.pickAngle(id, n);
+    }
+
     @PostMapping("/{id}/retry")
     public void retry(@PathVariable UUID id) {
         studio.retry(id);

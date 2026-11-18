@@ -57,6 +57,9 @@ public class DreamService {
     /** Pieces of the bed Gemini compares for one Short, and what that listen is held to before the call (a few paise). */
     static final int BED_CANDIDATES = 6;
     static final BigDecimal LISTEN_ESTIMATE_INR = new BigDecimal("0.50");
+    /** Scout: Shorts watched per idea, and the estimate held before it runs (unmeasured until the first runs). */
+    static final int SCOUT_VIDEOS = 6;
+    static final BigDecimal SCOUT_ESTIMATE_INR = new BigDecimal("5");
     static final int FPS = 16;          // Wan's own frame rate; the finish makes it 24
     static final int MIN_FRAMES = 33;
     static final int MAX_FRAMES = 81;
@@ -190,6 +193,7 @@ public class DreamService {
     private final String musicBed;
     private final String listenModel;
     private final DreamEvidence evidence;
+    private final String briefModel;
 
     public DreamService(JdbcClient jdbc, ObjectMapper json, Llm llm, AssetStore assets, Pricing pricing, BudgetGuard budget,
                         Router router, com.projectv.video.ClipProgress clipProgress,
@@ -203,7 +207,8 @@ public class DreamService {
                         @Value("${projectv.dream.music-dir:}") String musicDir,
                         @Value("${projectv.models.music:lyria-3.5}") String musicModel,
                         @Value("${projectv.dream.music-bed:}") String musicBed,
-                        @Value("${projectv.models.vision:gemini-3.6-flash}") String listenModel) {
+                        @Value("${projectv.models.vision:gemini-3.6-flash}") String listenModel,
+                        @Value("${projectv.models.story:claude:claude-sonnet-5-5}") String briefModel) {
         this.jdbc = jdbc;
         this.json = json;
         this.llm = llm;
@@ -224,6 +229,7 @@ public class DreamService {
         this.musicBed = musicBed;
         this.listenModel = listenModel;
         this.evidence = new DreamEvidence(jdbc, json);
+        this.briefModel = briefModel;
     }
 
     public DreamEvidence evidence() {
@@ -262,11 +268,22 @@ public class DreamService {
                 "shots": [{"scene": what this shot shows (one or two sentences, concrete), "motion": the camera move and
                 the small motion inside the scene}]} with exactly %d shots.
                 """.formatted(look.structure().formatted(count), FEEL, look.brief(), count);
-        String user = "Idea: " + d.get("idea") + (notes == null || notes.isBlank() ? "" : "\nOwner's notes for this rewrite: " + notes);
+        Scouted scouted = scouted(d);
+        String user = "Idea: " + d.get("idea") + (notes == null || notes.isBlank() ? "" : "\nOwner's notes for this rewrite: " + notes)
+                + (scouted == null ? "" : scouted.forWriter());
+        java.time.Instant since = java.time.Instant.now();
         DreamWorld w = llm.call(null, "dream.write", system, user, DreamWorld.class);
         if (w == null || w.shots() == null || w.shots().isEmpty()) {
             throw new IllegalStateException("The writer returned no shots");
         }
+        String rewrite = scouted == null ? null : tooSimilar(id, w, scouted);
+        if (rewrite != null) { // one rewrite: never copy a Short that already exists
+            DreamWorld again = llm.call(null, "dream.write", system, user + "\nRewrite: " + rewrite, DreamWorld.class);
+            if (again != null && again.shots() != null && !again.shots().isEmpty()) {
+                w = again;
+            }
+        }
+        linkLlmCosts(id, "dream.", since);
         List<PlannedDreamShot> shots = w.shots().size() > count ? w.shots().subList(0, count) : w.shots();
         jdbc.sql("DELETE FROM dream_shot WHERE dream_short_id = :d").param("d", id).update();
         int ord = 0;
@@ -284,6 +301,155 @@ public class DreamService {
                         """)
                 .param("t", w.title()).param("w", json.writeValueAsString(w)).param("d", id).update();
         return "\"%s\": %d shots in one world (%s).".formatted(w.title(), shots.size(), Objects.toString(w.palette(), "").strip());
+    }
+
+    // ------------------------------------------------------------------------------------------- SCOUT
+
+    /** What the Scout found and the angle the owner picked, as the writer will read it. */
+    record Scouted(DreamTypes.ScoutBrief brief, List<DreamTypes.ScoutVideo> videos, int angle) {
+        String forWriter() {
+            StringBuilder s = new StringBuilder("\n\nWhat already exists (make this Short clearly different):");
+            if (brief.cliches() != null && !brief.cliches().isEmpty()) {
+                s.append("\nAvoid these clichés: ").append(String.join("; ", brief.cliches()));
+            }
+            if (brief.angles() != null && !brief.angles().isEmpty()) {
+                DreamTypes.ScoutAngle a = brief.angles().get(Math.min(Math.max(angle, 1), brief.angles().size()) - 1);
+                s.append("\nFollow this angle: ").append(a.title()).append(" - ").append(a.idea());
+            }
+            List<String> seen = videos.stream().map(DreamTypes.ScoutVideo::shows).filter(Objects::nonNull).limit(8).toList();
+            if (!seen.isEmpty()) {
+                s.append("\nDo not copy any of these existing Shorts: ").append(String.join(" | ", seen));
+            }
+            return s.toString();
+        }
+    }
+
+    Scouted scouted(Map<String, Object> d) {
+        if (d.get("scout_json") == null) {
+            return null;
+        }
+        Map<String, Object> m = json.readValue(d.get("scout_json").toString(), new tools.jackson.core.type.TypeReference<Map<String, Object>>() {
+        });
+        DreamTypes.ScoutBrief brief = json.convertValue(m.get("brief"), DreamTypes.ScoutBrief.class);
+        List<DreamTypes.ScoutVideo> videos = json.convertValue(m.get("videos"),
+                new tools.jackson.core.type.TypeReference<List<DreamTypes.ScoutVideo>>() {
+                });
+        return brief == null ? null : new Scouted(brief, videos == null ? List.of() : videos, ((Number) d.get("scout_angle")).intValue());
+    }
+
+    public boolean scoutWanted(UUID id) {
+        return Boolean.TRUE.equals(dream(id).get("scout"));
+    }
+
+    public DreamTypes.DreamScoutRequest scoutRequest(UUID id, String notes) {
+        Map<String, Object> d = dream(id);
+        budget.require(SCOUT_ESTIMATE_INR, "Dream Short Scout (watch similar Shorts)");
+        String query = Objects.toString(d.get("idea"), "") + (notes == null || notes.isBlank() ? "" : " " + notes.strip());
+        return new DreamTypes.DreamScoutRequest(storageId(id), query.strip(), listenModel, SCOUT_VIDEOS);
+    }
+
+    @Transactional
+    public String saveScout(UUID id, DreamTypes.DreamScoutRequest req, DreamTypes.DreamScoutResult r) {
+        double paid = 0;
+        if (r.usage() != null) {
+            for (var u : r.usage()) {
+                BigDecimal inr = pricing.textInr(u);
+                paid += inr.doubleValue();
+                cost(id, BudgetGuard.GEMINI, inr, u.totalTokens(), "token", false, "Dream Short Scout: Gemini watched a Short");
+            }
+        }
+        if (r.searches() > 0 && "google".equals(r.source())) {
+            BigDecimal inr = pricing.groundingInr(r.searches());
+            paid += inr.doubleValue();
+            cost(id, BudgetGuard.GEMINI, inr, r.searches(), "query", false, "Dream Short Scout: Google Search");
+        }
+        UUID decision = router.recordExternal(null, "DREAM_SCOUT", "video.watch", BudgetGuard.GEMINI,
+                "found %d similar Shorts via %s; Gemini watches them from their links (only model that takes video)"
+                        .formatted(r.videos() == null ? 0 : r.videos().size(), r.source()), List.of(Map.of("provider", BudgetGuard.GEMINI)));
+        tag("routing_decision", decision, id);
+        List<DreamTypes.ScoutVideo> seen = r.videos() == null ? List.of()
+                : r.videos().stream().filter(v -> v.error() == null && v.shows() != null).toList();
+        if (seen.isEmpty()) {
+            throw new IllegalStateException("The Scout found no similar Shorts to learn from"
+                    + (r.error() == null ? "" : ": " + r.error()) + ". Retry, or switch the Scout off for this Short.");
+        }
+        Map<String, Object> d = dream(id);
+        java.time.Instant since = java.time.Instant.now();
+        String system = """
+                You advise a private studio that makes short, wordless, music-led vertical videos (YouTube Shorts) that
+                feel warm, nostalgic and real. Below are Shorts that already exist for the owner's idea, as a viewer saw
+                them. Find what most of them do (the clichés to avoid), what none of them do (the gaps), and propose 3
+                concrete angles that would make the owner's Short clearly different yet still feel-good and believable
+                (a new object or place, a new camera idea, a new time of light, a twist at the end...). Never suggest
+                copying any of them. Return JSON: {"cliches": [short phrases], "gaps": [short phrases],
+                "angles": [{"title": 2-5 words, "idea": one or two concrete sentences, "why": why it stands out}]}.
+                """;
+        StringBuilder user = new StringBuilder("Owner's idea: " + d.get("idea") + "\nLook: " + look((String) d.get("look")).brief() + "\n");
+        int n = 1;
+        for (var v : seen) {
+            user.append("\nShort ").append(n++).append(v.views() == null ? "" : " (" + v.views() + " views)").append(": ")
+                    .append(v.shows()).append(" | look: ").append(v.look()).append(" | camera: ").append(v.camera())
+                    .append(" | shots: ").append(v.shots()).append(" | music: ").append(v.music()).append(" | hook: ")
+                    .append(v.hook()).append(" | why it works: ").append(v.works());
+        }
+        DreamTypes.ScoutBrief brief = llm.call(null, "dream.scout", system, user.toString(), DreamTypes.ScoutBrief.class, briefModel);
+        linkLlmCosts(id, "dream.scout", since);
+        if (brief == null || brief.angles() == null || brief.angles().isEmpty()) {
+            throw new IllegalStateException("The Scout's brief came back empty");
+        }
+        jdbc.sql("UPDATE dream_short SET scout_json = CAST(:j AS jsonb), scout_angle = 1, updated_at = now() WHERE id = :d")
+                .param("j", json.writeValueAsString(Map.of("videos", seen, "brief", brief, "source", r.source())))
+                .param("d", id).update();
+        evidence.costCheck(id, "SCOUT", SCOUT_ESTIMATE_INR.doubleValue(), paid + llmCostsSince(id, "dream.scout", since));
+        long top = seen.stream().map(DreamTypes.ScoutVideo::views).filter(Objects::nonNull).mapToLong(Long::longValue).max().orElse(0);
+        return "Watched %d similar Shorts%s. Most do: %s. Angle 1: %s (pick another before approving).".formatted(seen.size(),
+                top > 0 ? " (top one %,d views)".formatted(top) : "",
+                brief.cliches() == null || brief.cliches().isEmpty() ? "-" : brief.cliches().getFirst(),
+                brief.angles().getFirst().title());
+    }
+
+    /** Our shots too close to an existing Short? Returns rewrite notes, or null. Cheap Gemini text call. */
+    String tooSimilar(UUID id, DreamWorld w, Scouted scouted) {
+        List<String> theirs = scouted.videos().stream().map(DreamTypes.ScoutVideo::shows).filter(Objects::nonNull).toList();
+        if (theirs.isEmpty()) {
+            return null;
+        }
+        StringBuilder user = new StringBuilder("Our shots:");
+        for (int i = 0; i < w.shots().size(); i++) {
+            user.append("\n").append(i + 1).append(". ").append(w.shots().get(i).scene());
+        }
+        user.append("\n\nExisting Shorts:");
+        for (int i = 0; i < theirs.size(); i++) {
+            user.append("\n").append((char) ('A' + i)).append(". ").append(theirs.get(i));
+        }
+        DreamTypes.Similar s = llm.call(null, "dream.similar", """
+                Compare our planned shots with Shorts that already exist. A shot is too similar only when it is nearly the
+                same scene (same object in the same kind of place, seen the same way). Sharing a mood or a colour is fine.
+                Return JSON {"similar": [{"shot": our shot number, "like": the letter it copies, "why": a few words}]};
+                an empty list when nothing is too close.
+                """, user.toString(), DreamTypes.Similar.class);
+        if (s == null || s.similar() == null || s.similar().isEmpty()) {
+            return null;
+        }
+        String notes = s.similar().stream().map(x -> "shot %d is too close to an existing Short (%s): make it a different scene"
+                .formatted(x.shot(), x.why())).collect(java.util.stream.Collectors.joining("; "));
+        evidence.event(id, "WRITE", "similar", null, notes, null);
+        return notes;
+    }
+
+    /** LLM costs are recorded without a Short; link this Short's calls (by purpose, since a moment) to it. */
+    private void linkLlmCosts(UUID id, String purposePrefix, java.time.Instant since) {
+        jdbc.sql("""
+                        UPDATE cost_entry SET dream_short_id = :d
+                        WHERE dream_short_id IS NULL AND video_id IS NULL AND note LIKE :p AND ts >= :since
+                        """).param("d", id).param("p", purposePrefix + "%").param("since", java.sql.Timestamp.from(since)).update();
+    }
+
+    private double llmCostsSince(UUID id, String purposePrefix, java.time.Instant since) {
+        return jdbc.sql("""
+                        SELECT COALESCE(sum(amount_inr), 0) FROM cost_entry WHERE dream_short_id = :d AND note LIKE :p AND ts >= :since
+                        """).param("d", id).param("p", purposePrefix + "%").param("since", java.sql.Timestamp.from(since))
+                .query(Double.class).single();
     }
 
     static String picturePrompt(DreamWorld w, PlannedDreamShot s, Look look) {

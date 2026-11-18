@@ -55,7 +55,7 @@ class DreamServicePersistenceTest {
         Router router = new Router(jdbc, json, budget, pricing);
         dreams = new DreamService(jdbc, json, null, new AssetStore(jdbc), pricing, budget, router, new ClipProgress(),
                 "projectv-zimage", "ZImage", "projectv-wan", "Wan", "http://127.0.0.1:8080", BigDecimal.ZERO, 3.5, "", "lyria-3.5",
-                "s3://projectv/music-beds/my track.m4a", "gemini-3.6-flash");
+                "s3://projectv/music-beds/my track.m4a", "gemini-3.6-flash", "claude:claude-sonnet-5-5");
         jdbc.sql("""
                         INSERT INTO provider (id, name, kind, capabilities_json, config_json, enabled)
                         VALUES ('local_laptop', 'Laptop', 'local', CAST('["ffmpeg"]' AS jsonb), CAST('{}' AS jsonb), true)
@@ -245,6 +245,21 @@ class DreamServicePersistenceTest {
         assertTrue(ev.events(dream).stream().anyMatch(e -> String.valueOf(e.get("data")).contains("\"ratio\": 1.88")));
         jdbc.sql("DELETE FROM gpu_timing").update();
         jdbc.sql("DELETE FROM calibration").update();
+    }
+
+    @Test
+    void theWriterFollowsThePickedAngleAndAvoidsWhatExists() {
+        jdbc.sql("""
+                        UPDATE dream_short SET scout_angle = 2, scout_json = CAST(:j AS jsonb) WHERE id = :d
+                        """).param("d", dream).param("j", """
+                {"source": "youtube", "videos": [{"url": "u", "shows": "a neon kiosk in a field at dusk"}],
+                 "brief": {"cliches": ["neon kiosk at dusk"], "gaps": ["rain at dawn"],
+                           "angles": [{"title": "One", "idea": "first", "why": "a"}, {"title": "Dawn rain", "idea": "a phone box at dawn in rain", "why": "b"}]}}
+                """).update();
+        String forWriter = dreams.scouted(dreams.dream(dream)).forWriter();
+        assertTrue(forWriter.contains("Follow this angle: Dawn rain - a phone box at dawn in rain"), forWriter);
+        assertTrue(forWriter.contains("Avoid these clichés: neon kiosk at dusk") && forWriter.contains("Do not copy"), forWriter);
+        assertTrue(dreams.scoutWanted(dream), "the Scout is on by default");
     }
 
     @Test
