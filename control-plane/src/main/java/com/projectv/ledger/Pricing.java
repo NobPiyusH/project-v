@@ -116,6 +116,11 @@ public class Pricing {
         return inr(num(map(pricing, "modal"), "monthlyCapUsd"));
     }
 
+    /** Modal's free credit each month, in US dollars. */
+    public double modalMonthlyFreeUsd() {
+        return num(map(pricing, "modal"), "monthlyFreeUsd");
+    }
+
     /** Expected H100 render seconds for one 81-frame Wan clip of this kind (draft / final). */
     public double wanSecondsPer81Frames(String kind) {
         return num(map(map(pricing, "modal"), "wanSecondsPer81Frames"), kind);

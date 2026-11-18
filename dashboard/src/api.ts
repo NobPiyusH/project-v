@@ -167,7 +167,8 @@ export const api = {
   videos: () => call<VideoSummary[]>('GET', '/videos'),
   video: (id: string) => call<VideoDetail>('GET', `/videos/${id}`),
   production: (id: string) => call<Production>('GET', `/videos/${id}/production`),
-  budget: () => call<{ geminiCapInr: number; geminiSpentInr: number; geminiRemainingInr: number; gpuCapInr: number; gpuSpentInr: number }>('GET', '/budget'),
+  budget: () => call<{ geminiCapInr: number; geminiSpentInr: number; geminiRemainingInr: number; gpuCapInr: number; gpuSpentInr: number;
+    modal?: { meteredUsd: number; creditsUsedUsd: number; billedUsd: number; freeCreditUsd: number; creditLeftUsd: number; fxInrPerUsd: number; fetchedAt: string } }>('GET', '/budget'),
   createVideo: (prompt: string, defaultMode: Mode, modes: Record<string, Mode>, reviewMinutes: number) =>
     call<{ id: string }>('POST', '/videos', { prompt, defaultMode, modes, reviewMinutes }),
   setReviewMinutes: (id: string, minutes: number) => call<void>('PUT', `/videos/${id}/review-minutes`, { minutes }),

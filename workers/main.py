@@ -22,6 +22,7 @@ from workers.activities.research import research_topic
 from workers.activities.review import review_images
 from workers.activities.sources import check_sources
 from workers.activities.voice import synthesize_narration
+from workers import modal_billing
 from workers.common import ensure_bucket
 
 # Must match com.projectv.workflow.TaskQueues.MEDIA
@@ -32,6 +33,7 @@ async def main() -> None:
     load_dotenv()  # reads .env in the repo root; values are never logged
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     ensure_bucket()
+    modal_billing.start()  # Modal credit + spend for the dashboard, every 10 min
     target = os.getenv("TEMPORAL_TARGET", "localhost:7233")
     namespace = os.getenv("TEMPORAL_NAMESPACE", "default")
     client = await Client.connect(target, namespace=namespace)

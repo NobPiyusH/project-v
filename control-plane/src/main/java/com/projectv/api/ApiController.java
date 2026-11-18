@@ -309,9 +309,29 @@ public class ApiController {
 
     @GetMapping("/budget")
     public Map<String, Object> budget() {
-        return Map.of("geminiCapInr", pricing.geminiMonthlyCapInr(), "geminiSpentInr", budget.geminiSpentThisMonth(),
-                "geminiRemainingInr", budget.geminiRemaining(), "gpuCapInr", pricing.gpuMonthlyCapInr(),
-                "gpuSpentInr", budget.gpuSpentThisMonth());
+        Map<String, Object> out = new java.util.LinkedHashMap<>(Map.of("geminiCapInr", pricing.geminiMonthlyCapInr(),
+                "geminiSpentInr", budget.geminiSpentThisMonth(), "geminiRemainingInr", budget.geminiRemaining(),
+                "gpuCapInr", pricing.gpuMonthlyCapInr(), "gpuSpentInr", budget.gpuSpentThisMonth()));
+        Map<String, Object> modal = modalBilling.get();
+        if (modal != null) { // Modal's own numbers, refreshed by the media worker every 10 min
+            Map<String, Object> m = new java.util.LinkedHashMap<>(modal);
+            double free = pricing.modalMonthlyFreeUsd();
+            double used = modal.get("creditsUsedUsd") instanceof Number n ? n.doubleValue() : 0;
+            m.put("freeCreditUsd", free);
+            m.put("creditLeftUsd", Math.max(0, free - used));
+            m.put("fxInrPerUsd", pricing.fx());
+            out.put("modal", m);
+        }
+        return out;
+    }
+
+    private final java.util.concurrent.atomic.AtomicReference<Map<String, Object>> modalBilling =
+            new java.util.concurrent.atomic.AtomicReference<>();
+
+    // Called by the local media worker: Modal's billing summary for this month (metered, credits used, billed).
+    @PostMapping("/internal/modal-billing")
+    public void reportModalBilling(@RequestBody Map<String, Object> body) {
+        modalBilling.set(body);
     }
 
     @GetMapping("/stages")
