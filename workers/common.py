@@ -60,6 +60,15 @@ def put_bytes(key: str, data: bytes, content_type: str) -> str:
     return f"s3://{BUCKET}/{key}"
 
 
+def exists(key: str) -> bool:
+    """True when the object is already in storage (used to resume a batch without redoing finished clips)."""
+    try:
+        s3().head_object(Bucket=BUCKET, Key=key)
+        return True
+    except Exception:  # noqa: BLE001 - missing (404) or unreachable: treat as not there, so it is redone
+        return False
+
+
 def put_file(key: str, path: Path, content_type: str) -> str:
     s3().upload_file(str(path), BUCKET, key, ExtraArgs={"ContentType": content_type})
     return f"s3://{BUCKET}/{key}"

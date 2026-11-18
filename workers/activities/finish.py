@@ -9,8 +9,11 @@ clips (upscale) (CLAUDE.md rule 8).
 
 from __future__ import annotations
 
+import contextvars
+import json
 import os
 import queue
+import subprocess
 import threading
 import uuid
 from pathlib import Path
@@ -20,7 +23,9 @@ import modal
 from temporalio import activity
 
 from workers.activities.clips import POLL_SECONDS, _post, _stop_requested
-from workers.common import get_bytes, log, put_bytes, put_file, workdir
+from workers.common import BUCKET, exists, ffprobe_bin, get_bytes, log, put_bytes, put_file, workdir
+
+HEARTBEAT_SECONDS = 15
 
 
 def _beat(detail) -> None:
@@ -28,6 +33,67 @@ def _beat(detail) -> None:
         activity.heartbeat(detail)
     except RuntimeError:
         pass
+
+
+class _Heartbeat:
+    """Heartbeats from its OWN thread every 15 s (18 Nov 2026 fix): the progress loop makes network calls that can
+    stall on a slow or dropped connection, and a late heartbeat made Temporal kill a healthy upscale twice. The
+    thread runs in a copy of the activity's context, so activity.heartbeat works there."""
+
+    def __init__(self):
+        self.detail: dict = {}
+        self._stop = threading.Event()
+        ctx = contextvars.copy_context()
+        self._thread = threading.Thread(target=lambda: ctx.run(self._loop), daemon=True, name="heartbeat")
+
+    def _loop(self):
+        while not self._stop.wait(HEARTBEAT_SECONDS):
+            _beat(self.detail)
+
+    def __enter__(self):
+        _beat(self.detail)
+        self._thread.start()
+        return self
+
+    def __exit__(self, *exc):
+        self._stop.set()
+
+
+def _out_key(video_id: str, folder: str, j: dict) -> str:
+    return f"videos/{video_id}/clips/{folder}/shot{j['shotNumber']:03d}-{j['sourceAssetId'][:8]}.mp4"
+
+
+def _probe(key: str) -> tuple[int, float]:
+    """(frames, fps) of a stored clip, for clips reused on a retry."""
+    with workdir("probe") as tmp:
+        path = Path(tmp) / "clip.mp4"
+        path.write_bytes(get_bytes(f"s3://{BUCKET}/{key}"))
+        out = subprocess.run([ffprobe_bin(), "-v", "error", "-select_streams", "v:0", "-show_entries",
+                              "stream=r_frame_rate:format=duration", "-of", "json", str(path)],
+                             capture_output=True, text=True, check=True).stdout
+    d = json.loads(out)
+    num, den = (d["streams"][0]["r_frame_rate"].split("/") + ["1"])[:2]
+    fps = float(num) / float(den or 1)
+    return round(float(d["format"]["duration"]) * fps), fps
+
+
+def _already_done(video_id: str, folder: str, jobs: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Resume (18 Nov 2026 fix): clips this batch already saved on an earlier attempt are reused, not re-rendered,
+    so a crash or retry loses at most the clip in progress. Returns (reused results, jobs still to do)."""
+    reused, todo = [], []
+    for j in jobs:
+        key = _out_key(video_id, folder, j)
+        if exists(key):
+            try:
+                frames, fps = _probe(key)
+                reused.append({"shotId": j["shotId"], "sourceAssetId": j["sourceAssetId"], "uri": f"s3://{BUCKET}/{key}",
+                               "gpuSeconds": 0, "frames": frames, "fps": fps, "error": None})
+                log.info("%s shot %s: reusing the clip saved on an earlier attempt", folder, j["shotNumber"])
+                continue
+            except Exception as e:  # noqa: BLE001 - unreadable leftover: redo it
+                log.warning("could not reuse %s (%s); redoing it", key, e)
+        todo.append(j)
+    return reused, todo
 
 
 def _stream(req: dict, kind: str, folder: str, payload: Callable[[dict], dict],
@@ -39,6 +105,19 @@ def _stream(req: dict, kind: str, folder: str, payload: Callable[[dict], dict],
     jobs = req["jobs"]
     if not jobs:
         return {"clips": [], "containers": 0, "stopped": False}
+    reused, jobs = _already_done(video_id, folder, jobs)
+    if not jobs:
+        _post(f"{base}/api/internal/clips/progress", {"videoId": video_id, "clips": [], "finished": True})
+        return {"clips": reused, "containers": 0, "stopped": False}
+    with _Heartbeat() as hb:
+        result = _stream_jobs(req, kind, folder, payload, start, jobs, hb)
+    result["clips"] = reused + result["clips"]
+    return result
+
+
+def _stream_jobs(req: dict, kind: str, folder: str, payload, start, jobs: list[dict], hb: "_Heartbeat") -> dict:
+    video_id = req["videoId"]
+    base = (req.get("progressUrl") or "http://127.0.0.1:8080").rstrip("/")
     progress = modal.Dict.from_name("projectv-progress", create_if_missing=True)
     stop_key = f"stop-{kind}-{video_id[:8]}-{uuid.uuid4().hex[:8]}"
     payloads, by_key = [], {}
@@ -71,8 +150,7 @@ def _stream(req: dict, kind: str, folder: str, payload: Callable[[dict], dict],
                     done.add(r["id"])
                     uri = None
                     if r.get("mp4"):
-                        uri = put_bytes(f"videos/{video_id}/clips/{folder}/shot{j['shotNumber']:03d}-"
-                                        f"{j['sourceAssetId'][:8]}.mp4", r["mp4"], "video/mp4")
+                        uri = put_bytes(_out_key(video_id, folder, j), r["mp4"], "video/mp4")
                     clips.append({"shotId": j["shotId"], "sourceAssetId": j["sourceAssetId"], "uri": uri,
                                   "gpuSeconds": float(r.get("seconds") or 0), "frames": int(r.get("frames") or 0),
                                   "fps": float(r.get("fps") or 0), "error": r.get("error")})
@@ -83,13 +161,16 @@ def _stream(req: dict, kind: str, folder: str, payload: Callable[[dict], dict],
                 continue
             if what == "end":
                 break
+            hb.detail = {"done": len(done), "total": len(jobs)}
             if not stopped and _stop_requested(base, video_id):
                 stopped = True
                 progress[stop_key] = True
-            _post(f"{base}/api/internal/clips/progress", {"videoId": video_id, "clips": [
-                {"shotId": j["shotId"], "shotNumber": j["shotNumber"], "kind": kind,
-                 **(progress.get(k) or {"state": "queued"})} for k, j in by_key.items() if k not in done]})
-            _beat({"done": len(done), "total": len(jobs)})
+            try:  # progress is best effort: a slow or dropped connection must never fail the batch
+                _post(f"{base}/api/internal/clips/progress", {"videoId": video_id, "clips": [
+                    {"shotId": j["shotId"], "shotNumber": j["shotNumber"], "kind": kind,
+                     **(progress.get(k) or {"state": "queued"})} for k, j in by_key.items() if k not in done]})
+            except Exception as e:  # noqa: BLE001
+                log.debug("progress snapshot skipped: %s", e)
     except BaseException:
         progress[stop_key] = True
         raise
