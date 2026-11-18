@@ -24,6 +24,7 @@ public class AssetStore {
     public static final UUID LICENCE_KOKORO = UUID.fromString("00000000-0000-0000-0000-00000000a009");
     public static final UUID LICENCE_COMMONS = UUID.fromString("00000000-0000-0000-0000-00000000a010");
     public static final UUID LICENCE_CHATTERBOX = UUID.fromString("00000000-0000-0000-0000-00000000a011");
+    public static final UUID LICENCE_ACESTEP = UUID.fromString("00000000-0000-0000-0000-00000000a013");
 
     public record NewAsset(UUID videoId, String kind, String uri, String mimeType, Integer width, Integer height,
                            Double durationSec, String provider, String model, String prompt, Long seed, UUID licenceId,

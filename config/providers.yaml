@@ -45,6 +45,26 @@ providers:
     secret_ref: GEMINI_API_KEY
     enabled: true
 
+  # Music (19 Nov 2026): Lyria is the default. ACE-Step 1.5 (MIT, github.com/ace-step/ACE-Step-1.5) is an A/B candidate:
+  # OFF until the owner's listening test says it matches Lyria (quality first). To try it: enabled: true here AND
+  # MUSIC_PROVIDER=acestep in .env. quality 6 = unproven, so the router only picks it when preferred.
+  - id: gemini_lyria
+    name: Lyria (Gemini API, music)
+    kind: api
+    capabilities: [music.score]
+    quality: 8
+    budget: gemini
+    secret_ref: GEMINI_API_KEY
+    enabled: true
+
+  - id: modal_acestep
+    name: ACE-Step 1.5 turbo + 1.7B planner (Modal L4, music)
+    kind: gpu_serverless
+    capabilities: [music.score]
+    quality: 6
+    budget: gpu
+    enabled: false
+
   - id: modal_a100
     name: Modal (serverless A100)
     kind: gpu_serverless
@@ -127,6 +147,7 @@ pricing:
       video.i2v.final: { minQuality: 7, enoughQuality: 10 }
       image.keyframe.hero: { minQuality: 7, enoughQuality: 10 }      # opening, reveals, climax, ending
       image.keyframe.standard: { minQuality: 5, enoughQuality: 6 }   # the rest: good enough is enough
+      music.score: { minQuality: 7, enoughQuality: 10 }
   gemini:
     monthlyCapInr: 1000         # owner's cap; the app stops paid Gemini calls at this amount (Google budgets only alert)
     reserveInr: 20              # keep this much back for voice/music when deciding hero images
@@ -151,6 +172,8 @@ pricing:
     monthlyFreeUsd: 30
     gpuPerSecondUsd: { L40S: 0.000542, H100: 0.001097, L4: 0.000222 }             # ~$1.95/h, ~$3.95/h (verify on modal.com/pricing)
     monthlyCapUsd: 30            # hard stop for GPU work (default: the free credit only); raise to allow paid GPU
+    acestepStartSeconds: 120     # ACE-Step container start + model load on the L4, router estimate (verify on the ledger)
+    acestepSecondsPerTake: 20    # one 60 s take, turbo 8 steps + 1.7B planner, router estimate (verify on the ledger)
     zimageSecondsPerImage: 6     # L40S render time per keyframe, router estimate only (verify on the ledger)
     containerStartSeconds: 140   # Wan container start + model load, billed once per container (measured 16 Nov)
     wanSecondsPer81Frames: { draft: 30, final: 480 }   # H100 render time per 5 s clip: fast@480p (measured 17 Nov: ~12 s for 33 frames), hybrid@720p (measured 483)

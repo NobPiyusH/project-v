@@ -78,11 +78,34 @@ public final class MediaTypes {
     }
 
     // ---- music
-    public record MusicRequest(String videoId, String model, String prompt, double targetSec, int maxSegments) {
+    /**
+     * @param provider    the router's choice: gemini_lyria (default) or modal_acestep (off unless the owner switches it on)
+     * @param takes       ACE-Step only: takes to generate; the worker keeps the one whose loudness curve best follows
+     *                    {@code energyCurve} and does not clip
+     * @param energyCurve ACE-Step only: the shot energy plan, one value 0..1 per second of the video (empty = no shots yet)
+     */
+    public record MusicRequest(String videoId, String model, String prompt, double targetSec, int maxSegments,
+                               String provider, int takes, List<Double> energyCurve) {
+        public MusicRequest(String videoId, String model, String prompt, double targetSec, int maxSegments) {
+            this(videoId, model, prompt, targetSec, maxSegments, "gemini_lyria", 1, List.of());
+        }
     }
 
+    /** One ACE-Step take: its seed, stored file, energy match (Pearson r, -1..1), peak and whether it clipped. */
+    public record MusicTake(long seed, String uri, double energyMatch, double peakDbfs, boolean clipped, boolean chosen) {
+    }
+
+    /**
+     * @param provider   who made it (null = Lyria, from workers that predate the field)
+     * @param gpuSeconds ACE-Step: wall time of the Modal call (container start + load + takes), what Modal bills
+     */
     public record MusicResult(String uri, double durationSec, double bpm, List<Double> beatTimes,
-                              List<Double> downbeatTimes, int segments, String model, List<Usage> usage) {
+                              List<Double> downbeatTimes, int segments, String model, List<Usage> usage,
+                              String provider, Long seed, double gpuSeconds, List<MusicTake> takes) {
+        public MusicResult(String uri, double durationSec, double bpm, List<Double> beatTimes,
+                           List<Double> downbeatTimes, int segments, String model, List<Usage> usage) {
+            this(uri, durationSec, bpm, beatTimes, downbeatTimes, segments, model, usage, null, null, 0, List.of());
+        }
     }
 
     // ---- keyframes

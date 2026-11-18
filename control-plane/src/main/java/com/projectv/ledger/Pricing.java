@@ -90,6 +90,12 @@ public class Pricing {
         return inr(num(map(modal, "gpuPerSecondUsd"), gpu) * seconds);
     }
 
+    /** Router estimate for ACE-Step music on the Modal L4: one container start + load, then the takes. */
+    public BigDecimal acestepInr(int takes) {
+        Map<String, Object> modal = map(pricing, "modal");
+        return modalGpuInr("L4", num(modal, "acestepStartSeconds") + num(modal, "acestepSecondsPerTake") * takes);
+    }
+
     /** AI Producer: what it may approve per video (Short or long-form). */
     public BigDecimal producerBudgetInr(boolean shortVideo) {
         return BigDecimal.valueOf(num(map(pricing, "producer"), shortVideo ? "budgetPerShortInr" : "budgetPerLongInr"));
