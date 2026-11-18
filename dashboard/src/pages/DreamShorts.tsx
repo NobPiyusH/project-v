@@ -58,7 +58,7 @@ function DreamHome() {
         {formError && <p className="error small">{formError}</p>}
         <div className="row" style={{ marginTop: 10 }}>
           <label className="small">Look <select value={look} onChange={(e) => setLook(e.target.value)}>
-            <option value="lonely">Lonely object</option><option value="walkthrough">Walk-through</option><option value="dreamcore">Dreamcore (soft pastel)</option><option value="impossible">Impossible place</option></select></label>
+            <option value="lonely">Lonely object</option><option value="drive">Drive-by</option><option value="walkthrough">Walk-through</option><option value="dreamcore">Dreamcore (soft pastel)</option><option value="impossible">Impossible place</option></select></label>
           <label className="small">Shots <select value={shots} onChange={(e) => setShots(Number(e.target.value))}>
             {[3, 4, 5, 6].map((n) => <option key={n} value={n}>{n}</option>)}</select></label>
           <label className="small">Music <select value={music} onChange={(e) => setMusic(e.target.value as 'bed' | 'lyria')}>

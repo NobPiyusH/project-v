@@ -207,6 +207,9 @@ class DreamServicePersistenceTest {
         assertEquals(4 * 81 / 16.0 - 3 * 0.35 + 1, dreams.shortSeconds(4, walk), 0.01);
         assertTrue(lonely.structure().formatted(5).contains("DIFFERENT place"));
         assertEquals(lonely, DreamService.look("nope"), "unknown looks fall back to the default");
+        var drive = DreamService.look("drive");
+        assertEquals(0, drive.dissolveSec());
+        assertTrue(drive.pictureStyle().contains("not a 3D render") && lonely.pictureStyle().contains("not a 3D render"));
     }
 
     @Test

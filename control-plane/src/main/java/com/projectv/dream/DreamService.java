@@ -73,7 +73,20 @@ public class DreamService {
             + "continuous camera move.";
 
     /** Order shown on the new-Short form; the first is the default. */
-    static final List<String> LOOK_ORDER = List.of("lonely", "walkthrough", "dreamcore", "impossible");
+    static final List<String> LOOK_ORDER = List.of("lonely", "drive", "walkthrough", "dreamcore", "impossible");
+
+    /**
+     * The owner's rule for every Dream Short (19 Nov 2026): it may look different each time, but it must feel good or
+     * nostalgic, have the best possible picture, and look real, never obviously AI.
+     */
+    static final String FEEL = "Feeling: warm, nostalgic, feel-good, calm wonder; beautiful and a little strange, never "
+            + "scary, sad or gloomy. It must look REAL, like footage a person actually filmed: believable places, true-to-life "
+            + "scale and light, small real-world imperfections; never like a 3D render, a game or an obvious AI image.";
+
+    /** Ends every picture prompt of the realistic looks: what makes a still read as a real photo, not an AI image. */
+    static final String REAL_PHOTO = "real photograph, natural light falloff, real-world wear and small imperfections "
+            + "(dust, scuffs, uneven grass, puddles), true-to-life scale, natural colours that are vivid but not over-processed HDR, "
+            + "not a 3D render, not plastic, not airbrushed, not perfectly symmetrical";
 
     static final Map<String, Look> LOOKS = Map.of(
             // Owner's examples (18 Nov 2026): one ordinary object alone and glowing in a vast empty place, a different
@@ -82,12 +95,14 @@ public class DreamService {
                     "Lonely object (parallel-world core): each shot is ONE ordinary man-made object or small building "
                             + "(vending machine, phone booth, neon kiosk, gas station, traffic light, bus stop, arcade cabinet, "
                             + "empty classroom, pool hallway) standing alone in a vast empty real place (flower field, cornfield, "
-                            + "open road, prairie, beach), at golden hour, sunset or blue hour, glowing (neon, warm windows, "
-                            + "fluorescent light) with wet shiny reflections. Nostalgic, calm, lonely, beautiful. "
+                            + "open road, prairie, beach, a sea of clouds), at golden hour, sunset, blue hour or night, glowing "
+                            + "(neon, warm windows, a street lamp, fluorescent light) with wet shiny reflections. Nostalgic, "
+                            + "calm, lonely, beautiful. "
                             + "No people, no animals, no readable words except at most one short sign.",
                     "photograph, shot on a full-frame camera with a wide lens, photorealistic, tack sharp, vivid saturated "
-                            + "colours, golden hour or blue hour sky with glowing clouds, neon glow, wet reflections, high detail, "
-                            + "cinematic, vertical composition with the object in the lower middle, no people, no text",
+                            + "colours, golden hour, blue hour or night sky with glowing clouds, neon or warm lamp glow, wet "
+                            + "reflections, high detail, cinematic, vertical composition with the object in the lower middle, "
+                            + "no people, no text, " + REAL_PHOTO,
                     "very slow smooth push-in toward the object, the camera barely moving; clouds drift, neon and lights "
                             + "flicker softly, grass and flowers sway in a light breeze; no cuts, no people, the object stays still",
                     "Invent %d shots, each a DIFFERENT place and a DIFFERENT object, joined by one feeling (not one connected "
@@ -103,12 +118,29 @@ public class DreamService {
                             + "strange but calm. No people, no text.",
                     "phone camera photo, first-person point of view at eye level, wide lens, photorealistic, sharp, bright "
                             + "fluorescent and daylight, pastel pink mint and sky-blue colours, glossy wet tiled floors with "
-                            + "reflections, liminal space, no people, no text",
+                            + "reflections, liminal space, no people, no text, " + REAL_PHOTO,
                     "steady first-person walk forward through the space at walking pace, slight handheld sway, water and "
                             + "light moving; continuous, no cuts, no people",
                     "Invent %d rooms or corridors walked through one after another, each a different ordinary place with "
                             + "its own impossible thing; the walk keeps going forward from shot to shot.",
                     5.0, 0.35),
+            // Owner's examples (19 Nov 2026): dashcam on a highway that curves up into space; side window passing a
+            // lonely house on a snowy field at blue hour. Real road details make the impossible sight believable.
+            "drive", new Look(
+                    "Drive-by: filmed from inside a car, either through the windscreen (dashcam) or out of the side window "
+                            + "(the side mirror or window frame in view), on an ordinary road where ONE impossible, beautiful "
+                            + "sight goes by (the highway curving up off the Earth into space, a lonely lit house on a frozen sea "
+                            + "at sunset, a lighthouse standing on a cloud). Real road details (lane markings, guard rails, "
+                            + "roadside poles, a few ordinary cars) make it believable. No readable words.",
+                    "photo taken from inside a car, dashcam view through the windscreen or side-window view with the side "
+                            + "mirror and window frame in frame, phone or dashcam lens, photorealistic, sharp, natural daylight "
+                            + "or golden or blue hour, vivid sky, no people visible, no text, " + REAL_PHOTO,
+                    "the car drives steadily forward along the road (dashcam), or the landscape glides past the side window "
+                            + "with natural parallax; lane markings and roadside poles move by, other cars keep driving; smooth, "
+                            + "continuous, no cuts",
+                    "Invent %d shots, each a different drive with its own impossible sight; the camera is inside a car in "
+                            + "every shot (mix windscreen and side-window views).",
+                    5.0, 0),
             "dreamcore", new Look(
                     "Dreamcore / liminal fever dream: one soft pastel world (pink, mint, cream, sky blue), surreal oversized "
                             + "or out-of-place objects, water, tiles, clouds, empty calm places, nostalgic and slightly eerie. "
@@ -201,12 +233,13 @@ public class DreamService {
         String system = """
                 You are the writer of a short, wordless, music-led vertical video (YouTube Shorts / Reels) for a channel
                 about dreams and impossible places. %s Every shot must be a fresh, specific image (not generic).
+                %s
                 Look: %s
                 Return JSON: {"title": short title, "world": one paragraph describing the shared feeling and world (materials,
                 objects, scale, mood), "palette": the exact colour palette, "light": the light and atmosphere,
                 "shots": [{"scene": what this shot shows (one or two sentences, concrete), "motion": the camera move and
                 the small motion inside the scene}]} with exactly %d shots.
-                """.formatted(look.structure().formatted(count), look.brief(), count);
+                """.formatted(look.structure().formatted(count), FEEL, look.brief(), count);
         String user = "Idea: " + d.get("idea") + (notes == null || notes.isBlank() ? "" : "\nOwner's notes for this rewrite: " + notes);
         DreamWorld w = llm.call(null, "dream.write", system, user, DreamWorld.class);
         if (w == null || w.shots() == null || w.shots().isEmpty()) {

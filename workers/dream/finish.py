@@ -28,8 +28,10 @@ LOOKS = {
     "impossible": ("eq=saturation=1.04:contrast=1.03,"
                    "noise=alls=4:allf=t,vignette=angle=PI/5"),
     # The owner's examples (18 Nov 2026) are clean: no haze, no grain, no vignette; vivid colour, crisp detail.
-    "lonely": "eq=saturation=1.12:contrast=1.04,unsharp=5:5:0.5:5:5:0",
-    "walkthrough": "eq=saturation=1.08:contrast=1.03:brightness=0.01,unsharp=5:5:0.4:5:5:0",
+    # A whisper of moving grain (alls=2) breaks up the too-smooth "AI" surface without looking like a filter.
+    "lonely": "eq=saturation=1.12:contrast=1.04,unsharp=5:5:0.5:5:5:0,noise=alls=2:allf=t",
+    "drive": "eq=saturation=1.1:contrast=1.04,unsharp=5:5:0.5:5:5:0,noise=alls=2:allf=t",
+    "walkthrough": "eq=saturation=1.08:contrast=1.03:brightness=0.01,unsharp=5:5:0.4:5:5:0,noise=alls=2:allf=t",
 }
 
 
@@ -52,7 +54,8 @@ def dissolve_graph(durations: list[float], dissolve: float, width: int, height: 
     n = len(durations)
     if n == 0:
         raise ValueError("no clips")
-    parts = [f"[{i}:v]scale={width}:{height}:force_original_aspect_ratio=increase:flags=lanczos,"
+    parts = [f"[{i}:v]trim=duration={durations[i]:.3f},setpts=PTS-STARTPTS,"
+             f"scale={width}:{height}:force_original_aspect_ratio=increase:flags=lanczos,"
              f"crop={width}:{height},fps={fps},format=yuv420p,setsar=1[c{i}]" for i in range(n)]
     if dissolve <= 0:  # hard cuts
         parts.append("".join(f"[c{i}]" for i in range(n)) + f"concat=n={n}:v=1:a=0[x]")
@@ -69,6 +72,40 @@ def dissolve_graph(durations: list[float], dissolve: float, width: int, height: 
         last = out
     parts.append(f"[{last}]{look_filter(look)},format=yuv420p[v]")
     return ";".join(parts)
+
+
+def _dissolve_at(durations: list[float], dissolve: float, i: int) -> float:
+    return round(max(0.1, min(dissolve, durations[i - 1] / 3, durations[i] / 3)), 3) if dissolve > 0 else 0.0
+
+
+def beat_synced(durations: list[float], dissolve: float, beats: list[float], max_trim: float = 1.0) -> list[float]:
+    """Shorten clips (never lengthen) so every cut, or the middle of every dissolve, lands on a beat of the music.
+
+    Each clip may lose at most `max_trim` seconds (and never more than a third of itself); a cut with no beat that
+    close keeps its natural place. The last clip is untouched (the music fades out over it)."""
+    out = list(durations)
+    base = 0.0  # where the current clip starts on the timeline
+    for i in range(len(out) - 1):
+        d = _dissolve_at(durations, dissolve, i + 1)
+        natural = base + out[i] - d / 2  # cut point (or dissolve middle) with the clip at full length
+        trim = min(max_trim, out[i] / 3)
+        hits = [b for b in beats if natural - trim <= b <= natural + 1e-6]
+        if hits:
+            out[i] = round(out[i] - (natural - max(hits)), 3)
+        base += out[i] - d
+    return out
+
+
+def track_beats(path: Path, seconds: float) -> list[float]:
+    """Beat times (s) of the first `seconds` of a music file; [] if it has no clear beat."""
+    try:
+        import librosa
+        y, sr = librosa.load(str(path), sr=22050, mono=True, duration=seconds)
+        _, beats = librosa.beat.beat_track(y=y, sr=sr, units="time")
+        return [round(float(t), 3) for t in beats]
+    except Exception as e:  # noqa: BLE001 - no beat sync, the Short still finishes
+        log.warning("No beats found in %s (%s); cuts keep their natural places", path.name, e)
+        return []
 
 
 def total_duration(durations: list[float], dissolve: float) -> float:
@@ -112,10 +149,15 @@ def _smooth(src: Path, dst: Path, src_fps: float, dst_fps: int) -> str:
     return "ffmpeg"
 
 
+def dissolve_of(req: dict) -> float:
+    """The request's dissolve length; 0 means hard cuts (not "unset")."""
+    return 0.5 if req.get("dissolveSec") is None else float(req["dissolveSec"])
+
+
 def finish(req: dict, tmp: Path) -> dict:
     dream_id = req["dreamId"]
     width, height, fps = int(req.get("width") or 1080), int(req.get("height") or 1920), int(req.get("fps") or 24)
-    dissolve = float(req.get("dissolveSec") or 0.5)
+    dissolve = dissolve_of(req)
     smoothed: list[Path] = []
     how: set[str] = set()
     for n, clip in enumerate(req["clips"]):
@@ -125,8 +167,6 @@ def finish(req: dict, tmp: Path) -> dict:
         smoothed.append(dst)
         _beat({"smoothed": n + 1, "total": len(req["clips"])})
     durations = [media_duration(p) for p in smoothed]
-    length = total_duration(durations, dissolve)
-    graph = dissolve_graph(durations, dissolve, width, height, fps, req.get("look"))
     track, music_name = None, None
     if req.get("musicUri"):  # the Short's own music: a piece of the owner's track, or a Lyria score
         track = tmp / "score.wav"
@@ -135,13 +175,20 @@ def finish(req: dict, tmp: Path) -> dict:
     else:
         track = pick_track(req.get("musicDir"), dream_id)
         music_name = track.name if track else None
+    synced = 0
+    if track:  # cut on the music: every cut (or dissolve middle) moved onto a beat
+        new = beat_synced(durations, dissolve, track_beats(track, total_duration(durations, dissolve) + 2))
+        synced = sum(1 for a, b in zip(durations, new) if a != b)
+        durations = new
+    length = total_duration(durations, dissolve)
+    graph = dissolve_graph(durations, dissolve, width, height, fps, req.get("look"))
     args: list[str] = []
     for p in smoothed:
         args += ["-i", str(p)]
     if track:
         args += ["-stream_loop", "-1", "-i", str(track)]
         fade_out = max(0.0, length - 1.5)
-        graph += (f";[{len(smoothed)}:a]atrim=0:{length:.3f},afade=t=in:d=1,afade=t=out:st={fade_out:.3f}:d=1.5,"
+        graph += (f";[{len(smoothed)}:a]atrim=0:{length:.3f},afade=t=in:d=0.3,afade=t=out:st={fade_out:.3f}:d=1.5,"
                   "loudnorm=I=-14:TP=-1.5:LRA=11,aresample=48000[a]")
     else:  # silent track: platforms and editors expect audio
         args += ["-f", "lavfi", "-t", f"{length:.3f}", "-i", "anullsrc=r=48000:cl=stereo"]
@@ -152,7 +199,8 @@ def finish(req: dict, tmp: Path) -> dict:
                 "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", str(out)])
     uri = put_file(f"videos/{dream_id}/dream-short.mp4", out, "video/mp4")
     smoothing = "rife-laptop" if how == {"rife-laptop"} else "ffmpeg" if "ffmpeg" in how else sorted(how)[0]
-    log.info("Dream Short %s finished: %.1f s (%s, music: %s)", dream_id, length, smoothing, music_name)
+    log.info("Dream Short %s finished: %.1f s (%s, music: %s, %d cuts on the beat)", dream_id, length, smoothing,
+             music_name, synced)
     return {"uri": uri, "durationSec": round(media_duration(out), 3), "width": width, "height": height, "fps": fps,
             "smoothing": smoothing, "music": music_name, "error": None}
 

@@ -39,3 +39,10 @@ def test_cut_makes_a_faded_stereo_piece(tmp_path: Path):
     assert "channels=2" in probe and "sample_rate=48000" in probe
     assert abs(float(probe.split("duration=")[1].split()[0]) - 8.0) < 0.1
     assert mean_volume(bed, 12.0, 8.0) > -35
+
+
+def test_the_strongest_beat_near_the_start_wins():
+    from workers.dream.music_bed import strongest_beat
+    beats, strength = [0.2, 0.7, 1.2, 1.7, 2.2], [1.0, 3.0, 1.0, 3.0, 9.0]
+    assert strongest_beat(beats, strength, 0, 2.0, 1.5) == 1.7  # 2.2 is outside; 0.7 and 1.7 tie, 1.7 is nearer
+    assert strongest_beat(beats, strength, 3, 4, 3.5) is None

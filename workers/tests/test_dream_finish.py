@@ -79,7 +79,29 @@ def test_hard_cuts_join_without_dissolves():
     assert dream.total_duration([3.5, 3.5, 3.5], 0) == 10.5
 
 
-def test_clean_looks_have_no_haze_or_grain():
-    for look in ("lonely", "walkthrough"):
+def test_realistic_looks_have_no_haze_or_vignette_and_only_a_whisper_of_grain():
+    for look in ("lonely", "drive", "walkthrough"):
         f = dream.look_filter(look)
-        assert "noise" not in f and "gblur" not in f and "vignette" not in f
+        assert "gblur" not in f and "vignette" not in f and "alls=2" in f
+
+
+def test_cuts_move_onto_beats_but_never_grow_a_clip():
+    beats = [0.5 * k for k in range(40)]  # 120 BPM
+    out = dream.beat_synced([3.56, 3.56, 3.56], 0, beats)
+    assert out[0] == 3.5 and out[1] == 3.5 and out[2] == 3.56  # cuts at 3.5 and 7.0; the last clip untouched
+    assert all(a <= b for a, b in zip(out, [3.56] * 3))
+
+
+def test_a_dissolve_is_centred_on_the_beat():
+    beats = [0.5 * k for k in range(40)]
+    out = dream.beat_synced([5.06, 5.06], 0.35, beats)
+    assert out[0] - 0.35 / 2 == pytest.approx(4.5)  # the dissolve's middle sits on the 4.5 s beat
+
+
+def test_no_beat_close_by_keeps_the_natural_cut():
+    assert dream.beat_synced([3.56, 3.56], 0, [10.0]) == [3.56, 3.56]
+
+
+def test_hard_cuts_are_kept_when_the_request_says_zero():
+    assert dream.dissolve_of({"dissolveSec": 0}) == 0
+    assert dream.dissolve_of({}) == 0.5
