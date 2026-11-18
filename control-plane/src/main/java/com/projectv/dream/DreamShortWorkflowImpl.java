@@ -107,7 +107,7 @@ public class DreamShortWorkflowImpl implements DreamShortWorkflow {
             if (cancelled) {
                 return false;
             }
-            show(step, "RUNNING", null);
+            show(step, "RUNNING", working(step));
             String summary;
             try {
                 summary = execute(step, only, notes);
@@ -154,13 +154,23 @@ public class DreamShortWorkflowImpl implements DreamShortWorkflow {
                     if (cancelled) {
                         yield null;
                     }
-                    show(step, "RUNNING", null);
+                    show(step, "RUNNING", working(step));
                 }
                 activities.startClipBatch(dreamId);
                 var req = activities.clipRequest(dreamId, only);
                 yield activities.saveClips(dreamId, req, clips.generateClips(req));
             }
             case FINISH -> activities.saveFinish(dreamId, finish.dreamFinish(activities.finishRequest(dreamId)));
+        };
+    }
+
+    /** What the dashboard says while a step runs (so an old "approve" message never lingers). */
+    static String working(DreamStep step) {
+        return switch (step) {
+            case WRITE -> "Writing the world and the shots…";
+            case PICTURES -> "Making the pictures…";
+            case CLIPS -> "Making the clips on the GPU…";
+            case FINISH -> "Finishing on the laptop: smoothing, dissolves, look, music…";
         };
     }
 
