@@ -22,7 +22,8 @@ public final class AgentTypes {
      *
      * @param spoken false for purely visual beats (no voice)
      */
-    public record ScriptLine(String text, String act, String purpose, boolean spoken) {
+    /** @param delivery how to read this line, a few words ("hushed, slow", "rising excitement"); optional */
+    public record ScriptLine(String text, String act, String purpose, boolean spoken, String delivery) {
     }
 
     /**

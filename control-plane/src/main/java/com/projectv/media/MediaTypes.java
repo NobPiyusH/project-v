@@ -35,7 +35,11 @@ public final class MediaTypes {
     }
 
     // ---- narration
-    public record NarrationLine(int index, String text) {
+    /** @param delivery how to read this line (optional): passed to the TTS director's notes */
+    public record NarrationLine(int index, String text, String delivery) {
+        public NarrationLine(int index, String text) {
+            this(index, text, null);
+        }
     }
 
     /** @param voiceProvider auto (ElevenLabs when its credit covers the whole video, else Gemini), elevenlabs or gemini */

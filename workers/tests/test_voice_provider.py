@@ -67,3 +67,21 @@ def test_when_gemini_tts_fails_kokoro_voices_the_whole_video(monkeypatch):
     monkeypatch.setattr(V.activity, "heartbeat", lambda *a: None)
     out = V.synthesize_narration({"videoId": "v", "model": "tts", "language": "en", "lines": LINES})
     assert out["model"] == "kokoro:bm_george" and calls == [3]
+
+
+def test_line_delivery_goes_into_the_directors_notes_not_the_transcript(monkeypatch):
+    """Owner, 18 Nov 2026: the voice follows the story line by line (per-line delivery from the writer)."""
+    from workers.activities import voice as V
+    seen = []
+
+    def fake_tts(req, prompt):
+        seen.append(prompt)
+        return b"RIFF", {}
+    monkeypatch.setattr(V, "_tts", fake_tts)
+    monkeypatch.setattr(V, "_transcribe", lambda req, wav: ("Protect the dark.", None))
+    monkeypatch.setattr(V, "put_bytes", lambda *a: "s3://b/x.wav")
+    monkeypatch.setattr(V, "_wav_seconds", lambda wav: 2.0)
+    V._speak({"videoId": "v", "style": "in a warm voice"}, {"index": 0, "text": "Protect the dark.", "delivery": "slow, tender"})
+    first = seen[0]
+    assert "This line: slow, tender" in first.split("### TRANSCRIPT")[0]
+    assert first.split("### TRANSCRIPT (read only this)\n")[1] == "Protect the dark."

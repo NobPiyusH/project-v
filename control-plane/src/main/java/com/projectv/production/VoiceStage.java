@@ -33,7 +33,7 @@ public class VoiceStage extends StageSupport {
         VideoPlan plan = plan(videoId);
         StoredScript s = latestScript(videoId).orElseThrow(() -> new IllegalStateException("No script yet"));
         List<NarrationLine> lines = s.lines().stream().filter(StoredLine::spoken)
-                .map(l -> new NarrationLine(l.index(), l.text())).toList();
+                .map(l -> new NarrationLine(l.index(), l.text(), l.delivery())).toList();
         // ~25 audio tokens per second of speech at ~2.3 words per second.
         long words = lines.stream().mapToLong(l -> l.text().split("\\s+").length).sum();
         budget.require(pricing.ttsInr(new Usage(words * 2, Math.round(words / 2.3 * 25 * 1.5), 0, 0)), "NARRATION");

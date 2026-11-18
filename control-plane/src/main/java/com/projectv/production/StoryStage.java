@@ -53,7 +53,7 @@ public class StoryStage extends StageSupport {
         int i = 0;
         for (ScriptLine l : s.lines()) {
             boolean spoken = l.spoken() && !"none".equals(plan.narration());
-            lines.add(new StoredLine(i++, l.text(), l.act(), l.purpose(), spoken));
+            lines.add(new StoredLine(i++, l.text(), l.act(), l.purpose(), spoken, l.delivery()));
         }
         String voice = WriterAgent.VOICES.contains(s.voiceName()) ? s.voiceName() : defaultVoice;
         StoredScript stored = new StoredScript(nextVersion("script", videoId), lines, voice, s.voiceStyle(), s.musicBrief(), null, null);

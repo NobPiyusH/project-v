@@ -42,10 +42,15 @@ public class ProductionService {
     public record StoredLine(int index, String text, String act, String purpose, boolean spoken,
                              UUID audioAssetId, String audioUri, Double durationSec,
                              String voiceStatus, Boolean needsVoice, Boolean edited, String originalText,
-                             List<AudioVersion> audioVersions, String check) {
+                             List<AudioVersion> audioVersions, String check, String delivery) {
 
         public StoredLine(int index, String text, String act, String purpose, boolean spoken) {
-            this(index, text, act, purpose, spoken, null, null, null, null, null, false, null, List.of(), null);
+            this(index, text, act, purpose, spoken, null);
+        }
+
+        /** @param delivery how to read THIS line (owner, 18 Nov 2026: the voice follows the story line by line) */
+        public StoredLine(int index, String text, String act, String purpose, boolean spoken, String delivery) {
+            this(index, text, act, purpose, spoken, null, null, null, null, null, false, null, List.of(), null, delivery);
         }
 
         List<AudioVersion> versions() {
@@ -54,7 +59,7 @@ public class ProductionService {
 
         StoredLine withStatus(String status, String why) {
             return new StoredLine(index, text, act, purpose, spoken, audioAssetId, audioUri, durationSec, status,
-                    needsVoice, edited, originalText, audioVersions, why);
+                    needsVoice, edited, originalText, audioVersions, why, delivery);
         }
 
         StoredLine withNewTake(AudioVersion v, boolean passed) {
@@ -65,13 +70,13 @@ public class ProductionService {
             }
             all.addFirst(v);
             return new StoredLine(index, text, act, purpose, spoken, v.assetId(), v.uri(), v.durationSec(),
-                    passed ? "READY" : "IMPERFECT", false, edited, originalText, all, v.check());
+                    passed ? "READY" : "IMPERFECT", false, edited, originalText, all, v.check(), delivery);
         }
 
         StoredLine withActive(AudioVersion v) {
             boolean needs = spoken && v.text() != null && !v.text().equals(text);
             return new StoredLine(index, text, act, purpose, spoken, v.assetId(), v.uri(), v.durationSec(), "READY",
-                    needs, edited, originalText, audioVersions, v.check());
+                    needs, edited, originalText, audioVersions, v.check(), delivery);
         }
 
         /** The text the active take actually speaks (older data: the text before the owner's first edit). */
@@ -89,7 +94,7 @@ public class ProductionService {
             String writers = originalText != null ? originalText : text;   // the writer's version, before any edit
             boolean differs = !newText.equals(writers);
             return new StoredLine(index, newText, act, purpose, newSpoken, audioAssetId, audioUri, durationSec,
-                    voiceStatus, needs, differs, differs ? writers : null, audioVersions, check);
+                    voiceStatus, needs, differs, differs ? writers : null, audioVersions, check, delivery);
         }
     }
 

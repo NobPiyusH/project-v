@@ -23,7 +23,7 @@ class InspectorTest {
 
     private static StoredLine voiced(int i, String text, double sec) {
         return new StoredLine(i, text, "a", "p", true, null, "s3://x/" + i, sec, "READY", false, false, null, List.of(),
-                "coverage 100%");
+                "coverage 100%", null);
     }
 
     private static List<String> codes(List<Finding> f) {

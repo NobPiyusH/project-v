@@ -16,8 +16,21 @@ import java.util.stream.Collectors;
 public class WriterAgent {
 
     /** Gemini TTS prebuilt voices offered to the writer (verify the list when the TTS model changes). */
-    public static final List<String> VOICES = List.of("Charon", "Kore", "Orus", "Iapetus", "Algieba", "Gacrux",
-            "Sadaltager", "Enceladus", "Algenib", "Schedar", "Rasalgethi", "Achird", "Fenrir", "Puck", "Zephyr", "Aoede");
+    /** Gemini TTS voices with their character (Google's own one-word descriptions), so the writer casts by meaning:
+     *  the voice suits the story's context and depth (owner, 18 Nov 2026). */
+    public static final java.util.Map<String, String> VOICE_CHARACTER = new java.util.LinkedHashMap<>();
+    static {
+        String[][] v = {{"Charon", "informative, calm, deep"}, {"Kore", "firm, clear"}, {"Orus", "firm"},
+                {"Iapetus", "clear"}, {"Algieba", "smooth"}, {"Gacrux", "mature"}, {"Sadaltager", "knowledgeable"},
+                {"Enceladus", "breathy, intimate"}, {"Algenib", "gravelly"}, {"Schedar", "even"},
+                {"Rasalgethi", "informative"}, {"Achird", "friendly"}, {"Fenrir", "excitable"}, {"Puck", "upbeat"},
+                {"Zephyr", "bright"}, {"Aoede", "breezy, soft (owner liked it, 18 Nov 2026)"}, {"Sulafat", "warm"},
+                {"Vindemiatrix", "gentle"}, {"Achernar", "soft"}, {"Despina", "smooth"}};
+        for (String[] x : v) {
+            VOICE_CHARACTER.put(x[0], x[1]);
+        }
+    }
+    public static final List<String> VOICES = List.copyOf(VOICE_CHARACTER.keySet());
 
     private final Llm llm;
     private final StylePresets presets;
@@ -66,9 +79,12 @@ public class WriterAgent {
                 You are the head writer of a premium documentary studio. Style preset: %s (%s).
                 Write the script as an ordered list of lines. %s
                 Every factual claim must come from the research facts provided. Write in language "%s".
-                Pick voiceName from %s to suit the tone, describe the reading style in voiceStyle as a short phrase of at most 8 words (e.g. "slow, hushed and awe-struck"), and write a one-paragraph
+                Cast the narrator: pick voiceName from these voices (name: character) to suit this story's context, depth and mood: %s.
+                Describe the overall reading style in voiceStyle as a short phrase of at most 8 words (e.g. "slow, hushed and awe-struck").
+                Give every spoken line a delivery: at most 6 words on how to read THAT line as the story moves (e.g. "hushed, curious", "rising excitement", "slow, tender", "punchy, fast"), so the voice follows the emotional arc. Then write a one-paragraph
                 musicBrief for the composer (mood, instruments, tempo feel, how it should build). No sound-effect cues in lines.
-                Return only the JSON object.""".formatted(preset.name(), preset.description(), lengthRule, plan.language(), VOICES);
+                Return only the JSON object.""".formatted(preset.name(), preset.description(), lengthRule, plan.language(),
+                        VOICE_CHARACTER.entrySet().stream().map(e -> e.getKey() + ": " + e.getValue()).collect(Collectors.joining("; ")));
         String user = """
                 Owner's prompt: %s
                 Title: %s. Duration: %d s. Tone: %s.

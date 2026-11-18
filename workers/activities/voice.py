@@ -132,8 +132,10 @@ def _speak(req: dict, line: dict) -> dict:
     style = (req.get("style") or "").strip().rstrip(".")
     # Take 1-2: style in a marked director's-notes block, apart from the transcript (the old "Say <style>: <text>"
     # form was read aloud on 4 of 7 lines of the night-sky Short). Last take: the bare text, no style.
-    styled = (f"### DIRECTOR'S NOTES (do not read aloud)\nStyle: {style}\n\n### TRANSCRIPT (read only this)\n"
-              f"{line['text']}") if style else line["text"]
+    delivery = (line.get("delivery") or "").strip().rstrip(".")
+    notes = f"Style: {style}" + (f"\nThis line: {delivery}" if delivery else "")  # the voice follows the story's arc
+    styled = (f"### DIRECTOR'S NOTES (do not read aloud)\n{notes}\n\n### TRANSCRIPT (read only this)\n"
+              f"{line['text']}") if (style or delivery) else line["text"]
     prompts = [styled] * (MAX_TAKES - 1) + [line["text"]]
     usages, checks = [], []
     wav = b""

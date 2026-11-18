@@ -16,7 +16,7 @@ class StoredLineTest {
     private static StoredLine voiced(String text) {
         UUID a = UUID.randomUUID();
         // A line voiced before versions existed (old JSON): audio set, no versions list.
-        return new StoredLine(4, text, "Act 1", "hook", true, a, "s3://b/old.wav", 5.0, null, null, false, null, null, null);
+        return new StoredLine(4, text, "Act 1", "hook", true, a, "s3://b/old.wav", 5.0, null, null, false, null, null, null, null);
     }
 
     @Test
