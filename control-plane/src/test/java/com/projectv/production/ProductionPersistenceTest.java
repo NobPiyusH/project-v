@@ -73,7 +73,7 @@ class ProductionPersistenceTest {
         shots = new ShotStage(deps);
         inspector = new Inspector(deps);
         creative = new CreativeDirector(deps, null, "gemini-3.6-flash");
-        clips = new VideoStage(deps, "projectv-wan", "Wan", "http://127.0.0.1:8080", BigDecimal.ZERO, 2, "wan", "wan", "gemini-omni-flash-preview");
+        clips = new VideoStage(deps, "projectv-wan", "Wan", "http://127.0.0.1:8080", BigDecimal.ZERO, 2, "wan", "wan", "gemini-omni-flash-preview", null);
         footage = new FootageStage(deps);
         assembly = new AssemblyStage(deps);
         finish = new FinishStage(deps, "http://127.0.0.1:8080", BigDecimal.ZERO);
@@ -129,7 +129,7 @@ class ProductionPersistenceTest {
     @Test
     void allMigrationsApplyAndLicencesAreSeeded() {
         assertEquals(11, jdbc.sql("SELECT count(*) FROM licence").query(Integer.class).single());
-        assertEquals(15, jdbc.sql("SELECT count(*) FROM flyway_schema_history WHERE success").query(Integer.class).single());
+        assertEquals(16, jdbc.sql("SELECT count(*) FROM flyway_schema_history WHERE success").query(Integer.class).single());
     }
 
     @Test

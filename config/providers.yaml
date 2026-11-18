@@ -9,6 +9,25 @@ providers:
     secret_ref: GEMINI_API_KEY
     enabled: true
 
+  # M3a router (18 Nov 2026): providers the router chooses between. quality = tier from our A/B tests (higher wins
+  # when nothing else decides); budget = which monthly cap the job counts against (gemini | gpu | claude | none).
+  - id: modal_wan
+    name: Wan 2.2 image-to-video (Modal H100)
+    kind: gpu_serverless
+    capabilities: [video.i2v.draft, video.i2v.final]
+    quality: 6
+    budget: gpu
+    enabled: true
+
+  - id: gemini_omni
+    name: Gemini Omni 1.2 Flash (image-to-video)
+    kind: api
+    capabilities: [video.i2v.draft, video.i2v.final]
+    quality: 8                     # better motion than a Wan final on the deep-ocean A/B (18 Nov 2026)
+    budget: gemini
+    secret_ref: GEMINI_API_KEY
+    enabled: true
+
   - id: modal_a100
     name: Modal (serverless A100)
     kind: gpu_serverless

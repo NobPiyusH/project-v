@@ -57,6 +57,7 @@ public class VideoStage extends StageSupport {
     private final String draftProvider;
     private final String finalProvider;
     private final String omniModel;
+    private final com.projectv.routing.Router router;
 
     public VideoStage(ProductionDeps d,
                       @Value("${projectv.video.modal-app:projectv-wan}") String wanApp,
@@ -66,7 +67,8 @@ public class VideoStage extends StageSupport {
                       @Value("${projectv.video.hero-draft-takes:2}") int heroTakes,
                       @Value("${projectv.video.provider-draft:wan}") String draftProvider,
                       @Value("${projectv.video.provider-final:omni}") String finalProvider,
-                      @Value("${projectv.video.omni-model:gemini-omni-1.2-flash}") String omniModel) {
+                      @Value("${projectv.video.omni-model:gemini-omni-1.2-flash}") String omniModel,
+                      com.projectv.routing.Router router) {
         super(d);
         this.wanApp = wanApp;
         this.wanClass = wanClass;
@@ -76,10 +78,34 @@ public class VideoStage extends StageSupport {
         this.draftProvider = draftProvider == null ? "wan" : draftProvider.strip().toLowerCase();
         this.finalProvider = finalProvider == null ? "wan" : finalProvider.strip().toLowerCase();
         this.omniModel = omniModel;
+        this.router = router;
     }
 
+    /** The owner's preferred provider for this kind (config); the router may still pick another (M3a). */
     boolean omni(String kind) {
         return "omni".equals(DRAFT.equals(kind) ? draftProvider : finalProvider);
+    }
+
+    static final String WAN = "modal_wan";
+    static final String OMNI = "gemini_omni";
+
+    /**
+     * M3a: the router chooses Wan or Omni for this batch. Each candidate is priced on its own job list (Omni finals
+     * are hero shots only), the owner's configured provider wins when it fits its budget, and otherwise the router
+     * falls back (e.g. Gemini cap used up: finals on Wan). Logged in routing_decision unless {@code log} is false.
+     */
+    boolean routeOmni(UUID videoId, String kind, List<UUID> only, boolean log) {
+        if (router == null) { // tests without a router: the configured provider, as before M3
+            return omni(kind);
+        }
+        List<ClipJob> wanJobs = jobs(videoId, kind, only, false);
+        List<ClipJob> omniJobs = jobs(videoId, kind, only, true);
+        var candidates = List.of(
+                new com.projectv.routing.Router.Candidate(WAN, pricing.modalGpuInr("H100", gpuSeconds(wanJobs, kind))),
+                new com.projectv.routing.Router.Candidate(OMNI, omniInr(omniJobs, kind)));
+        var choice = router.choose(videoId, DRAFT.equals(kind) ? "DRAFT_GEN" : "FINAL_GEN", "video.i2v." + kind,
+                candidates, omni(kind) ? OMNI : WAN, log);
+        return OMNI.equals(choice.providerId());
     }
 
     /** 720p for drafts and finals: SeedVR2 upscales every clip to 4K, so 1080p from Omni would cost 50% more for little. */
@@ -100,8 +126,14 @@ public class VideoStage extends StageSupport {
     // ------------------------------------------------------------------------------------------- estimate & request
 
     public ClipEstimate estimate(UUID videoId, String kind, List<UUID> only) {
-        List<ClipJob> jobs = jobs(videoId, kind, only);
-        if (omni(kind)) {
+        boolean useOmni;
+        try {
+            useOmni = routeOmni(videoId, kind, only, false); // preview: not logged
+        } catch (com.projectv.ledger.BudgetGuard.BudgetExceededException e) {
+            useOmni = omni(kind); // nothing fits: show the preferred plan; the request itself is then refused with reasons
+        }
+        List<ClipJob> jobs = jobs(videoId, kind, only, useOmni);
+        if (useOmni) {
             BigDecimal inr = omniInr(jobs, kind).setScale(2, RoundingMode.HALF_UP);
             String what = "%s clips (Gemini Omni, %s)".formatted(kind, omniResolution(kind));
             double wall = jobs.isEmpty() ? 0 : Math.ceil(jobs.size() / 3.0) * 0.75;
@@ -134,12 +166,13 @@ public class VideoStage extends StageSupport {
 
     /** The batch for the media worker. Refused (non-retryable) when it would break the monthly GPU cap. */
     public ClipRequest clipRequest(UUID videoId, String kind, List<UUID> only) {
-        List<ClipJob> jobs = jobs(videoId, kind, only);
+        boolean useOmni = routeOmni(videoId, kind, only, true); // the decision, logged (rule 6)
+        List<ClipJob> jobs = jobs(videoId, kind, only, useOmni);
         if (jobs.isEmpty()) {
             throw new IllegalStateException(DRAFT.equals(kind) ? "No shots with images to animate"
                     : "No approved drafts need a final render");
         }
-        if (omni(kind)) {
+        if (useOmni) {
             BigDecimal inr = omniInr(jobs, kind);
             budget.require(inr, jobs.size() + " " + kind + " clips on Gemini Omni");
             return new ClipRequest(videoId.toString(), wanApp, wanClass, publicUrl, jobs, 0, 0,
@@ -153,6 +186,10 @@ public class VideoStage extends StageSupport {
     }
 
     List<ClipJob> jobs(UUID videoId, String kind, List<UUID> only) {
+        return jobs(videoId, kind, only, omni(kind));
+    }
+
+    List<ClipJob> jobs(UUID videoId, String kind, List<UUID> only, boolean useOmni) {
         VideoPlan plan = plan(videoId);
         StylePresets.Preset preset = presets.byIdOrDefault(plan.stylePreset());
         boolean vertical = "9:16".equals(plan.aspectRatio());
@@ -172,7 +209,7 @@ public class VideoStage extends StageSupport {
             if (!draft && wanted == null && (s.get("draft_clip_asset_id") == null || !Boolean.TRUE.equals(s.get("final_wanted")))) {
                 continue; // finals only for shots with a draft that the owner didn't mark "keep the draft"
             }
-            if (!draft && wanted == null && omni(kind) && !"hero".equals(s.get("priority"))) {
+            if (!draft && wanted == null && useOmni && !"hero".equals(s.get("priority"))) {
                 continue; // cost (owner, 18 Nov): Omni finals only for hero shots; others keep their Wan draft unless picked
             }
             Map<String, Object> p = json.readValue((String) s.get("prompt_json"), new TypeReference<Map<String, Object>>() {
@@ -185,15 +222,15 @@ public class VideoStage extends StageSupport {
             // Renders vary like seeds (owner, 17 Nov: one FA3 render "had better motion"): hero shots get several draft
             // takes with different seeds, so the best motion can be picked. Finals render the chosen draft once.
             int takes = draft && "hero".equals(s.get("priority")) ? heroTakes : 1;
-            if (omni(kind)) {
+            if (useOmni) {
                 longSide = 1280;
                 shortSide = 720;
             }
             for (int take = first; take < first + takes; take++) {
                 jobs.add(new ClipJob(id, ((Number) s.get("ord")).intValue() + 1, take, kind,
-                        omni(kind) ? "omni" : draft ? "fast" : "hybrid",
+                        useOmni ? "omni" : draft ? "fast" : "hybrid",
                         (String) s.get("keyframe_uri"), prompt, vertical ? shortSide : longSide, vertical ? longSide : shortSide,
-                        omni(kind) ? omniSeconds(num(s.get("duration_target_sec"))) * 24 : frames(num(s.get("duration_target_sec"))),
+                        useOmni ? omniSeconds(num(s.get("duration_target_sec"))) * 24 : frames(num(s.get("duration_target_sec"))),
                         Math.abs((long) id.hashCode()) + take));
             }
         }

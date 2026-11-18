@@ -1,0 +1,141 @@
+package com.projectv.routing;
+
+import com.projectv.ledger.BudgetGuard;
+import com.projectv.ledger.BudgetGuard.BudgetExceededException;
+import com.projectv.ledger.Pricing;
+import com.projectv.routing.Router.Candidate;
+import org.flywaydb.core.Flyway;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.utility.DockerImageName;
+import tools.jackson.databind.json.JsonMapper;
+
+import java.math.BigDecimal;
+import java.util.List;
+import java.util.UUID;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+/** M3a router core against a real Postgres: preference, budget fallback, deferral, cooldowns, logging (rule 6). */
+@Testcontainers(disabledWithoutDocker = true)
+class RouterTest {
+
+    @Container
+    static final PostgreSQLContainer PG = new PostgreSQLContainer(
+            DockerImageName.parse("pgvector/pgvector:0.8.7-pg17-trixie").asCompatibleSubstituteFor("postgres"));
+
+    static JdbcClient jdbc;
+    static Router router;
+    static final String CAP = "video.i2v.final";
+    UUID video;
+
+    @BeforeAll
+    static void setUp() throws Exception {
+        Flyway.configure().dataSource(PG.getJdbcUrl(), PG.getUsername(), PG.getPassword()).load().migrate();
+        jdbc = JdbcClient.create(new DriverManagerDataSource(PG.getJdbcUrl(), PG.getUsername(), PG.getPassword()));
+        router = new Router(jdbc, JsonMapper.builder().build(), new BudgetGuard(jdbc, new Pricing("../config")));
+    }
+
+    @BeforeEach
+    void reset() {
+        jdbc.sql("DELETE FROM routing_decision").update();
+        jdbc.sql("DELETE FROM provider_health").update();
+        jdbc.sql("DELETE FROM cost_entry").update();
+        provider("modal_wan", 6, "gpu", true, "[\"video.i2v.draft\",\"video.i2v.final\"]");
+        provider("gemini_omni", 8, "gemini", true, "[\"video.i2v.draft\",\"video.i2v.final\"]");
+        provider("other_video", 9, "none", false, "[\"video.i2v.final\"]");
+        video = UUID.randomUUID();
+        jdbc.sql("INSERT INTO video (id, prompt, status) VALUES (:id, 'router test', 'RUNNING')").param("id", video).update();
+    }
+
+    static void provider(String id, int quality, String budget, boolean enabled, String caps) {
+        jdbc.sql("""
+                        INSERT INTO provider (id, name, kind, capabilities_json, config_json, enabled)
+                        VALUES (:id, :id, 'api', CAST(:caps AS jsonb), CAST(:cfg AS jsonb), :en)
+                        ON CONFLICT (id) DO UPDATE SET capabilities_json = EXCLUDED.capabilities_json,
+                            config_json = EXCLUDED.config_json, enabled = EXCLUDED.enabled
+                        """).param("id", id).param("caps", caps)
+                .param("cfg", "{\"quality\":" + quality + ",\"budget\":\"" + budget + "\"}").param("en", enabled).update();
+    }
+
+    static List<Candidate> both(int wanInr, int omniInr) {
+        return List.of(new Candidate("modal_wan", BigDecimal.valueOf(wanInr)), new Candidate("gemini_omni", BigDecimal.valueOf(omniInr)));
+    }
+
+    int logged() {
+        return jdbc.sql("SELECT count(*) FROM routing_decision WHERE video_id = :v").param("v", video).query(Integer.class).single();
+    }
+
+    @Test
+    void ownersPreferenceWinsWhenItFitsAndTheDecisionIsLogged() {
+        var c = router.choose(video, "FINAL_GEN", CAP, both(40, 90), "modal_wan", true);
+        assertEquals("modal_wan", c.providerId(), "preferred over the higher quality tier");
+        assertNotNull(c.decisionId());
+        assertEquals(1, logged());
+        String chosen = jdbc.sql("SELECT chosen_provider_id FROM routing_decision WHERE id = :id").param("id", c.decisionId())
+                .query(String.class).single();
+        assertEquals("modal_wan", chosen);
+    }
+
+    @Test
+    void withoutAPreferenceTheHighestQualityEligibleProviderWins() {
+        assertEquals("gemini_omni", router.choose(video, "FINAL_GEN", CAP, both(40, 90), null, true).providerId());
+    }
+
+    @Test
+    void preferredProviderOverItsCapFallsBackToTheNextProvider() {
+        var c = router.choose(video, "FINAL_GEN", CAP, both(40, 5000), "gemini_omni", true);
+        assertEquals("modal_wan", c.providerId(), "Gemini cap (₹1000) can't take ₹5000: finals go to Wan");
+        assertTrue(c.reason().contains("gemini cap"), c.reason());
+    }
+
+    @Test
+    void nothingEligibleDefersWithReasonsAndLogsIt() {
+        var e = assertThrows(BudgetExceededException.class,
+                () -> router.choose(video, "FINAL_GEN", CAP, both(99_999, 99_999), "gemini_omni", true));
+        assertTrue(e.getMessage().contains("modal_wan") && e.getMessage().contains("gemini_omni"), e.getMessage());
+        assertEquals(1, jdbc.sql("SELECT count(*) FROM routing_decision WHERE video_id = :v AND chosen_provider_id IS NULL")
+                .param("v", video).query(Integer.class).single(), "the deferral itself is a logged decision");
+    }
+
+    @Test
+    void failingProviderCoolsDownAndSuccessClearsIt() {
+        router.reportFailure("gemini_omni", "503 overloaded");
+        assertEquals("modal_wan", router.choose(video, "FINAL_GEN", CAP, both(40, 90), "gemini_omni", false).providerId());
+        router.reportSuccess("gemini_omni");
+        assertEquals("gemini_omni", router.choose(video, "FINAL_GEN", CAP, both(40, 90), "gemini_omni", false).providerId());
+    }
+
+    @Test
+    void repeatedFailuresGrowTheCooldownUpToThirtyMinutes() {
+        for (int i = 0; i < 20; i++) {
+            router.reportFailure("modal_wan", "timeout");
+        }
+        long sec = router.cooldownUntil("modal_wan").getEpochSecond() - java.time.Instant.now().getEpochSecond();
+        assertTrue(sec > 25 * 60 && sec <= Router.MAX_COOLDOWN_SEC, "capped at 30 min, was " + sec);
+    }
+
+    @Test
+    void disabledOrIncapableProvidersAreSkipped() {
+        var c = router.choose(video, "FINAL_GEN", CAP, List.of(new Candidate("other_video", BigDecimal.ONE),
+                new Candidate("modal_wan", BigDecimal.TEN), new Candidate("unknown", BigDecimal.ONE)), "other_video", true);
+        assertEquals("modal_wan", c.providerId());
+        assertTrue(c.considered().stream().anyMatch(r -> "disabled".equals(r.get("why"))));
+        assertTrue(c.considered().stream().anyMatch(r -> "not in the provider registry".equals(r.get("why"))));
+    }
+
+    @Test
+    void previewDecisionsAreNotLogged() {
+        router.choose(video, "FINAL_GEN", CAP, both(40, 90), null, false);
+        assertEquals(0, logged());
+    }
+}
