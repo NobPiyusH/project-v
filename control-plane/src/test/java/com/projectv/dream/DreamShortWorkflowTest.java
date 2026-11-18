@@ -87,8 +87,19 @@ class DreamShortWorkflowTest {
         }
 
         @Override
+        public com.projectv.media.MediaTypes.MusicRequest musicRequest(String dreamId, String notes) {
+            return new com.projectv.media.MediaTypes.MusicRequest(dreamId, "lyria", "p", 16, 1);
+        }
+
+        @Override
+        public String saveMusic(String dreamId, com.projectv.media.MediaTypes.MusicResult result) {
+            events.add("music");
+            return "music";
+        }
+
+        @Override
         public DreamFinishRequest finishRequest(String dreamId) {
-            return new DreamFinishRequest(dreamId, "dreamcore", List.of(), 1080, 1920, 24, 0.5, null, "u");
+            return new DreamFinishRequest(dreamId, "dreamcore", List.of(), 1080, 1920, 24, 0.5, null, "u", null);
         }
 
         @Override
@@ -115,6 +126,8 @@ class DreamShortWorkflowTest {
                             "z", 1L, 1.0, null, null, List.of())), 1.0);
                     case "generateClips" -> new ClipResult(List.of(new ClipOutput("s1", 1, "dream", "s3://clip", 20, 57, 16,
                             "fast", null, 0)), 1, false);
+                    case "generateMusic" -> new com.projectv.media.MediaTypes.MusicResult("s3://music", 16, 80, List.of(),
+                            List.of(), 1, "lyria", List.of());
                     case "toString" -> "fakeMedia";
                     default -> throw new UnsupportedOperationException(method.getName());
                 });
@@ -176,7 +189,7 @@ class DreamShortWorkflowTest {
         start(StageMode.AUTO, Map.of());
         assertEquals("completed", result());
         List<String> work = dream.events.stream().filter(e -> !e.startsWith("status")).toList();
-        assertEquals(List.of("write", "pictures", "clips", "finish"), work);
+        assertEquals(List.of("write", "pictures", "clips", "music", "finish"), work);
         assertTrue(dream.events.contains("status:FINISH:COMPLETED"));
     }
 
@@ -225,6 +238,16 @@ class DreamShortWorkflowTest {
         assertTrue(wf.view().message().contains("GPU cap reached"));
         wf.retry();
         assertEquals("completed", result());
+    }
+
+    @Test
+    void redoFromMusicKeepsTheEarlierSteps() {
+        DreamShortWorkflow wf = client.newWorkflowStub(DreamShortWorkflow.class,
+                WorkflowOptions.newBuilder().setTaskQueue(TaskQueues.CONTROL).setWorkflowId("dream-test").build());
+        WorkflowClient.start(wf::run, new DreamRequest("00000000-0000-0000-0000-000000000001", StageMode.AUTO, Map.of(), 10,
+                DreamStep.MUSIC));
+        assertEquals("completed", result());
+        assertEquals(List.of("music", "finish"), dream.events.stream().filter(e -> !e.startsWith("status")).toList());
     }
 
     @Test

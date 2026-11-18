@@ -12,11 +12,18 @@ public final class DreamTypes {
     private DreamTypes() {
     }
 
-    /** The four steps of a Dream Short, in order. */
-    public enum DreamStep { WRITE, PICTURES, CLIPS, FINISH }
+    /** The steps of a Dream Short, in order. */
+    public enum DreamStep { WRITE, PICTURES, CLIPS, MUSIC, FINISH }
 
-    /** Workflow input. Steps not listed in {@code modes} use {@code defaultMode}. */
-    public record DreamRequest(String dreamId, StageMode defaultMode, Map<DreamStep, StageMode> modes, int reviewMinutes) {
+    /**
+     * Workflow input. Steps not listed in {@code modes} use {@code defaultMode}. {@code fromStep}: start there and keep
+     * the earlier steps' results (redo from a step after the Short is done); null = from the start.
+     */
+    public record DreamRequest(String dreamId, StageMode defaultMode, Map<DreamStep, StageMode> modes, int reviewMinutes,
+                               DreamStep fromStep) {
+        public DreamRequest(String dreamId, StageMode defaultMode, Map<DreamStep, StageMode> modes, int reviewMinutes) {
+            this(dreamId, defaultMode, modes, reviewMinutes, null);
+        }
     }
 
     /** One shot as the writer plans it: the scene (shared world added later) and how the camera moves. */
@@ -37,10 +44,11 @@ public final class DreamTypes {
 
     /**
      * Finish job for the media worker: smooth to 24 fps (laptop RIFE, else FFmpeg), join with soft dissolves, apply
-     * the look, add music from {@code musicDir} (if any), loudness to Shorts level, save one MP4.
+     * the look, add the Short's score ({@code musicUri}, Lyria) or else a track from {@code musicDir}, loudness to
+     * Shorts level, save one MP4.
      */
     public record DreamFinishRequest(String dreamId, String look, List<DreamFinishClip> clips, int width, int height,
-                                     int fps, double dissolveSec, String musicDir, String progressUrl) {
+                                     int fps, double dissolveSec, String musicDir, String progressUrl, String musicUri) {
     }
 
     /** @param smoothing "rife-laptop" | "ffmpeg" (how 16 fps became 24); {@code music} the track used, or null */

@@ -36,6 +36,15 @@ providers:
     budget: gpu
     enabled: true
 
+  - id: gemini_lyria
+    name: Gemini Lyria (music for Dream Shorts)
+    kind: api
+    capabilities: [music.dream]
+    quality: 7                     # owner's choice for Dream Shorts music (18 Nov 2026, ~₹10 a Short)
+    budget: gemini                 # cost entries are recorded as gemini_api, the provider the Gemini cap counts
+    secret_ref: GEMINI_API_KEY
+    enabled: true
+
   - id: gemini_omni
     name: Gemini Omni 1.2 Flash (image-to-video)
     kind: api
@@ -127,6 +136,7 @@ pricing:
       image.keyframe.standard: { minQuality: 5, enoughQuality: 6 }   # the rest: good enough is enough
       image.dream: { minQuality: 5, enoughQuality: 6 }          # Dream Shorts pictures (owner target: under ₹20 a Short)
       video.i2v.dream: { minQuality: 5, enoughQuality: 6 }      # Dream Shorts clips: soft dreamcore look forgives fast mode
+      music.dream: { minQuality: 5, enoughQuality: 7 }          # Dream Shorts score (Lyria)
   gemini:
     monthlyCapInr: 1000         # owner's cap; the app stops paid Gemini calls at this amount (Google budgets only alert)
     reserveInr: 20              # keep this much back for voice/music when deciding hero images

@@ -55,6 +55,14 @@ public class DreamShortWorkflowImpl implements DreamShortWorkflow {
                     .setRetryOptions(RetryOptions.newBuilder().setMaximumAttempts(1).build())
                     .build());
 
+    // Paid (Lyria): no automatic retry; the owner's Retry decides.
+    private final MediaActivities music = Workflow.newActivityStub(MediaActivities.class,
+            ActivityOptions.newBuilder()
+                    .setTaskQueue(TaskQueues.MEDIA)
+                    .setStartToCloseTimeout(Duration.ofMinutes(15))
+                    .setRetryOptions(RetryOptions.newBuilder().setMaximumAttempts(1).build())
+                    .build());
+
     private final DreamMediaActivities finish = Workflow.newActivityStub(DreamMediaActivities.class,
             ActivityOptions.newBuilder()
                     .setTaskQueue(TaskQueues.MEDIA)
@@ -88,7 +96,11 @@ public class DreamShortWorkflowImpl implements DreamShortWorkflow {
             modes.putAll(request.modes());
         }
         reviewWindow = Duration.ofMinutes(Math.max(1, request.reviewMinutes()));
+        DreamStep from = request.fromStep() == null ? DreamStep.WRITE : request.fromStep();
         for (DreamStep step : DreamStep.values()) {
+            if (step.ordinal() < from.ordinal()) {
+                continue; // redo from a later step: earlier results stay as they are
+            }
             if (!runStep(step)) {
                 show(step, "CANCELLED", "Cancelled by the owner.");
                 return "cancelled";
@@ -160,6 +172,7 @@ public class DreamShortWorkflowImpl implements DreamShortWorkflow {
                 var req = activities.clipRequest(dreamId, only);
                 yield activities.saveClips(dreamId, req, clips.generateClips(req));
             }
+            case MUSIC -> activities.saveMusic(dreamId, music.generateMusic(activities.musicRequest(dreamId, notes)));
             case FINISH -> activities.saveFinish(dreamId, finish.dreamFinish(activities.finishRequest(dreamId)));
         };
     }
@@ -170,6 +183,7 @@ public class DreamShortWorkflowImpl implements DreamShortWorkflow {
             case WRITE -> "Writing the world and the shots…";
             case PICTURES -> "Making the pictures…";
             case CLIPS -> "Making the clips on the GPU…";
+            case MUSIC -> "Composing the music (Lyria)…";
             case FINISH -> "Finishing on the laptop: smoothing, dissolves, look, music…";
         };
     }

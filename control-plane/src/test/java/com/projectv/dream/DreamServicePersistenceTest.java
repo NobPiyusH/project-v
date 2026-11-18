@@ -54,9 +54,15 @@ class DreamServicePersistenceTest {
         var json = JsonMapper.builder().build();
         Router router = new Router(jdbc, json, budget, pricing);
         dreams = new DreamService(jdbc, json, null, new AssetStore(jdbc), pricing, budget, router, new ClipProgress(),
-                "projectv-zimage", "ZImage", "projectv-wan", "Wan", "http://127.0.0.1:8080", BigDecimal.ZERO, 3.5, "");
+                "projectv-zimage", "ZImage", "projectv-wan", "Wan", "http://127.0.0.1:8080", BigDecimal.ZERO, 3.5, "", "lyria-3.5");
         provider("modal_zimage", "[\"image.dream\"]");
         provider("modal_wan", "[\"video.i2v.dream\"]");
+        jdbc.sql("""
+                        INSERT INTO provider (id, name, kind, capabilities_json, config_json, enabled)
+                        VALUES ('gemini_lyria', 'Lyria', 'api', CAST('["music.dream"]' AS jsonb),
+                                CAST('{"quality":7,"budget":"gemini"}' AS jsonb), true)
+                        ON CONFLICT (id) DO NOTHING
+                        """).update();
     }
 
     static void provider(String id, String caps) {
@@ -135,6 +141,21 @@ class DreamServicePersistenceTest {
                 new KeyframeOutput(shot1.toString(), "s3://b/p1b.png", "modal_zimage", "z", 3L, 5.0, null, null, List.of())), 5));
         assertNull(jdbc.sql("SELECT clip_asset_id FROM dream_shot WHERE id = :s").param("s", shot1).query(UUID.class).optional().orElse(null));
         assertThrows(IllegalStateException.class, () -> dreams.finishRequest(dream), "a shot without a clip can't be finished");
+    }
+
+    @Test
+    void musicIsRoutedCostedAgainstGeminiAndUsedByTheFinish() {
+        var req = dreams.musicRequest(dream, "more strings");
+        assertEquals(1, req.maxSegments());
+        assertTrue(req.prompt().contains("no vocals") && req.prompt().endsWith("Owner's notes: more strings"));
+        assertEquals(7.625, req.targetSec(), 0.01); // two 3.5625 s clips - one 0.5 s dissolve + 1 s tail
+        assertEquals(1, count("SELECT count(*) FROM routing_decision WHERE dream_short_id = :d AND capability = 'music.dream' AND chosen_provider_id = 'gemini_lyria'"));
+        dreams.saveMusic(dream, new com.projectv.media.MediaTypes.MusicResult("s3://b/score.wav", 7, 80, List.of(), List.of(), 1,
+                "lyria-3.5", List.of()));
+        assertEquals(1, count("SELECT count(*) FROM cost_entry WHERE dream_short_id = :d AND provider_id = 'gemini_api' AND unit_type = 'song'"));
+        jdbc.sql("UPDATE dream_shot SET clip_asset_id = (SELECT music_asset_id FROM dream_short WHERE id = :d) WHERE dream_short_id = :d")
+                .param("d", dream).update(); // any asset will do: the finish only needs every shot to have a clip
+        assertEquals("s3://b/score.wav", dreams.finishRequest(dream).musicUri());
     }
 
     @Test

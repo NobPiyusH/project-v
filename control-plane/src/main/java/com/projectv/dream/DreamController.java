@@ -66,6 +66,12 @@ public class DreamController {
         studio.setMode(id, DreamStep.valueOf(step.toUpperCase()), StageMode.parse(body.mode()));
     }
 
+    /** Redo a finished Short from a step (e.g. MUSIC or FINISH); earlier steps keep their results. */
+    @PostMapping("/{id}/rerun/{step}")
+    public void rerun(@PathVariable UUID id, @PathVariable String step) {
+        studio.rerun(id, DreamStep.valueOf(step.toUpperCase()));
+    }
+
     @PostMapping("/{id}/retry")
     public void retry(@PathVariable UUID id) {
         studio.retry(id);

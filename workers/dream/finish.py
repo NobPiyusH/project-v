@@ -118,7 +118,14 @@ def finish(req: dict, tmp: Path) -> dict:
     durations = [media_duration(p) for p in smoothed]
     length = total_duration(durations, dissolve)
     graph = dissolve_graph(durations, dissolve, width, height, fps, req.get("look"))
-    track = pick_track(req.get("musicDir"), dream_id)
+    track, music_name = None, None
+    if req.get("musicUri"):  # the Short's own score (Lyria)
+        track = tmp / "score.wav"
+        track.write_bytes(get_bytes(req["musicUri"]))
+        music_name = "Lyria score"
+    else:
+        track = pick_track(req.get("musicDir"), dream_id)
+        music_name = track.name if track else None
     args: list[str] = []
     for p in smoothed:
         args += ["-i", str(p)]
@@ -136,14 +143,15 @@ def finish(req: dict, tmp: Path) -> dict:
                 "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", str(out)])
     uri = put_file(f"videos/{dream_id}/dream-short.mp4", out, "video/mp4")
     smoothing = "rife-laptop" if how == {"rife-laptop"} else "ffmpeg" if "ffmpeg" in how else sorted(how)[0]
-    log.info("Dream Short %s finished: %.1f s (%s, music: %s)", dream_id, length, smoothing, track.name if track else None)
+    log.info("Dream Short %s finished: %.1f s (%s, music: %s)", dream_id, length, smoothing, music_name)
     return {"uri": uri, "durationSec": round(media_duration(out), 3), "width": width, "height": height, "fps": fps,
-            "smoothing": smoothing, "music": track.name if track else None, "error": None}
+            "smoothing": smoothing, "music": music_name, "error": None}
 
 
 @activity.defn(name="dream_finish")
 def dream_finish(req: dict) -> dict:
-    """req: DreamFinishRequest {dreamId, look, clips:[{uri, fps}], width, height, fps, dissolveSec, musicDir, progressUrl}
+    """req: DreamFinishRequest {dreamId, look, clips:[{uri, fps}], width, height, fps, dissolveSec, musicDir, progressUrl,
+             musicUri}
     -> DreamFinishResult {uri, durationSec, width, height, fps, smoothing, music, error}"""
     with workdir("dream") as d:
         return finish(req, Path(d))

@@ -3,7 +3,7 @@ import { assetUrl } from '../api'
 import { DREAM_STEPS, dreamApi, type DreamMode, type DreamStep, type DreamSummary } from '../dreamApi'
 import { usePoll } from '../hooks'
 
-const STEP_LABEL: Record<DreamStep, string> = { WRITE: 'Write', PICTURES: 'Pictures', CLIPS: 'Clips', FINISH: 'Finish' }
+const STEP_LABEL: Record<DreamStep, string> = { WRITE: 'Write', PICTURES: 'Pictures', CLIPS: 'Clips', MUSIC: 'Music', FINISH: 'Finish' }
 
 function statusBadge(status: string) {
   const cls = status === 'COMPLETED' ? 'b-ok' : status.startsWith('WAITING') ? 'b-warn'
@@ -51,7 +51,7 @@ function DreamHome() {
   return (
     <>
       <section className="card">
-        <div className="card-head"><h2>New Dream Short</h2><span className="pill">Laptop finish · Modal Wan clips</span></div>
+        <div className="card-head"><h2>New Dream Short</h2><span className="pill">Modal Wan clips · Lyria music · laptop finish</span></div>
         <textarea rows={2} value={idea} placeholder="A pink house under a cloud at the end of a tiled pier"
           onChange={(e) => { setIdea(e.target.value); setFormError(null) }} style={{ width: '100%' }} />
         {formError && <p className="error small">{formError}</p>}
@@ -97,6 +97,7 @@ function DreamView({ id }: { id: string }) {
   const { data: d, error, refresh } = usePoll(() => dreamApi.get(id), 4000, [id])
   const [picked, setPicked] = useState<string[]>([])
   const [notes, setNotes] = useState('')
+  const [from, setFrom] = useState<DreamStep>('MUSIC')
   const [actionError, setActionError] = useState<string | null>(null)
 
   async function act(fn: () => Promise<void>) {
@@ -147,7 +148,8 @@ function DreamView({ id }: { id: string }) {
             <button className="primary" onClick={() => void act(() => dreamApi.approve(id, step))}>Approve {STEP_LABEL[step].toLowerCase()}</button>
             <input type="text" value={notes} placeholder={step === 'WRITE' ? 'More mushrooms, softer light' : 'Notes for the redo'}
               onChange={(e) => setNotes(e.target.value)} style={{ flex: 1, minWidth: 180 }} />
-            {step !== 'FINISH' && <button onClick={() => void act(() => dreamApi.redo(id, step, picked, notes))}>
+            {step === 'MUSIC' && <button onClick={() => void act(() => dreamApi.redo(id, step, [], notes))}>New music (≈₹10)</button>}
+            {step !== 'FINISH' && step !== 'MUSIC' && <button onClick={() => void act(() => dreamApi.redo(id, step, picked, notes))}>
               Redo {step === 'WRITE' ? 'all' : picked.length ? `${picked.length} shot${picked.length > 1 ? 's' : ''}` : 'all'}</button>}
             {step === 'FINISH' && <button onClick={() => void act(() => dreamApi.redo(id, step, [], notes))}>Finish again</button>}
           </>}
@@ -155,6 +157,11 @@ function DreamView({ id }: { id: string }) {
           {status === 'FAILED_WAITING' && <button className="primary" onClick={() => void act(() => dreamApi.retry(id))}>Retry</button>}
           {status === 'RUNNING' && step === 'CLIPS' && <button className="danger" onClick={() => void act(() => dreamApi.stop(id))}>Stop clips</button>}
           <span style={{ flex: 1 }} />
+          {!live && <>
+            <label className="small">Redo from <select value={from} onChange={(e) => setFrom(e.target.value as DreamStep)}>
+              {DREAM_STEPS.map((s) => <option key={s} value={s}>{STEP_LABEL[s]}</option>)}</select></label>
+            <button onClick={() => { if (window.confirm(`Redo this Short from ${STEP_LABEL[from]}? That step and the ones after it run again; paid steps ask before spending.`)) void act(() => dreamApi.rerun(id, from)) }}>Redo</button>
+          </>}
           {live && <button className="danger" onClick={() => { if (window.confirm('Cancel this Dream Short?')) void act(() => dreamApi.cancel(id)) }}>Cancel Short</button>}
         </div>
       </section>
@@ -164,6 +171,13 @@ function DreamView({ id }: { id: string }) {
           <div className="card-head"><h2>Finished Short</h2>
             <a className="button" href={assetUrl(d.final_asset_id)} download>Download MP4</a></div>
           <video src={assetUrl(d.final_asset_id)} controls playsInline style={{ maxHeight: 640, borderRadius: 8 }} />
+        </section>
+      )}
+
+      {d.music_asset_id && (
+        <section className="card">
+          <div className="card-head"><h2>Music</h2><span className="pill">Lyria</span></div>
+          <audio src={assetUrl(d.music_asset_id)} controls style={{ width: '100%' }} />
         </section>
       )}
 

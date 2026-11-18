@@ -70,6 +70,34 @@ public class DreamStudio {
         return id;
     }
 
+    /**
+     * Redo a finished (or cancelled) Short from a step: that step and the ones after it run again; earlier results
+     * stay. Modes come from the Short's saved settings.
+     */
+    public void rerun(UUID id, DreamStep from) {
+        Map<String, Object> d = dreams.dream(id);
+        String st = (String) d.get("status");
+        if (!"COMPLETED".equals(st) && !"CANCELLED".equals(st)) {
+            throw new IllegalStateException("This Short is still running: use approve / redo on its current step");
+        }
+        Map<String, String> saved = json.readValue(d.get("modes_json").toString(),
+                new tools.jackson.core.type.TypeReference<Map<String, String>>() {
+                });
+        Map<DreamStep, StageMode> modes = new EnumMap<>(DreamStep.class);
+        saved.forEach((k, v) -> {
+            try {
+                modes.put(DreamStep.valueOf(k), StageMode.parse(v));
+            } catch (IllegalArgumentException ignored) { // a step that no longer exists
+            }
+        });
+        jdbc.sql("UPDATE dream_short SET status = 'RUNNING', step = :s, message = NULL, updated_at = now() WHERE id = :id")
+                .param("s", from.name()).param("id", id).update();
+        DreamShortWorkflow wf = temporal.newWorkflowStub(DreamShortWorkflow.class,
+                WorkflowOptions.newBuilder().setWorkflowId("dream-" + id).setTaskQueue(TaskQueues.CONTROL).build());
+        WorkflowClient.start(wf::run, new DreamRequest(id.toString(), StageMode.AUTO, modes,
+                ((Number) d.get("review_minutes")).intValue(), from));
+    }
+
     public List<Map<String, Object>> list() {
         return jdbc.sql("""
                         SELECT d.id, d.idea, d.title, d.look, d.status, d.step, d.message, d.final_asset_id, d.created_at, d.updated_at,

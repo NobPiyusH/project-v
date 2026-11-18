@@ -34,6 +34,11 @@ public interface DreamActivities {
 
     String saveClips(String dreamId, ClipRequest request, ClipResult result);
 
+    /** The score request (Lyria): mood from the Short's world, length to cover it. Routed, logged, held to the Gemini cap. */
+    com.projectv.media.MediaTypes.MusicRequest musicRequest(String dreamId, String notes);
+
+    String saveMusic(String dreamId, com.projectv.media.MediaTypes.MusicResult result);
+
     DreamFinishRequest finishRequest(String dreamId);
 
     String saveFinish(String dreamId, DreamFinishResult result);

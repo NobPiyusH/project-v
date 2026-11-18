@@ -53,6 +53,16 @@ public class DreamActivitiesImpl implements DreamActivities {
     }
 
     @Override
+    public com.projectv.media.MediaTypes.MusicRequest musicRequest(String dreamId, String notes) {
+        return dreams.musicRequest(UUID.fromString(dreamId), notes);
+    }
+
+    @Override
+    public String saveMusic(String dreamId, com.projectv.media.MediaTypes.MusicResult result) {
+        return dreams.saveMusic(UUID.fromString(dreamId), result);
+    }
+
+    @Override
     public DreamFinishRequest finishRequest(String dreamId) {
         return dreams.finishRequest(UUID.fromString(dreamId));
     }

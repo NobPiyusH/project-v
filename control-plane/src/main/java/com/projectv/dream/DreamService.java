@@ -48,6 +48,7 @@ public class DreamService {
 
     static final String ZIMAGE = "modal_zimage";
     static final String WAN = "modal_wan";
+    static final String LYRIA = "gemini_lyria";
     static final int FPS = 16;          // Wan's own frame rate; the finish makes it 24
     static final int MIN_FRAMES = 33;
     static final int MAX_FRAMES = 81;
@@ -86,6 +87,7 @@ public class DreamService {
     private final BigDecimal autoApproveInr;
     private final double shotSeconds;
     private final String musicDir;
+    private final String musicModel;
 
     public DreamService(JdbcClient jdbc, ObjectMapper json, Llm llm, AssetStore assets, Pricing pricing, BudgetGuard budget,
                         Router router, com.projectv.video.ClipProgress clipProgress,
@@ -96,7 +98,8 @@ public class DreamService {
                         @Value("${projectv.public-url:http://127.0.0.1:8080}") String publicUrl,
                         @Value("${projectv.dream.auto-approve-inr:0}") BigDecimal autoApproveInr,
                         @Value("${projectv.dream.shot-seconds:3.5}") double shotSeconds,
-                        @Value("${projectv.dream.music-dir:}") String musicDir) {
+                        @Value("${projectv.dream.music-dir:}") String musicDir,
+                        @Value("${projectv.models.music:lyria-3.5}") String musicModel) {
         this.jdbc = jdbc;
         this.json = json;
         this.llm = llm;
@@ -113,6 +116,7 @@ public class DreamService {
         this.autoApproveInr = autoApproveInr;
         this.shotSeconds = shotSeconds;
         this.musicDir = musicDir;
+        this.musicModel = musicModel;
     }
 
     static Look look(String id) {
@@ -163,7 +167,10 @@ public class DreamService {
                     .param("id", UUID.randomUUID()).param("d", id).param("o", ord++).param("scene", s.scene())
                     .param("pp", picturePrompt(w, s, look)).param("mp", motionPrompt(s, look)).update();
         }
-        jdbc.sql("UPDATE dream_short SET title = :t, world_json = CAST(:w AS jsonb), final_asset_id = NULL, updated_at = now() WHERE id = :d")
+        jdbc.sql("""
+                        UPDATE dream_short SET title = :t, world_json = CAST(:w AS jsonb), final_asset_id = NULL,
+                               music_asset_id = NULL, updated_at = now() WHERE id = :d
+                        """)
                 .param("t", w.title()).param("w", json.writeValueAsString(w)).param("d", id).update();
         return "\"%s\": %d shots in one world (%s).".formatted(w.title(), shots.size(), Objects.toString(w.palette(), "").strip());
     }
@@ -361,6 +368,48 @@ public class DreamService {
                 errors.isEmpty() ? "" : "; " + errors.size() + " failed: " + errors.getFirst());
     }
 
+    // ------------------------------------------------------------------------------------------- MUSIC
+
+    /** Length the finished Short will have: the shots minus the dissolves between them, plus a second of tail. */
+    double shortSeconds(int shots) {
+        double clip = (double) frames(shotSeconds) / FPS;
+        return shots * clip - Math.max(0, shots - 1) * Math.min(0.5, clip / 3) + 1;
+    }
+
+    @Transactional
+    public com.projectv.media.MediaTypes.MusicRequest musicRequest(UUID id, String notes) {
+        Map<String, Object> d = dream(id);
+        Look look = look((String) d.get("look"));
+        DreamWorld w = d.get("world_json") == null ? null : json.readValue(d.get("world_json").toString(), DreamWorld.class);
+        double target = shortSeconds(shots(id).size());
+        BigDecimal inr = pricing.musicInr(1);
+        route(id, "DREAM_MUSIC", "music.dream", LYRIA, inr);
+        budget.require(inr, "Dream Short music (1 Lyria generation)");
+        String world = w == null ? String.valueOf(d.get("idea"))
+                : String.join(" ", Objects.toString(w.world(), ""), "Palette:", Objects.toString(w.palette(), ""),
+                "Light:", Objects.toString(w.light(), ""));
+        String prompt = String.join("\n",
+                "Instrumental music only, no vocals, no lyrics. About " + Math.round(target) + " seconds, for a wordless vertical Short.",
+                "Feeling: a calm, slightly eerie dream; soft, warm, floating, nostalgic. Gentle start, no hard drums.",
+                "Look of the video: " + look.brief(),
+                "World: " + world,
+                notes == null || notes.isBlank() ? "" : "Owner's notes: " + notes.strip()).strip();
+        return new com.projectv.media.MediaTypes.MusicRequest(storageId(id), musicModel, prompt, target, 1);
+    }
+
+    @Transactional
+    public String saveMusic(UUID id, com.projectv.media.MediaTypes.MusicResult r) {
+        int songs = r.usage() == null || r.usage().isEmpty() ? Math.max(1, r.segments()) : r.usage().size();
+        // Recorded as gemini_api: the provider the monthly Gemini cap counts (BudgetGuard.GEMINI).
+        cost(id, BudgetGuard.GEMINI, pricing.musicInr(songs), songs, "song", true, "Dream Short music (" + r.model() + ")");
+        UUID asset = assets.create(new NewAsset(null, "audio", r.uri(), "audio/wav", null, null, r.durationSec(),
+                LYRIA, r.model(), null, null, AssetStore.LICENCE_GEMINI, true));
+        jdbc.sql("UPDATE asset SET dream_short_id = :d WHERE id = :a").param("d", id).param("a", asset).update();
+        jdbc.sql("UPDATE dream_short SET music_asset_id = :a, final_asset_id = NULL, updated_at = now() WHERE id = :d")
+                .param("a", asset).param("d", id).update();
+        return "Music: %.0f s at about %.0f BPM (%s).".formatted(r.durationSec(), r.bpm(), r.model());
+    }
+
     // ------------------------------------------------------------------------------------------- FINISH
 
     public DreamFinishRequest finishRequest(UUID id) {
@@ -374,8 +423,10 @@ public class DreamService {
         if (clips.isEmpty()) {
             throw new IllegalStateException("No shots to finish");
         }
-        return new DreamFinishRequest(storageId(id), (String) dream(id).get("look"), clips, 1080, 1920, 24, 0.5,
-                musicDir == null || musicDir.isBlank() ? null : musicDir, publicUrl);
+        Map<String, Object> d = dream(id);
+        String musicUri = d.get("music_asset_id") == null ? null : assets.uriOf((UUID) d.get("music_asset_id"));
+        return new DreamFinishRequest(storageId(id), (String) d.get("look"), clips, 1080, 1920, 24, 0.5,
+                musicDir == null || musicDir.isBlank() ? null : musicDir, publicUrl, musicUri);
     }
 
     @Transactional
@@ -393,7 +444,7 @@ public class DreamService {
         tag("routing_decision", decision, id);
         return "Finished: %.1f s, %dx%d at %d fps (%s)%s.".formatted(r.durationSec(), r.width(), r.height(), r.fps(),
                 "rife-laptop".equals(r.smoothing()) ? "smoothed with RIFE on the laptop" : "smoothed with FFmpeg",
-                r.music() == null ? ", no music (no music folder set)" : ", music: " + r.music());
+                r.music() == null ? ", no music" : ", music: " + r.music());
     }
 
     // ------------------------------------------------------------------------------------------- shared helpers

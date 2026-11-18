@@ -61,3 +61,13 @@ def test_finish_makes_one_vertical_24fps_short(tmp_path, monkeypatch):
     assert r["durationSec"] == pytest.approx(3.5, abs=0.15)
     out = work / "dream-short.mp4"
     assert out.exists() and media_duration(out) == pytest.approx(3.5, abs=0.15)
+
+    # With the Short's own score (Lyria): it is fetched from storage and mixed in.
+    score = tmp_path / "score.wav"
+    run_ffmpeg(["-f", "lavfi", "-i", "sine=frequency=440:duration=6", str(score)])
+    work2 = tmp_path / "work2"
+    work2.mkdir()
+    r2 = dream.finish({"dreamId": "d1", "look": "dreamcore", "clips": clips, "width": 270, "height": 480, "fps": 24,
+                       "dissolveSec": 0.5, "musicDir": None, "musicUri": "s3://test/score.wav"}, work2)
+    assert r2["music"] == "Lyria score"
+    assert media_duration(work2 / "dream-short.mp4") == pytest.approx(3.5, abs=0.15)
