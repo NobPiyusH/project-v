@@ -53,8 +53,9 @@ public final class DreamTypes {
     }
 
     /** @param smoothing "rife-laptop" | "ffmpeg" (how 16 fps became 24); {@code music} the track used, or null */
+    /** {@code metrics}: what the finished Short measures (motion, colour, shadows, cuts, loudness...), for the learning loop. */
     public record DreamFinishResult(String uri, double durationSec, int width, int height, int fps, String smoothing,
-                                    String music, String error) {
+                                    String music, String error, Map<String, Double> metrics) {
     }
 
     /**

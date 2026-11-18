@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import hashlib
 import random
+import re
+import subprocess
 from pathlib import Path
 
 from temporalio import activity
 
-from workers.common import get_bytes, log, media_duration, put_file, run_ffmpeg, workdir
+from workers.common import ffmpeg_bin, get_bytes, log, media_duration, put_file, run_ffmpeg, workdir
 
 MUSIC_EXTENSIONS = {".mp3", ".wav", ".m4a", ".flac", ".ogg", ".aac"}
 
@@ -181,6 +183,40 @@ def _smooth(src: Path, dst: Path, src_fps: float, dst_fps: int, speed: float = 1
     return "ffmpeg"
 
 
+CUT_JUMP = 12.0  # mean luma change between frames above which we call it a cut (measured on the owner's examples)
+
+
+def summarise(motion: list[float], saturation: list[float], low: list[float]) -> dict:
+    """Per-frame numbers -> the Short's metrics (pure, unit-tested)."""
+    moving = [m for m in motion if m < CUT_JUMP]
+    cuts = sum(1 for m in motion if m >= CUT_JUMP)
+    avg = lambda xs: round(sum(xs) / len(xs), 2) if xs else 0.0  # noqa: E731
+    return {"motion": avg(moving), "cuts": float(cuts), "colour": avg(saturation), "shadows": avg(low)}
+
+
+def measure(path: Path, tmp: Path) -> dict:
+    """What a finished Short measures, for the learning loop: motion between frames (cuts left out), number of cuts,
+    colour strength, the level of its darkest tenth (shadows), loudness. The same checks used on the owner's examples."""
+    def series(vf: str, key: str) -> list[float]:
+        f = tmp / f"m-{key}.txt"
+        # run inside tmp: a Windows path (C:...) can't go inside a filter's file= option
+        subprocess.run([ffmpeg_bin(), "-hide_banner", "-y", "-i", str(path), "-an", "-vf",
+                        f"scale=180:320,{vf}signalstats,metadata=print:key=lavfi.signalstats.{key}:file={f.name}",
+                        "-f", "null", "-"], cwd=tmp, capture_output=True, check=True)
+        return [float(x) for x in re.findall(rf"{key}=([0-9.]+)", f.read_text())]
+    try:
+        out = summarise(series("tblend=all_mode=difference,", "YAVG"), series("", "SATAVG"), series("", "YLOW"))
+        loud = subprocess.run([ffmpeg_bin(), "-hide_banner", "-nostats", "-i", str(path), "-af", "ebur128", "-f", "null", "-"],
+                              capture_output=True, text=True, check=False).stderr
+        m = re.findall(r"I:\s+(-?[\d.]+) LUFS", loud)
+        if m:
+            out["loudnessLufs"] = float(m[-1])
+        return out
+    except Exception as e:  # noqa: BLE001 - no metrics never stops a Short
+        log.warning("Measuring %s failed: %s", path.name, e)
+        return {}
+
+
 def dissolve_of(req: dict) -> float:
     """The request's dissolve length; 0 means hard cuts (not "unset")."""
     return 0.5 if req.get("dissolveSec") is None else float(req["dissolveSec"])
@@ -233,8 +269,11 @@ def finish(req: dict, tmp: Path) -> dict:
     smoothing = "rife-laptop" if how == {"rife-laptop"} else "ffmpeg" if "ffmpeg" in how else sorted(how)[0]
     log.info("Dream Short %s finished: %.1f s (%s, music: %s, %d cuts on the beat)", dream_id, length, smoothing,
              music_name, synced)
-    return {"uri": uri, "durationSec": round(media_duration(out), 3), "width": width, "height": height, "fps": fps,
-            "smoothing": smoothing, "music": music_name, "error": None}
+    duration = round(media_duration(out), 3)
+    metrics = {**measure(out, tmp), "durationSec": duration, "shots": float(len(smoothed)), "cutsOnBeat": float(synced),
+               "speed": float(req.get("speed") or 1.0)}
+    return {"uri": uri, "durationSec": duration, "width": width, "height": height, "fps": fps,
+            "smoothing": smoothing, "music": music_name, "error": None, "metrics": metrics}
 
 
 @activity.defn(name="dream_finish")

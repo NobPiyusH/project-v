@@ -59,6 +59,7 @@ def test_finish_makes_one_vertical_24fps_short(tmp_path, monkeypatch):
     assert r["uri"] == "s3://bucket/videos/d1/dream-short.mp4"
     assert r["smoothing"] == "ffmpeg" and r["music"] is None
     assert r["durationSec"] == pytest.approx(3.5, abs=0.15)
+    assert r["metrics"]["cuts"] >= 0 and r["metrics"]["colour"] >= 0 and "motion" in r["metrics"]
     out = work / "dream-short.mp4"
     assert out.exists() and media_duration(out) == pytest.approx(3.5, abs=0.15)
 
@@ -122,3 +123,8 @@ def test_slowed_clip_gets_longer(tmp_path):
     out = tmp_path / "s.mp4"
     dream._smooth(src, out, 16, 24, 0.7)
     assert media_duration(out) == pytest.approx(2 / 0.7, abs=0.15)
+
+
+def test_metrics_leave_cuts_out_of_the_motion():
+    m = dream.summarise([1.0, 2.0, 30.0, 3.0], [20.0, 30.0], [35.0, 45.0])
+    assert m == {"motion": 2.0, "cuts": 1.0, "colour": 25.0, "shadows": 40.0}

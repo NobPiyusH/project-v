@@ -156,7 +156,7 @@ class DreamShortWorkflowTest {
     static class FakeFinish implements DreamMediaActivities {
         @Override
         public DreamFinishResult dreamFinish(DreamFinishRequest request) {
-            return new DreamFinishResult("s3://final", 15, 1080, 1920, 24, "ffmpeg", null, null);
+            return new DreamFinishResult("s3://final", 15, 1080, 1920, 24, "ffmpeg", null, null, java.util.Map.of());
         }
 
         @Override

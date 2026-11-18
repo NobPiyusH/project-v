@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { assetUrl } from '../api'
-import { DREAM_STEPS, dreamApi, type DreamMode, type DreamStep, type DreamSummary } from '../dreamApi'
+import { DREAM_STEPS, dreamApi, type DreamDetail, type DreamMode, type DreamStep, type DreamSummary } from '../dreamApi'
 import { usePoll } from '../hooks'
 
 const STEP_LABEL: Record<DreamStep, string> = { WRITE: 'Write', PICTURES: 'Pictures', CLIPS: 'Clips', MUSIC: 'Music', FINISH: 'Finish' }
@@ -207,6 +207,8 @@ function DreamView({ id }: { id: string }) {
         </div>
       </section>
 
+      <Evidence d={d} />
+
       <section className="card">
         <div className="card-head"><h2>Why these providers, and what it cost</h2></div>
         {d.decisions.length === 0 && <p className="muted small">No routing decisions yet.</p>}
@@ -219,5 +221,46 @@ function DreamView({ id }: { id: string }) {
         </table>}
       </section>
     </>
+  )
+}
+
+// The owner's example Shorts, measured the same way (19 Nov 2026): what "good" looks like for the learning loop.
+const EXAMPLES: Record<string, string> = {
+  motion: '1.2–1.5 (lonely object), 3.2 (walk-through)', colour: '26–27 (lonely object), 15 (walk-through)',
+  shadows: '—', loudnessLufs: '−14', cuts: '3–4 per 15–20 s',
+}
+const METRIC_LABEL: Record<string, string> = {
+  motion: 'Camera / scene motion', colour: 'Colour strength', shadows: 'Darkest areas (higher = more detail)',
+  cuts: 'Cuts', cutsOnBeat: 'Cuts on the beat', loudnessLufs: 'Loudness (LUFS)', durationSec: 'Length (s)',
+  shots: 'Shots', speed: 'Playback speed',
+}
+
+function parse(s: string | null): Record<string, unknown> {
+  try { return s ? JSON.parse(s) : {} } catch { return {} }
+}
+
+/** Learning loop, phase 1: what this Short measured, what each paid step cost against its estimate, every decision. */
+function Evidence({ d }: { d: DreamDetail }) {
+  const latest = d.metrics[0] ? parse(d.metrics[0].metrics) as Record<string, number> : null
+  const costs = d.events.filter((e) => e.kind === 'cost')
+  const decisions = d.events.filter((e) => e.kind !== 'cost')
+  return (
+    <section className="card">
+      <div className="card-head"><h2>Evidence</h2><span className="muted small">what the studio learns from</span></div>
+      {latest && <table className="small" style={{ width: '100%', marginBottom: 12 }}>
+        <thead><tr><th align="left">Measured</th><th align="left">This Short</th><th align="left">Your examples</th></tr></thead>
+        <tbody>{Object.keys(METRIC_LABEL).filter((k) => latest[k] !== undefined).map((k) => (
+          <tr key={k}><td>{METRIC_LABEL[k]}</td><td>{latest[k]}</td><td className="muted">{EXAMPLES[k] ?? ''}</td></tr>))}</tbody>
+      </table>}
+      {costs.length > 0 && <div className="small" style={{ marginBottom: 12 }}>
+        {costs.map((e, i) => { const x = parse(e.data) as Record<string, number>; return (
+          <div key={i}>{e.step}: estimated ₹{x.estimateInr} → actually ₹{x.actualInr}
+            {x.ratio > 1.2 || (x.ratio > 0 && x.ratio < 0.8) ? <span className="error"> (off by {x.ratio}×)</span> : null}</div>) })}
+      </div>}
+      {decisions.length === 0 && !latest && <p className="muted small">Nothing recorded yet.</p>}
+      {decisions.map((e, i) => (
+        <div key={i} className="small muted">{new Date(e.created_at).toLocaleString()} · {e.kind}{e.step ? ` ${e.step}` : ''}
+          {e.notes ? ` · “${e.notes}”` : ''}{e.data && e.kind === 'mode' ? ` · ${String(parse(e.data).mode)}` : ''}</div>))}
+    </section>
   )
 }

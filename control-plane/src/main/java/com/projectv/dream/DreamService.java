@@ -46,6 +46,8 @@ import java.util.UUID;
 @Component
 public class DreamService {
 
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(DreamService.class);
+
     static final String ZIMAGE = "modal_zimage";
     static final String WAN = "modal_wan";
     static final String LYRIA = "gemini_lyria";
@@ -187,6 +189,7 @@ public class DreamService {
     private final String musicModel;
     private final String musicBed;
     private final String listenModel;
+    private final DreamEvidence evidence;
 
     public DreamService(JdbcClient jdbc, ObjectMapper json, Llm llm, AssetStore assets, Pricing pricing, BudgetGuard budget,
                         Router router, com.projectv.video.ClipProgress clipProgress,
@@ -220,6 +223,11 @@ public class DreamService {
         this.musicModel = musicModel;
         this.musicBed = musicBed;
         this.listenModel = listenModel;
+        this.evidence = new DreamEvidence(jdbc, json);
+    }
+
+    public DreamEvidence evidence() {
+        return evidence;
     }
 
     static Look look(String id) {
@@ -412,10 +420,19 @@ public class DreamService {
         if (jobs.isEmpty()) {
             return 0;
         }
-        // 720p is measured on its own: render time grows faster than the pixel count (19 Nov 2026: ~2x the old guess).
-        double per81 = pricing.wanSecondsPer81Frames("720p".equals(quality) ? "draft720" : "draft");
+        // Measured timings (recalibrated after every batch) win over the config's numbers. 720p is its own number:
+        // render time grows faster than the pixel count (19 Nov 2026: ~2x the old pixel-scaled guess).
+        String kind = clipKind(quality);
+        evidence.recalibrate(kind); // cheap; keeps the estimate on the latest real timings
+        double per81 = evidence.calibrated(kind + ".per81")
+                .orElse(pricing.wanSecondsPer81Frames("720p".equals(quality) ? "draft720" : "draft"));
+        double firstExtra = evidence.calibrated(kind + ".first_extra").orElse(pricing.wanFirstClipExtraSeconds());
         return jobs.stream().mapToDouble(j -> per81 * j.numFrames() / MAX_FRAMES).sum()
-                + pricing.wanFirstClipExtraSeconds() + pricing.gpuContainerStartSeconds();
+                + firstExtra + pricing.gpuContainerStartSeconds();
+    }
+
+    static String clipKind(String quality) {
+        return "wan.fast." + ("720p".equals(quality) ? "720p" : "480p");
     }
 
     @Transactional
@@ -425,6 +442,9 @@ public class DreamService {
         int ok = 0;
         int stopped = 0;
         double gpu = 0;
+        BigDecimal spent = BigDecimal.ZERO;
+        String kind = clipKind((String) dream(id).get("quality"));
+        boolean first = r.containers() > 0;
         List<String> errors = new ArrayList<>();
         for (ClipOutput o : r.clips()) {
             ClipJob job = jobs.get(o.shotId() + ":" + o.take());
@@ -432,6 +452,11 @@ public class DreamService {
                 continue;
             }
             gpu += o.gpuSeconds();
+            if (o.gpuSeconds() > 0) {
+                evidence.gpuTiming(id, kind, o.frames() > 0 ? o.frames() : job.numFrames(), o.gpuSeconds(), first);
+                first = false;
+                spent = spent.add(pricing.modalGpuInr("H100", o.gpuSeconds()));
+            }
             if (o.gpuSeconds() > 0) {
                 cost(id, "modal_h100", pricing.modalGpuInr("H100", o.gpuSeconds()), o.gpuSeconds(), "gpu_seconds", true,
                         "Dream Short clip, shot %d take %d (Wan fast)".formatted(job.shotNumber(), job.take()));
@@ -459,7 +484,12 @@ public class DreamService {
             double start = r.containers() * pricing.gpuContainerStartSeconds();
             cost(id, "modal_h100", pricing.modalGpuInr("H100", start), start, "gpu_seconds", true,
                     "Dream Short: Wan GPU start-up + model load (estimated)");
+            spent = spent.add(pricing.modalGpuInr("H100", start));
         }
+        if (req.estimateInr() != null && gpu > 0) {
+            evidence.costCheck(id, "CLIPS", req.estimateInr().doubleValue(), spent.doubleValue());
+        }
+        evidence.recalibrate(kind).forEach(c -> log.info("Clip estimate recalibrated: {}", c));
         router.reportBatch(WAN, ok, errors.size(), errors.isEmpty() ? null : errors.getFirst());
         if (ok == 0 && stopped == 0) {
             throw new IllegalStateException("No clips were made: " + String.join(" | ", errors));
@@ -562,6 +592,7 @@ public class DreamService {
     @Transactional
     public String saveMusicBed(UUID id, DreamTypes.DreamBedResult r) {
         if (r.usage() != null) {
+            evidence.costCheck(id, "MUSIC", LISTEN_ESTIMATE_INR.doubleValue(), pricing.textInr(r.usage()).doubleValue());
             cost(id, BudgetGuard.GEMINI, pricing.textInr(r.usage()), r.usage().totalTokens(), "token", false,
                     "Dream Short music pick: Gemini listened to " + r.heard() + " pieces (" + r.model() + ")");
             UUID pick = router.recordExternal(null, "DREAM_MUSIC_PICK", "audio.listen", BudgetGuard.GEMINI,
@@ -629,6 +660,7 @@ public class DreamService {
                 "local_laptop", "dream finish (" + r.smoothing() + ", FFmpeg look)", null, null, AssetStore.LICENCE_WAN, true));
         jdbc.sql("UPDATE asset SET dream_short_id = :d, fps = :f WHERE id = :a").param("d", id).param("f", r.fps()).param("a", asset).update();
         jdbc.sql("UPDATE dream_short SET final_asset_id = :a, updated_at = now() WHERE id = :d").param("a", asset).param("d", id).update();
+        evidence.metrics(id, asset, (String) dream(id).get("look"), r.metrics());
         UUID decision = router.recordExternal(null, "DREAM_FINISH", "interp.rife", "local_laptop",
                 "laptop first: smoothing, look and mix are free on this laptop (" + r.smoothing() + ")",
                 List.of(Map.of("provider", "local_laptop")));
@@ -690,6 +722,9 @@ public class DreamService {
                         UPDATE dream_short SET step = :step, status = :st, message = COALESCE(:m, message), updated_at = now()
                         WHERE id = :id
                         """).param("step", step).param("st", status).param("m", message).param("id", id).update();
+        if ("FAILED_WAITING".equals(status)) {
+            evidence.event(id, step, "failure", null, message, null);
+        }
     }
 
     public void startClipBatch(UUID id) {

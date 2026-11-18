@@ -23,6 +23,8 @@ export interface DreamDetail extends DreamSummary {
   decisions: { stage: string; capability: string; chosen_provider_id: string | null; reason_text: string; created_at: string }[]
   clipProgress: { shotId: string; state: string }[] | null
   view: { step: string | null; status: string; message: string | null; modes: Record<DreamStep, DreamMode>; deadline: string | null } | null
+  events: { step: string | null; kind: string; shot_ids: string | null; notes: string | null; data: string | null; created_at: string }[]
+  metrics: { asset_id: string; look: string | null; metrics: string; created_at: string }[]
 }
 
 export interface NewDream {

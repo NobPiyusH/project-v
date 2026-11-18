@@ -124,8 +124,10 @@ class DreamServicePersistenceTest {
         var fin = dreams.finishRequest(dream);
         assertEquals(List.of("s3://b/c1.mp4", "s3://b/c2.mp4"), fin.clips().stream().map(c -> c.uri()).toList());
         assertEquals(16.0, fin.clips().getFirst().fps());
-        dreams.saveFinish(dream, new DreamTypes.DreamFinishResult("s3://b/final.mp4", 6.5, 1080, 1920, 24, "rife-laptop", null, null));
+        dreams.saveFinish(dream, new DreamTypes.DreamFinishResult("s3://b/final.mp4", 6.5, 1080, 1920, 24, "rife-laptop", null, null,
+                java.util.Map.of("motion", 1.8, "colour", 26.0)));
         assertNotNull(jdbc.sql("SELECT final_asset_id FROM dream_short WHERE id = :d").param("d", dream).query(UUID.class).single());
+        assertEquals(1, count("SELECT count(*) FROM dream_metric WHERE dream_short_id = :d AND (metrics->>'colour')::float = 26"));
         assertEquals(3, count("SELECT count(*) FROM routing_decision WHERE dream_short_id = :d"));
     }
 
@@ -215,6 +217,37 @@ class DreamServicePersistenceTest {
     }
 
     @Test
+    void realGpuTimingsReplaceTheConfigGuessAndCostsAreCheckedAgainstTheEstimate() {
+        var ev = dreams.evidence();
+        String kind = "wan.fast.720p";
+        jdbc.sql("DELETE FROM gpu_timing WHERE kind = :k").param("k", kind).update();
+        jdbc.sql("DELETE FROM calibration WHERE key LIKE 'wan.fast.720p%'").update();
+        ev.gpuTiming(dream, kind, 57, 1, true); // too few warm clips yet: nothing changes
+        assertTrue(ev.recalibrate(kind).isEmpty());
+        jdbc.sql("DELETE FROM gpu_timing WHERE kind = :k").param("k", kind).update();
+        ev.gpuTiming(dream, kind, 57, 70, false);
+        ev.gpuTiming(dream, kind, 57, 84, false);
+        ev.gpuTiming(dream, kind, 57, 140, true);
+        assertEquals(2, ev.recalibrate(kind).size());
+        double per81 = (70 + 84) / 2.0 * 81 / 57;
+        assertEquals(per81, ev.calibrated(kind + ".per81").orElseThrow(), 0.01);
+        assertEquals(140 - 77, ev.calibrated(kind + ".first_extra").orElseThrow(), 0.01); // the first clip took 63 s longer
+        jdbc.sql("UPDATE dream_short SET quality = '720p' WHERE id = :d").param("d", dream).update();
+        var pics = dreams.pictureRequest(dream, null, null);
+        dreams.savePictures(dream, pics, new KeyframeResult(List.of(
+                new KeyframeOutput(shot1.toString(), "s3://b/p1.png", "modal_zimage", "z", 1L, 5.0, null, null, List.of())), 5));
+        double minutes = dreams.clipEstimate(dream, null).minutes();
+        assertEquals((per81 * 57 / 81 + ev.calibrated(kind + ".first_extra").orElseThrow() + 140) / 60, minutes, 0.01);
+        ev.costCheck(dream, "CLIPS", 25, 47);
+        dreams.status(dream, "CLIPS", "FAILED_WAITING", "GPU cap reached");
+        String kinds = ev.events(dream).stream().map(e -> (String) e.get("kind")).toList().toString();
+        assertTrue(kinds.contains("cost") && kinds.contains("failure"), kinds);
+        assertTrue(ev.events(dream).stream().anyMatch(e -> String.valueOf(e.get("data")).contains("\"ratio\": 1.88")));
+        jdbc.sql("DELETE FROM gpu_timing").update();
+        jdbc.sql("DELETE FROM calibration").update();
+    }
+
+    @Test
     void aBatchWithNoClipsFailsSoTheStepWaitsForTheOwner() {
         jdbc.sql("UPDATE dream_shot SET picture_asset_id = NULL").update();
         assertThrows(IllegalStateException.class, () -> dreams.clipRequest(dream, null));
@@ -222,6 +255,8 @@ class DreamServicePersistenceTest {
 
     @Test
     void estimateAsksWhenOverTheAutoApproveAmount() {
+        jdbc.sql("DELETE FROM gpu_timing").update(); // the config's numbers, not another test's measured ones
+        jdbc.sql("DELETE FROM calibration").update();
         var pics = dreams.pictureRequest(dream, null, null);
         dreams.savePictures(dream, pics, new KeyframeResult(List.of(
                 new KeyframeOutput(shot1.toString(), "s3://b/p1.png", "modal_zimage", "z", 1L, 5.0, null, null, List.of())), 5));

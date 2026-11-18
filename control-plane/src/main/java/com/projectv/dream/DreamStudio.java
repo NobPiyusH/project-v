@@ -69,6 +69,8 @@ public class DreamStudio {
         DreamShortWorkflow wf = temporal.newWorkflowStub(DreamShortWorkflow.class,
                 WorkflowOptions.newBuilder().setWorkflowId(workflowId).setTaskQueue(TaskQueues.CONTROL).build());
         WorkflowClient.start(wf::run, new DreamRequest(id.toString(), defaultMode, modes, review));
+        dreams.evidence().event(id, null, "create", null, req.idea(), Map.of("look", look, "shots", shots, "quality", quality,
+                "music", "lyria".equalsIgnoreCase(req.music()) ? "lyria" : "bed", "mode", defaultMode.name()));
         return id;
     }
 
@@ -98,6 +100,7 @@ public class DreamStudio {
                 WorkflowOptions.newBuilder().setWorkflowId("dream-" + id).setTaskQueue(TaskQueues.CONTROL).build());
         WorkflowClient.start(wf::run, new DreamRequest(id.toString(), StageMode.AUTO, modes,
                 ((Number) d.get("review_minutes")).intValue(), from));
+        dreams.evidence().event(id, from.name(), "rerun", null, null, null);
     }
 
     public List<Map<String, Object>> list() {
@@ -124,6 +127,8 @@ public class DreamStudio {
                         SELECT stage, capability, chosen_provider_id, reason_text, candidates_json::text AS candidates, created_at
                         FROM routing_decision WHERE dream_short_id = :d ORDER BY created_at
                         """).param("d", id).query().listOfRows());
+        out.put("events", dreams.evidence().events(id));
+        out.put("metrics", dreams.evidence().metrics(id));
         var progress = clipProgress.get(id);
         out.put("clipProgress", progress == null ? null : progress.clips());
         try {
@@ -136,30 +141,40 @@ public class DreamStudio {
 
     public void approve(UUID id, DreamStep step) {
         stub(id).approve(step);
+        dreams.evidence().event(id, step.name(), "approve", null, null, null);
     }
 
     public void redo(UUID id, DreamStep step, List<String> shotIds, String notes) {
         stub(id).redo(step, shotIds, notes);
+        dreams.evidence().event(id, step.name(), "redo", shotIds, notes, null);
     }
 
     public void setMode(UUID id, DreamStep step, StageMode mode) {
         stub(id).setMode(step, mode);
+        dreams.evidence().event(id, step.name(), "mode", null, null, Map.of("mode", mode.name()));
         jdbc.sql("UPDATE dream_short SET modes_json = jsonb_set(modes_json, CAST(:path AS text[]), to_jsonb(CAST(:m AS text))) WHERE id = :id")
                 .param("path", "{" + step.name() + "}").param("m", mode.name()).param("id", id).update();
     }
 
     public void retry(UUID id) {
         stub(id).retry();
+        dreams.evidence().event(id, null, "retry", null, null, null);
     }
 
     public void cancel(UUID id) {
         clipProgress.requestStop(id);
         stub(id).cancel();
+        dreams.evidence().event(id, null, "cancel", null, null, null);
     }
 
     /** The owner's Stop: clips in flight stop after the one being rendered (rule 8). */
     public void stopClips(UUID id) {
         clipProgress.requestStop(id);
+        dreams.evidence().event(id, "CLIPS", "stop", null, null, null);
+    }
+
+    public List<Map<String, Object>> calibration() {
+        return dreams.evidence().calibration();
     }
 
     private DreamShortWorkflow stub(UUID id) {

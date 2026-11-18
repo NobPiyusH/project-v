@@ -36,6 +36,12 @@ public class DreamController {
         return DreamService.LOOK_ORDER;
     }
 
+    /** Measured GPU timings that replaced the config's guesses (learning loop, phase 1). */
+    @GetMapping("/calibration")
+    public List<Map<String, Object>> calibration() {
+        return studio.calibration();
+    }
+
     @PostMapping
     public Map<String, Object> create(@RequestBody NewDream body) {
         return Map.of("id", studio.create(body));
