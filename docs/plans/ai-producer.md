@@ -33,7 +33,7 @@ sharper prompts for redos, asks the owner only when it should, and **learns from
 5. **Report** at the end of the video: what it approved, redid, spent and why, plus what it learned.
 
 ## Money rules (owner sets per video, defaults in config)
-- Producer budget per video (default: Rs 150 for a Short), on top of the existing monthly caps (never overrides them).
+- Producer budget per video (owner, 18 Nov 2026: Rs 100 for a Short), on top of the existing monthly caps (never overrides them).
 - "Ask me above Rs X" for any single decision (default Rs 50).
 - Redo limit per item (default 2) and per stage (default 3 rounds).
 - Before a redo it compares cost vs expected gain; the cheapest fix first (e.g. re-voice one line, not the script).
@@ -84,5 +84,5 @@ Expected to save more by catching weak takes before paid finals and upscaling.
 
 ## Decisions needed from the owner
 1. Approve P1 + P2 as above?
-2. Defaults OK: Rs 150 Producer budget per Short, ask above Rs 50, 2 redos per item?
+2. Defaults: Rs 100 Producer budget per Short (owner set), ask above Rs 50, 2 redos per item?
 3. Start in advise-only for the first ~10 decisions, then let it decide? (recommended)
