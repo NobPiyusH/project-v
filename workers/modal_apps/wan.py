@@ -75,7 +75,7 @@ progress = modal.Dict.from_name("projectv-progress", create_if_missing=True)
     volumes={"/cache": hf_cache},
     timeout=3600,
     memory=98304,          # room for the offload fallback
-    scaledown_window=120,  # CLAUDE.md rule 8: never leave a GPU idling
+    scaledown_window=30,   # CLAUDE.md rule 8 + cost (18 Nov): drafts stream in one call, so idle time is pure waste
     max_containers=4,      # parallel clips across at most 4 GPUs: faster, same total GPU time, capped spend rate
 )
 class Wan:

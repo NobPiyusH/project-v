@@ -51,11 +51,14 @@ public class DirectorAgent {
                 - shotType: extreme_wide, wide, medium, close_up, macro, aerial, pov
                 - priority: "hero" for the 10-20%% of shots that matter most (opening, reveals, climax, ending), else "standard"
                 - overlayText: short on-screen text such as the clock value ("13.8 billion years ago"), or empty
-                - footageQuery: only when REAL footage would show this line better and truer than a generated image:
+                - footageQuery: whenever a REAL recording of this exact thing is likely to exist and would show the
+                  line as well as or truer than a generated image (it is free, and real footage reads as authentic):
                   space (the real Sun, Earth from orbit, launches, telescope views) from NASA, or real nature, animals,
-                  places and expeditions (e.g. NOAA deep-sea dives) from Wikimedia Commons. 2-5 exact search words,
-                  such as "solar flare SDO", "Okeanos Explorer", "deep sea". Otherwise empty. Always for a real event
-                  or "first ever" claim. Never for imaginary or abstract scenes.
+                  insects, plants, weather, microscopy, lab experiments, places, historic events and expeditions (e.g.
+                  NOAA deep-sea dives) from Wikimedia Commons. In science videos, aim for roughly a quarter of the
+                  shots where it fits. 2-5 exact search words, such as "solar flare SDO", "Okeanos Explorer",
+                  "firefly bioluminescence". Otherwise empty. Always for a real event or "first ever" claim. Never for
+                  imaginary, dreamlike or abstract scenes, and never for hero shots that need a specific composition.
                 - sfxQuery: 2-4 words for a quiet background sound that makes the shot feel real ("underwater
                   ambience", "train interior", "wind over grass", "crackling fire"); keep the same words across
                   consecutive shots in one place so the ambience flows. Empty for silence or pure music moments.

@@ -51,7 +51,7 @@ def plan_frames(n_src: int, src_fps: float, dst_fps: float) -> list[tuple[int, f
     return out
 
 
-@app.cls(image=image, gpu="L4", timeout=3600, scaledown_window=120, max_containers=1, memory=16384)
+@app.cls(image=image, gpu="L4", timeout=3600, scaledown_window=30, max_containers=1, memory=16384)
 class Smooth:
 
     @modal.enter()

@@ -35,7 +35,7 @@ hf_cache = modal.Volume.from_name("projectv-hf-cache", create_if_missing=True)
     image=image,
     volumes={"/cache": hf_cache},
     timeout=1800,
-    scaledown_window=120,  # shut down 2 min after the last call (CLAUDE.md rule 8)
+    scaledown_window=30,   # shut down 30 s after the last call (CLAUDE.md rule 8; cost, 18 Nov)
 )
 class ZImage:
     @modal.enter()
