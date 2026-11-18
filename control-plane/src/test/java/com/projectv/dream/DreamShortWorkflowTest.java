@@ -136,7 +136,7 @@ class DreamShortWorkflowTest {
 
         @Override
         public DreamFinishRequest finishRequest(String dreamId) {
-            return new DreamFinishRequest(dreamId, "dreamcore", List.of(), 1080, 1920, 24, 0.5, null, "u", null, null, 1.0, "none");
+            return new DreamFinishRequest(dreamId, "dreamcore", List.of(), 1080, 1920, 24, 0.5, null, "u", null, null, 1.0, "none", true, true, true);
         }
 
         @Override

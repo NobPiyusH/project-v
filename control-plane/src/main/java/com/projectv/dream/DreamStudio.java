@@ -21,7 +21,8 @@ import java.util.UUID;
 public class DreamStudio {
 
     public record NewDream(String idea, String look, Integer shots, String quality, String defaultMode,
-                           Map<String, String> modes, Integer reviewMinutes, String music, Boolean scout) {
+                           Map<String, String> modes, Integer reviewMinutes, String music, Boolean scout,
+                           Boolean musicEdit, Boolean ambience, Boolean pacing) {
     }
 
     private final JdbcClient jdbc;
@@ -60,9 +61,12 @@ public class DreamStudio {
         }
         jdbc.sql("""
                         INSERT INTO dream_short (id, idea, look, shot_count, quality, modes_json, review_minutes, status, step, workflow_id,
-                                                 music_source, scout)
-                        VALUES (:id, :idea, :look, :n, :q, CAST(:modes AS jsonb), :r, 'RUNNING', 'SCOUT', :wf, :music, :scout)
+                                                 music_source, scout, edit_music, edit_ambience, edit_pacing)
+                        VALUES (:id, :idea, :look, :n, :q, CAST(:modes AS jsonb), :r, 'RUNNING', 'SCOUT', :wf, :music, :scout,
+                                :em, :ea, :ep)
                         """)
+                .param("em", req.musicEdit() == null || req.musicEdit()).param("ea", req.ambience() == null || req.ambience())
+                .param("ep", req.pacing() == null || req.pacing())
                 .param("scout", req.scout() == null || req.scout())
                 .param("music", "lyria".equalsIgnoreCase(req.music()) ? "lyria" : "bed")
                 .param("id", id).param("idea", req.idea().strip()).param("look", look).param("n", shots).param("q", quality)
@@ -180,6 +184,19 @@ public class DreamStudio {
         jdbc.sql("UPDATE dream_short SET scout_angle = :a, updated_at = now() WHERE id = :id").param("a", Math.max(1, angle))
                 .param("id", id).update();
         dreams.evidence().event(id, "SCOUT", "angle", null, null, Map.of("angle", angle));
+    }
+
+    /** The editing switches (music-led cuts, J-cut ambience, pacing); they apply at the next finish or re-finish. */
+    public void editing(UUID id, Boolean musicEdit, Boolean ambience, Boolean pacing) {
+        jdbc.sql("""
+                        UPDATE dream_short SET edit_music = COALESCE(:em, edit_music), edit_ambience = COALESCE(:ea, edit_ambience),
+                               edit_pacing = COALESCE(:ep, edit_pacing), updated_at = now() WHERE id = :id
+                        """).param("em", musicEdit).param("ea", ambience).param("ep", pacing).param("id", id).update();
+        var data = new java.util.HashMap<String, Object>();
+        if (musicEdit != null) data.put("musicEdit", musicEdit);
+        if (ambience != null) data.put("ambience", ambience);
+        if (pacing != null) data.put("pacing", pacing);
+        dreams.evidence().event(id, "FINISH", "editing", null, null, data);
     }
 
     public List<Map<String, Object>> calibration() {

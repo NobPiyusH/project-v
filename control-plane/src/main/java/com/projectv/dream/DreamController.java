@@ -84,6 +84,15 @@ public class DreamController {
         studio.pickAngle(id, n);
     }
 
+    public record EditingBody(Boolean musicEdit, Boolean ambience, Boolean pacing) {
+    }
+
+    /** Switch the editing rules for this Short; they apply at the next finish (use "Redo from Finish", free). */
+    @PostMapping("/{id}/editing")
+    public void editing(@PathVariable UUID id, @RequestBody EditingBody body) {
+        studio.editing(id, body.musicEdit(), body.ambience(), body.pacing());
+    }
+
     @PostMapping("/{id}/retry")
     public void retry(@PathVariable UUID id) {
         studio.retry(id);

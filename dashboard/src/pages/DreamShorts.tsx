@@ -3,6 +3,15 @@ import { assetUrl } from '../api'
 import { DREAM_STEPS, dreamApi, type DreamDetail, type DreamMode, type DreamStep, type DreamSummary } from '../dreamApi'
 import { usePoll } from '../hooks'
 
+type EditKey = 'musicEdit' | 'ambience' | 'pacing'
+const EDIT_SWITCHES: [EditKey, string][] = [
+  ['musicEdit', 'Cut to the music (bars, rise, energy)'],
+  ['ambience', 'J-cut ambience'],
+  ['pacing', 'Pacing (hook first, no shot under 3.4 s, climax mid-way)'],
+]
+const EDIT_COLUMN: Record<EditKey, 'edit_music' | 'edit_ambience' | 'edit_pacing'> = {
+  musicEdit: 'edit_music', ambience: 'edit_ambience', pacing: 'edit_pacing',
+}
 const STEP_LABEL: Record<DreamStep, string> = { SCOUT: 'Scout', WRITE: 'Write', PICTURES: 'Pictures', CLIPS: 'Clips', MUSIC: 'Music', FINISH: 'Finish' }
 
 function statusBadge(status: string) {
@@ -30,6 +39,7 @@ function DreamHome() {
   const [review, setReview] = useState(10)
   const [music, setMusic] = useState<'bed' | 'lyria'>('bed')
   const [scout, setScout] = useState(true)
+  const [ed, setEd] = useState({ musicEdit: true, ambience: true, pacing: true })
   const [busy, setBusy] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
 
@@ -40,7 +50,7 @@ function DreamHome() {
     }
     setBusy(true)
     try {
-      const r = await dreamApi.create({ idea, look, shots, quality, defaultMode: mode, reviewMinutes: review, music, scout })
+      const r = await dreamApi.create({ idea, look, shots, quality, defaultMode: mode, reviewMinutes: review, music, scout, ...ed })
       window.location.hash = `#/dream/${r.id}`
     } catch (e) {
       setFormError(e instanceof Error ? e.message : String(e))
@@ -62,6 +72,8 @@ function DreamHome() {
             <option value="lonely">Lonely object</option><option value="drive">Drive-by</option><option value="walkthrough">Walk-through</option><option value="dreamcore">Dreamcore (soft pastel)</option><option value="impossible">Impossible place</option></select></label>
           <label className="small">Shots <select value={shots} onChange={(e) => setShots(Number(e.target.value))}>
             {[3, 4, 5, 6].map((n) => <option key={n} value={n}>{n}</option>)}</select></label>
+          {EDIT_SWITCHES.map(([k, label]) => <label key={k} className="small"><input type="checkbox" checked={ed[k]}
+            onChange={(e) => setEd({ ...ed, [k]: e.target.checked })} /> {label}</label>)}
           <label className="small"><input type="checkbox" checked={scout} onChange={(e) => setScout(e.target.checked)} /> Scout similar Shorts first (≈₹5)</label>
           <label className="small">Music <select value={music} onChange={(e) => setMusic(e.target.value as 'bed' | 'lyria')}>
             <option value="bed">Your track (free)</option><option value="lyria">Lyria (≈₹10)</option></select></label>
@@ -175,6 +187,9 @@ function DreamView({ id }: { id: string }) {
         <section className="card">
           <div className="card-head"><h2>Finished Short</h2>
             <a className="button" href={assetUrl(d.final_asset_id)} download>Download MP4</a></div>
+          <div className="small" style={{ marginBottom: 8 }}>Editing (applies at the next finish; Redo from Finish is free):{' '}
+            {EDIT_SWITCHES.map(([k, label]) => <label key={k} style={{ marginRight: 12 }}><input type="checkbox"
+              checked={d[EDIT_COLUMN[k]]} onChange={(e) => void act(() => dreamApi.editing(id, { [k]: e.target.checked }))} /> {label}</label>)}</div>
           <video src={assetUrl(d.final_asset_id)} controls playsInline style={{ maxHeight: 640, borderRadius: 8 }} />
         </section>
       )}
@@ -231,12 +246,13 @@ function DreamView({ id }: { id: string }) {
 // The owner's example Shorts, measured the same way (19 Nov 2026): what "good" looks like for the learning loop.
 const EXAMPLES: Record<string, string> = {
   motion: '1.2–1.5 (lonely object), 3.2 (walk-through)', colour: '26–27 (lonely object), 15 (walk-through)',
-  shadows: '—', loudnessLufs: '−14', cuts: '3–4 per 15–20 s',
+  shadows: '—', loudnessLufs: '−14', cuts: '3–4 per 15–20 s', climaxAtPct: '38–68', shortestShotSec: '≥ 3.4',
 }
 const METRIC_LABEL: Record<string, string> = {
   motion: 'Camera / scene motion', colour: 'Colour strength', shadows: 'Darkest areas (higher = more detail)',
   cuts: 'Cuts', cutsOnBeat: 'Cuts on the beat', loudnessLufs: 'Loudness (LUFS)', durationSec: 'Length (s)',
-  shots: 'Shots', speed: 'Playback speed',
+  shots: 'Shots', speed: 'Playback speed', hookShot: 'Opening (hook) shot', climaxAtPct: 'Climax at (% of length)',
+  musicRiseSec: 'Music rise at (s)', shortestShotSec: 'Shortest shot (s)', ambiences: 'Ambience beds',
 }
 
 function parse(s: string | null): Record<string, unknown> {

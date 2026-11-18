@@ -17,7 +17,8 @@ export interface DreamShot {
 }
 
 export interface DreamDetail extends DreamSummary {
-  shot_count: number; quality: string; review_minutes: number; music_asset_id: string | null; music_source: 'bed' | 'lyria'; scout: boolean; scout_json: string | null; scout_angle: number; modes_json: string | Record<string, DreamMode>
+  shot_count: number; quality: string; review_minutes: number; music_asset_id: string | null; music_source: 'bed' | 'lyria'; scout: boolean; scout_json: string | null; scout_angle: number;
+  edit_music: boolean; edit_ambience: boolean; edit_pacing: boolean; modes_json: string | Record<string, DreamMode>
   shots: DreamShot[]
   costs: { provider_id: string; amount_inr: number; units: number | null; unit_type: string | null; estimated: boolean; note: string; ts: string }[]
   decisions: { stage: string; capability: string; chosen_provider_id: string | null; reason_text: string; created_at: string }[]
@@ -31,6 +32,7 @@ export interface NewDream {
   idea: string; look: string; shots: number; quality: string; defaultMode: DreamMode; reviewMinutes: number
   music: 'bed' | 'lyria'
   scout: boolean
+  musicEdit: boolean; ambience: boolean; pacing: boolean
 }
 
 async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -56,6 +58,7 @@ export const dreamApi = {
     call<void>('POST', `/${id}/steps/${step}/redo`, { shotIds, notes }),
   setMode: (id: string, step: DreamStep, mode: DreamMode) => call<void>('POST', `/${id}/steps/${step}/mode`, { mode }),
   retry: (id: string) => call<void>('POST', `/${id}/retry`),
+  editing: (id: string, e: { musicEdit?: boolean; ambience?: boolean; pacing?: boolean }) => call<void>('POST', `/${id}/editing`, e),
   pickAngle: (id: string, n: number) => call<void>('POST', `/${id}/scout/angle/${n}`),
   rerun: (id: string, from: DreamStep) => call<void>('POST', `/${id}/rerun/${from}`),
   stop: (id: string) => call<void>('POST', `/${id}/stop`),

@@ -128,6 +128,11 @@ class DreamServicePersistenceTest {
                 java.util.Map.of("motion", 1.8, "colour", 26.0)));
         assertNotNull(jdbc.sql("SELECT final_asset_id FROM dream_short WHERE id = :d").param("d", dream).query(UUID.class).single());
         assertEquals(1, count("SELECT count(*) FROM dream_metric WHERE dream_short_id = :d AND (metrics->>'colour')::float = 26"));
+        var on = dreams.finishRequest(dream);
+        assertTrue(on.musicEdit() && on.ambience() && on.pacing(), "the editing rules are on by default");
+        assertEquals("scene", on.clips().getFirst().scene());
+        jdbc.sql("UPDATE dream_short SET edit_ambience = false WHERE id = :d").param("d", dream).update();
+        assertTrue(!dreams.finishRequest(dream).ambience() && dreams.finishRequest(dream).pacing());
         assertEquals(3, count("SELECT count(*) FROM routing_decision WHERE dream_short_id = :d"));
     }
 

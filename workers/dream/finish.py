@@ -16,6 +16,7 @@ from pathlib import Path
 from temporalio import activity
 
 from workers.common import ffmpeg_bin, get_bytes, log, media_duration, put_file, run_ffmpeg, workdir
+from workers.dream import edit
 
 MUSIC_EXTENSIONS = {".mp3", ".wav", ".m4a", ".flac", ".ogg", ".aac"}
 
@@ -110,20 +111,29 @@ def _dissolve_at(durations: list[float], dissolve: float, i: int) -> float:
     return round(max(0.1, min(dissolve, durations[i - 1] / 3, durations[i] / 3)), 3) if dissolve > 0 else 0.0
 
 
-def beat_synced(durations: list[float], dissolve: float, beats: list[float], max_trim: float = 1.0) -> list[float]:
-    """Shorten clips (never lengthen) so every cut, or the middle of every dissolve, lands on a beat of the music.
+def beat_synced(durations: list[float], dissolve: float, beats: list[float], max_trim: float = 1.0,
+                bars: list[float] | None = None, min_len: float = 0.0, prefer: dict[int, float] | None = None) -> list[float]:
+    """Shorten clips (never lengthen) so every cut, or the middle of every dissolve, lands on the music.
 
-    Each clip may lose at most `max_trim` seconds (and never more than a third of itself); a cut with no beat that
-    close keeps its natural place. The last clip is untouched (the music fades out over it)."""
+    Bar lines win over plain beats when given. Each clip may lose at most `max_trim` seconds, never more than a third
+    of itself, and never drop under `min_len`; a cut with nothing that close keeps its natural place. `prefer` maps a
+    cut (after clip i) to a time it should land nearest (the music's biggest rise, for the climax). The last clip is
+    untouched (the music fades out over it)."""
     out = list(durations)
     base = 0.0  # where the current clip starts on the timeline
     for i in range(len(out) - 1):
         d = _dissolve_at(durations, dissolve, i + 1)
         natural = base + out[i] - d / 2  # cut point (or dissolve middle) with the clip at full length
-        trim = min(max_trim, out[i] / 3)
-        hits = [b for b in beats if natural - trim <= b <= natural + 1e-6]
+        trim = min(max_trim, out[i] / 3, max(0.0, out[i] - min_len) if min_len else max_trim)
+        hits: list[float] = []
+        for grid in ([bars] if bars else []) + [beats]:
+            hits = [b for b in grid if natural - trim <= b <= natural + 1e-6]
+            if hits:
+                break
         if hits:
-            out[i] = round(out[i] - (natural - max(hits)), 3)
+            want = prefer.get(i) if prefer else None
+            at = min(hits, key=lambda b: abs(b - want)) if want is not None else max(hits)
+            out[i] = round(out[i] - (natural - at), 3)
         base += out[i] - d
     return out
 
@@ -226,15 +236,14 @@ def finish(req: dict, tmp: Path) -> dict:
     dream_id = req["dreamId"]
     width, height, fps = int(req.get("width") or 1080), int(req.get("height") or 1920), int(req.get("fps") or 24)
     dissolve = dissolve_of(req)
-    smoothed: list[Path] = []
-    how: set[str] = set()
-    for n, clip in enumerate(req["clips"]):
-        src, dst = tmp / f"in{n}.mp4", tmp / f"smooth{n}.mp4"
+    base = float(req.get("speed") or 1.0)
+    music_edit, ambience_on, pacing = (req.get(k) is not False for k in ("musicEdit", "ambience", "pacing"))
+    clips = req["clips"]
+    srcs: list[Path] = []
+    for n, clip in enumerate(clips):
+        src = tmp / f"in{n}.mp4"
         src.write_bytes(get_bytes(clip["uri"]))
-        how.add(_smooth(src, dst, float(clip.get("fps") or 16), fps, float(req.get("speed") or 1.0)))
-        smoothed.append(dst)
-        _beat({"smoothed": n + 1, "total": len(req["clips"])})
-    durations = [media_duration(p) for p in smoothed]
+        srcs.append(src)
     track, music_name = None, None
     if req.get("musicUri"):  # the Short's own music: a piece of the owner's track, or a Lyria score
         track = tmp / "score.wav"
@@ -243,9 +252,36 @@ def finish(req: dict, tmp: Path) -> dict:
     else:
         track = pick_track(req.get("musicDir"), dream_id)
         music_name = track.name if track else None
-    synced = 0
-    if track:  # cut on the music: every cut (or dissolve middle) moved onto a beat
-        new = beat_synced(durations, dissolve, track_beats(track, total_duration(durations, dissolve) + 2))
+    # Plan the edit before smoothing: shot order (pacing) and per-shot speed (music energy) change the timing.
+    expected = [media_duration(s) / base for s in srcs]
+    mm = None
+    if track and (music_edit or pacing):
+        try:
+            mm = edit.music_map(track, sum(expected) + 2)
+        except Exception as e:  # noqa: BLE001 - no music map: cuts still go on the beat below
+            log.warning("Music map failed (%s); plain beat sync", e)
+    order = list(range(len(srcs)))
+    climax_slot = None
+    if pacing:
+        scores = [edit.striking(s, tmp) for s in srcs]
+        order = edit.order_shots(scores, expected, mm["rise"] if mm else None)
+        if len(order) > 2:
+            climax_slot = order.index(sorted(range(len(scores)), key=lambda i: -scores[i])[1])
+    speeds = edit.speeds(order, expected, base, mm["energy"]) if music_edit and mm else [base] * len(order)
+    smoothed: list[Path] = []
+    how: set[str] = set()
+    for k, i in enumerate(order):
+        dst = tmp / f"smooth{k}.mp4"
+        how.add(_smooth(srcs[i], dst, float(clips[i].get("fps") or 16), fps, speeds[k]))
+        smoothed.append(dst)
+        _beat({"smoothed": k + 1, "total": len(order)})
+    durations = [media_duration(p) for p in smoothed]
+    synced, climax_at = 0, None
+    if track:  # cut on the music: bar lines first, then beats; the climax cut nearest the music's rise
+        beats = mm["beats"] if mm else track_beats(track, total_duration(durations, dissolve) + 2)
+        prefer = {climax_slot - 1: mm["rise"]} if climax_slot and mm and mm["rise"] is not None else None
+        new = beat_synced(durations, dissolve, beats, bars=mm["bars"] if (mm and music_edit) else None,
+                          min_len=edit.MIN_SHOT if pacing else 0.0, prefer=prefer)
         synced = sum(1 for a, b in zip(durations, new) if a != b)
         durations = new
     length = total_duration(durations, dissolve)
@@ -257,21 +293,43 @@ def finish(req: dict, tmp: Path) -> dict:
         args += ["-stream_loop", "-1", "-i", str(track)]
         fade_out = max(0.0, length - 1.5)
         graph += (f";[{len(smoothed)}:a]atrim=0:{length:.3f},afade=t=in:d=0.3,afade=t=out:st={fade_out:.3f}:d=1.5,"
-                  "loudnorm=I=-14:TP=-1.5:LRA=11,aresample=48000[a]")
+                  "aresample=48000,aformat=channel_layouts=stereo[mus]")
     else:  # silent track: platforms and editors expect audio
         args += ["-f", "lavfi", "-t", f"{length:.3f}", "-i", "anullsrc=r=48000:cl=stereo"]
-        graph += f";[{len(smoothed)}:a]anull[a]"
+        graph += f";[{len(smoothed)}:a]anull[mus]"
+    ambiences = 0
+    if ambience_on:  # J-cut: each shot's own ambience starts 0.7 s before its cut
+        sounds = edit.fetch_cc0([edit.ambience_query(clips[i].get("scene")) for i in order], tmp)
+        for s in sounds:
+            if s:
+                args += ["-stream_loop", "-1", "-i", str(s)]
+        parts, labels = edit.ambience_graph(len(smoothed) + 1, edit.j_cut_windows(durations, dissolve), [bool(s) for s in sounds])
+        ambiences = len(labels)
+        if labels:
+            graph += ";" + parts + f";[mus]{''.join(labels)}amix=inputs={len(labels) + 1}:normalize=0:duration=first[mixed]"
+            graph += ";[mixed]"
+        else:
+            graph += ";[mus]"
+    else:
+        graph += ";[mus]"
+    graph += "loudnorm=I=-14:TP=-1.5:LRA=11,aresample=48000[a]" if track or ambiences else "anull[a]"
     out = tmp / "dream-short.mp4"
     run_ffmpeg([*args, "-filter_complex", graph, "-map", "[v]", "-map", "[a]", "-t", f"{length:.3f}",
                 "-c:v", "libx264", "-preset", "slow", "-crf", "17", "-pix_fmt", "yuv420p", "-r", str(fps),
                 "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", str(out)])
     uri = put_file(f"videos/{dream_id}/dream-short.mp4", out, "video/mp4")
     smoothing = "rife-laptop" if how == {"rife-laptop"} else "ffmpeg" if "ffmpeg" in how else sorted(how)[0]
-    log.info("Dream Short %s finished: %.1f s (%s, music: %s, %d cuts on the beat)", dream_id, length, smoothing,
-             music_name, synced)
+    log.info("Dream Short %s finished: %.1f s (%s, music: %s, %d cuts on the music, order %s, %d ambiences)", dream_id,
+             length, smoothing, music_name, synced, order, ambiences)
     duration = round(media_duration(out), 3)
+    starts = [sum(durations[:k]) - k * dissolve for k in range(len(durations))]
     metrics = {**measure(out, tmp), "durationSec": duration, "shots": float(len(smoothed)), "cutsOnBeat": float(synced),
-               "speed": float(req.get("speed") or 1.0)}
+               "speed": base, "hookShot": float(order[0] + 1) if order else 0.0, "ambiences": float(ambiences),
+               "shortestShotSec": round(min(durations), 2) if durations else 0.0}
+    if climax_slot is not None and length > 0:
+        metrics["climaxAtPct"] = round(100 * (starts[climax_slot] + durations[climax_slot] / 2) / length, 1)
+    if mm and mm.get("rise") is not None:
+        metrics["musicRiseSec"] = round(mm["rise"], 2)
     return {"uri": uri, "durationSec": duration, "width": width, "height": height, "fps": fps,
             "smoothing": smoothing, "music": music_name, "error": None, "metrics": metrics}
 

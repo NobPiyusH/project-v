@@ -801,7 +801,8 @@ public class DreamService {
             if (s.get("clip_uri") == null) {
                 throw new IllegalStateException("Shot " + (((Number) s.get("ord")).intValue() + 1) + " has no clip yet");
             }
-            clips.add(new DreamFinishClip((String) s.get("clip_uri"), s.get("clip_fps") == null ? FPS : ((Number) s.get("clip_fps")).doubleValue()));
+            clips.add(new DreamFinishClip((String) s.get("clip_uri"), s.get("clip_fps") == null ? FPS : ((Number) s.get("clip_fps")).doubleValue(),
+                    (String) s.get("scene")));
         }
         if (clips.isEmpty()) {
             throw new IllegalStateException("No shots to finish");
@@ -815,7 +816,8 @@ public class DreamService {
         Look look = look((String) d.get("look"));
         return new DreamFinishRequest(storageId(id), (String) d.get("look"), clips, 1080, 1920, 24, look.dissolveSec(),
                 musicDir == null || musicDir.isBlank() ? null : musicDir, publicUrl, musicUri, musicName,
-                look.speed(), look.handheld());
+                look.speed(), look.handheld(), !Boolean.FALSE.equals(d.get("edit_music")),
+                !Boolean.FALSE.equals(d.get("edit_ambience")), !Boolean.FALSE.equals(d.get("edit_pacing")));
     }
 
     @Transactional

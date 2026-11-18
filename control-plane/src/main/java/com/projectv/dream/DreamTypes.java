@@ -39,7 +39,7 @@ public final class DreamTypes {
     }
 
     /** One clip for the finish, in order. {@code fps} is the clip's own frame rate (Wan: 16). */
-    public record DreamFinishClip(String uri, double fps) {
+    public record DreamFinishClip(String uri, double fps, String scene) {
     }
 
     /**
@@ -49,7 +49,8 @@ public final class DreamTypes {
      */
     public record DreamFinishRequest(String dreamId, String look, List<DreamFinishClip> clips, int width, int height,
                                      int fps, double dissolveSec, String musicDir, String progressUrl, String musicUri,
-                                     String musicName, double speed, String handheld) {
+                                     String musicName, double speed, String handheld, boolean musicEdit,
+                                     boolean ambience, boolean pacing) {
     }
 
     /** @param smoothing "rife-laptop" | "ffmpeg" (how 16 fps became 24); {@code music} the track used, or null */
