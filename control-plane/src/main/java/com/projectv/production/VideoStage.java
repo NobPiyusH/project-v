@@ -66,7 +66,7 @@ public class VideoStage extends StageSupport {
                       @Value("${projectv.video.hero-draft-takes:2}") int heroTakes,
                       @Value("${projectv.video.provider-draft:wan}") String draftProvider,
                       @Value("${projectv.video.provider-final:omni}") String finalProvider,
-                      @Value("${projectv.video.omni-model:gemini-omni-flash-preview}") String omniModel) {
+                      @Value("${projectv.video.omni-model:gemini-omni-1.2-flash}") String omniModel) {
         super(d);
         this.wanApp = wanApp;
         this.wanClass = wanClass;

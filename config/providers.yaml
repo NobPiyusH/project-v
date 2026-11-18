@@ -81,7 +81,7 @@ pricing:
     music: { perSongUsd: 0.08 }                                     # lyria-3.5 per generated song (verify)
     groundingPerQueryUsd: 0.014                                     # Google Search grounding (verify)
     omni:                                                           # Gemini Omni Flash video (18 Nov 2026; verify)
-      outputPerMTokUsd: 17.50     # pricing page lists $12 (1.2) and $17.50 (1.1); the higher one until the bill shows which
+      outputPerMTokUsd: 12.00     # gemini-omni-1.2-flash video output (pricing page 18 Nov 2026; 1.1 routes to 1.2 on 3 Dec)
       tokensPerSecond: { "360p": 1931, "720p": 5792, "1080p": 8688, "4k": 17376 }   # 720p measured: 28,960 tokens / 5 s
   anthropic:
     monthlyCapUsd: 8             # owner-funded (17 Nov 2026: $5 credit; $8 cap once research + concept moved to Claude): hard stop, then Gemini

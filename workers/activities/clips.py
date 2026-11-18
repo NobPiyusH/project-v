@@ -218,7 +218,7 @@ def _omni_one(model: str, video_id: str, j: dict, resolution: str) -> dict:
 
 def _omni(req: dict, base: str, video_id: str) -> tuple[list[dict], bool]:
     """Clips on Gemini Omni: a few in flight at once; the owner's Stop cancels the clips not yet started."""
-    model, resolution = req.get("omniModel") or "gemini-omni-flash-preview", req.get("resolution") or "720p"
+    model, resolution = req.get("omniModel") or "gemini-omni-1.2-flash", req.get("resolution") or "720p"
     jobs = [(j, f"{j['shotId'][:8]}-{j['kind']}{j['take']}") for j in req["jobs"]]
     clips: list[dict] = []
     stopped = False
