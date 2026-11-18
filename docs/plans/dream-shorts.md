@@ -76,3 +76,19 @@ cost entries and provenance written, finish filter graph (FFmpeg) on a sample cl
 2. Default clip quality: 480p (cheapest, fits the look) or 720p?
 3. Music: a folder of free tracks you choose, or Lyria (≈ ₹10, over the ₹20 target with 720p)?
 4. Screen name: "Dream Shorts" OK?
+
+## Decisions made for the owner's approval (19 Nov 2026)
+
+The owner asked me to handle the technical decisions; he approves. Built on `dream-shorts` (commits f4f6996, 827447d, 964ccea).
+
+| # | Decision | Why | Cost |
+|---|---|---|---|
+| 1 | Every Short must feel warm, nostalgic or feel-good, and look real (never a render or an obvious AI image); written into the writer and every picture prompt | Owner's rule from his 7 examples | ₹0 |
+| 2 | Looks: Lonely object (default), Drive-by (new), Walk-through, plus the old Dreamcore and Impossible place | Covers all the examples; variety stays inside rule 1 | ₹0 |
+| 3 | Lonely object and Drive-by join shots with hard cuts; Walk-through uses 0.35 s dissolves | Matches the examples | ₹0 |
+| 4 | Pictures stay on Z-Image | Owner's choice after the side-by-side | ≈ ₹0.2 a picture |
+| 5 | Music: the owner's track by default; 6 candidate pieces, each starting on a strong beat; Gemini listens with the pictures and keeps the best fit; Lyria stays a per-Short option | Owner: "they are syncing with the music" | ≈ ₹0.6 a Short |
+| 6 | Cuts land on the music's beats (a clip may lose up to 1 s, never grows) | Same | ₹0 |
+| 7 | A whisper of moving film grain on the realistic looks, no haze or vignette | Breaks the too-smooth AI surface | ₹0 |
+| 8 | NOT built yet: one long 10 s take (two clips joined from the last frame) | Needs a second GPU round per Short (+ ≈ ₹13.5 start-up) | later, with batching |
+| 9 | Pending the owner: 720p clips as the default for the new looks | "Best graphics", but ≈ 2× the clip cost of 480p | ≈ ₹25–33 a Short |
