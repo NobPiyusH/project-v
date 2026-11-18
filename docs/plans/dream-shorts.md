@@ -92,3 +92,18 @@ The owner asked me to handle the technical decisions; he approves. Built on `dre
 | 7 | A whisper of moving film grain on the realistic looks, no haze or vignette | Breaks the too-smooth AI surface | ₹0 |
 | 8 | NOT built yet: one long 10 s take (two clips joined from the last frame) | Needs a second GPU round per Short (+ ≈ ₹13.5 start-up) | later, with batching |
 | 9 | Pending the owner: 720p clips as the default for the new looks | "Best graphics", but ≈ 2× the clip cost of 480p | ≈ ₹25–33 a Short |
+
+## Lessons learned (19 Nov 2026)
+
+What went wrong in the first Dream Shorts tests, and the rule each one became:
+
+1. **The 720p clip estimate was half the real cost** (said ₹25, cost ₹47). Never quote a price from scaling a guess:
+   use a measured number, and after each new kind of paid run, put its real cost back into `providers.yaml`.
+2. **A hard cut was silently read as a 0.5 s dissolve** (`value or 0.5` treats 0 as missing). Settings where 0 means
+   something must be read with an explicit "is it set?" check, and get a test for the 0 case.
+3. **The first music bed matched nothing** (a random spot in an hour of music). Anything chosen for taste (music,
+   pictures) is judged by ear or eye, not only by a number like loudness.
+4. **The camera looked like AI** (fast, perfect glide). Compare every new look against the owner's examples on
+   measured motion and colour before calling it fine, and write camera prompts as a person filming, not a camera rig.
+5. **Haze and grain made it look worse, not dreamier.** The owner wants it real; effects that announce themselves are out.
+6. **Before saying "something approved this", read the workflow history**: signals record when and from where.
