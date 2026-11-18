@@ -61,3 +61,18 @@ tasks.named<org.springframework.boot.gradle.tasks.run.BootRun>("bootRun") {
 	workingDir = rootProject.projectDir
 	jvmArgs("-Djava.net.preferIPv4Stack=true")
 }
+
+// Copy-paste detector (PMD CPD): `./gradlew :control-plane:cpd` lists blocks of 100+ duplicated tokens.
+// Report only (does not fail the build); PMD downloads the first time the task runs. scripts/check.ps1 runs it.
+val cpdTool: Configuration by configurations.creating
+dependencies {
+	cpdTool("net.sourceforge.pmd:pmd-cli:7.29.0")
+	cpdTool("net.sourceforge.pmd:pmd-java:7.29.0")
+}
+tasks.register<JavaExec>("cpd") {
+	group = "verification"
+	description = "Finds copy-pasted Java code (PMD CPD)."
+	classpath = cpdTool
+	mainClass = "net.sourceforge.pmd.cli.PmdCli"
+	args("cpd", "--minimum-tokens", "100", "--language", "java", "--dir", "src/main/java", "--format", "text", "--no-fail-on-violation")
+}

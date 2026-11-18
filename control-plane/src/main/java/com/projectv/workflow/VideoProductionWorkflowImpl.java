@@ -55,7 +55,7 @@ public class VideoProductionWorkflowImpl implements VideoProductionWorkflow {
                             .build())
                     .build());
 
-    private static final String BUDGET_ERROR = "com.projectv.ledger.BudgetGuard$BudgetExceededException";
+    private static final String BUDGET_ERROR = com.projectv.ledger.BudgetGuard.BUDGET_ERROR;
 
     // Activities that call paid LLMs: few retries (each retry costs money), never retry a budget refusal.
     private final VideoActivities agents = Workflow.newActivityStub(VideoActivities.class,

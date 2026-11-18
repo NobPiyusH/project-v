@@ -22,7 +22,7 @@ public class VoiceRedoWorkflowImpl implements VoiceRedoWorkflow {
                     .setStartToCloseTimeout(Duration.ofMinutes(2))
                     .setRetryOptions(RetryOptions.newBuilder()
                             .setMaximumAttempts(3)
-                            .setDoNotRetry("com.projectv.ledger.BudgetGuard$BudgetExceededException")
+                            .setDoNotRetry(com.projectv.ledger.BudgetGuard.BUDGET_ERROR)
                             .build())
                     .build());
 

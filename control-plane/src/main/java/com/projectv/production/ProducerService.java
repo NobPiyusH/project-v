@@ -235,13 +235,18 @@ public class ProducerService extends StageSupport {
         jdbc.sql("UPDATE producer_decision SET acted = :a WHERE id = :id").param("a", acted).param("id", decisionId).update();
     }
 
+    /** Everything this video has cost so far (the Producer budget counts the whole video). */
+    private BigDecimal videoSpent(UUID videoId) {
+        return jdbc.sql("SELECT COALESCE(sum(amount_inr), 0) FROM cost_entry WHERE video_id = :v")
+                .param("v", videoId).query(BigDecimal.class).single();
+    }
+
     /** A redo is allowed while the stage has rounds left and the video is inside the Producer budget. */
     public boolean mayRedo(UUID videoId, int round) {
         if (round > pricing.producerSetting("roundsPerStage")) {
             return false;
         }
-        BigDecimal spent = jdbc.sql("SELECT COALESCE(sum(amount_inr), 0) FROM cost_entry WHERE video_id = :v")
-                .param("v", videoId).query(BigDecimal.class).single();
+        BigDecimal spent = videoSpent(videoId);
         return spent.compareTo(pricing.producerBudgetInr(plan(videoId).durationSec() <= 180)) < 0;
     }
 
@@ -364,8 +369,7 @@ public class ProducerService extends StageSupport {
                                COALESCE(sum(cost_inr), 0) AS review_cost
                         FROM producer_decision WHERE video_id = :v
                         """).param("v", videoId).query().singleRow();
-        BigDecimal spent = jdbc.sql("SELECT COALESCE(sum(amount_inr), 0) FROM cost_entry WHERE video_id = :v")
-                .param("v", videoId).query(BigDecimal.class).single();
+        BigDecimal spent = videoSpent(videoId);
         Map<String, Object> out = new java.util.LinkedHashMap<>(m);
         out.put("spentInr", spent);
         out.put("budgetInr", pricing.producerBudgetInr(plan(videoId).durationSec() <= 180));
@@ -382,8 +386,7 @@ public class ProducerService extends StageSupport {
         boolean shortVideo = plan(videoId).durationSec() <= 180;
         BigDecimal budgetInr = pricing.producerBudgetInr(shortVideo);
         BigDecimal askAbove = pricing.producerAskAboveInr();
-        BigDecimal spent = jdbc.sql("SELECT COALESCE(sum(amount_inr), 0) FROM cost_entry WHERE video_id = :v")
-                .param("v", videoId).query(BigDecimal.class).single();
+        BigDecimal spent = videoSpent(videoId);
         boolean fits = estimateInr.compareTo(askAbove) <= 0 && spent.add(estimateInr).compareTo(budgetInr) <= 0;
         return fits ? "AI Producer: would APPROVE this (≈₹%s, under your ₹%s 'ask me' line; ₹%s of the ₹%s video budget used)."
                 .formatted(r0(estimateInr), r0(askAbove), r0(spent), r0(budgetInr))

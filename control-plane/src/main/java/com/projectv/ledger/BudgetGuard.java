@@ -22,12 +22,20 @@ public class BudgetGuard {
         this.pricing = pricing;
     }
 
-    public BigDecimal geminiSpentThisMonth() {
+    /** Temporal must not retry a budget refusal: activity options name this class (setDoNotRetry). */
+    public static final String BUDGET_ERROR = BudgetExceededException.class.getName();
+
+    /** This calendar month's (UTC) spend for providers whose id starts with {@code providerPrefix}. */
+    private BigDecimal spentThisMonth(String providerPrefix) {
         return jdbc.sql("""
                         SELECT COALESCE(sum(amount_inr), 0) FROM cost_entry
-                        WHERE provider_id = :p AND ts >= date_trunc('month', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'
+                        WHERE starts_with(provider_id, :p) AND ts >= date_trunc('month', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'
                         """)
-                .param("p", GEMINI).query(BigDecimal.class).single();
+                .param("p", providerPrefix).query(BigDecimal.class).single();
+    }
+
+    public BigDecimal geminiSpentThisMonth() {
+        return spentThisMonth(GEMINI);
     }
 
     public BigDecimal geminiRemaining() {
@@ -53,10 +61,7 @@ public class BudgetGuard {
     public static final String CLAUDE = "anthropic";
 
     public BigDecimal claudeSpentThisMonth() {
-        return jdbc.sql("""
-                        SELECT COALESCE(sum(amount_inr), 0) FROM cost_entry
-                        WHERE provider_id = :p AND ts >= date_trunc('month', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'
-                        """).param("p", CLAUDE).query(BigDecimal.class).single();
+        return spentThisMonth(CLAUDE);
     }
 
     public boolean canSpendClaude(BigDecimal estimateInr) {
@@ -68,11 +73,7 @@ public class BudgetGuard {
     public static final String GPU_PREFIX = "modal_";
 
     public BigDecimal gpuSpentThisMonth() {
-        return jdbc.sql("""
-                        SELECT COALESCE(sum(amount_inr), 0) FROM cost_entry
-                        WHERE left(provider_id, 6) = 'modal_'
-                          AND ts >= date_trunc('month', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'
-                        """).query(BigDecimal.class).single();
+        return spentThisMonth(GPU_PREFIX);
     }
 
     public BigDecimal gpuRemaining() {

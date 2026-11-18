@@ -158,6 +158,21 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
   return (text ? JSON.parse(text) : undefined) as T
 }
 
+/** Studio power (served by the dashboard's own dev server, so it works while the backend is down). */
+export interface StudioStatus { controlPlane: boolean; worker: boolean; busy: string | null; lastOutput: string }
+
+export const studio = {
+  status: async (): Promise<StudioStatus> => {
+    const r = await fetch('/studio/status')
+    if (!r.ok) throw new Error(`${r.status}`)
+    return r.json() as Promise<StudioStatus>
+  },
+  act: async (action: 'start' | 'restart') => {
+    const r = await fetch(`/studio/${action}`, { method: 'POST', headers: { 'X-Studio': '1' } })
+    if (!r.ok) throw new Error(((await r.json().catch(() => ({}))) as { error?: string }).error ?? `${r.status}`)
+  },
+}
+
 export interface RouterProvider {
   id: string; name: string; kind: string; enabled: boolean; owner_disabled: boolean; capabilities: string
   quality: number; budget: string; fails: number | null; cooldown_until: string | null; last_error: string | null

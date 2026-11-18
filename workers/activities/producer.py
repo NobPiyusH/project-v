@@ -13,7 +13,7 @@ from google.genai import types
 from pydantic import BaseModel
 from temporalio import activity
 
-from workers.common import download, gemini, log, run_ffmpeg, usage_dict, with_models, workdir
+from workers.common import beat as _beat, download, gemini, log, run_ffmpeg, usage_dict, with_models, workdir
 
 CALL_TIMEOUT_MS = 240_000
 MAX_ITEMS_PER_CALL = 12
@@ -34,13 +34,6 @@ class Review(BaseModel):
     summary: str
     redoNotes: str
     items: list[ItemVerdict]
-
-
-def _beat(detail: str) -> None:
-    try:
-        activity.heartbeat(detail)
-    except RuntimeError:  # outside an activity (tests, manual runs)
-        pass
 
 
 def _media_part(item: dict, tmp: Path, n: int) -> tuple[types.Part | None, int]:

@@ -1,8 +1,9 @@
 <#
   Stops the studio's app processes. Docker services keep running (they hold your data and start in seconds);
-  add -All to stop them too.  Usage:  powershell -ExecutionPolicy Bypass -File C:\dev\project-v\scripts\stop.ps1 [-All]
+  add -All to stop them too; -Backend keeps the dashboard running (its Restart button uses this).
+  Usage:  powershell -ExecutionPolicy Bypass -File C:\dev\project-v\scripts\stop.ps1 [-All] [-Backend]
 #>
-param([switch]$All)
+param([switch]$All, [switch]$Backend)
 $root = Split-Path -Parent $PSScriptRoot
 
 function Stop-Port($port, $name) {
@@ -15,7 +16,7 @@ Stop-Port 8080 'control plane'
 $workers = Get-CimInstance Win32_Process -Filter "Name='python.exe'" | Where-Object { $_.CommandLine -like '*workers.main*' }
 foreach ($w in $workers) { Stop-Process -Id $w.ProcessId -Force -Confirm:$false -ErrorAction SilentlyContinue }
 if ($workers) { Write-Host '  stopped media worker' } else { Write-Host '  media worker was not running' }
-Stop-Port 5173 'dashboard'
+if (-not $Backend) { Stop-Port 5173 'dashboard' }
 
 # Gradle daemons started by bootRun keep memory; stop only this project's daemon.
 if (Test-Path "$root\gradlew.bat") { & "$root\gradlew.bat" --stop *> $null }
