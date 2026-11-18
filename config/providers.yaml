@@ -118,6 +118,8 @@ pricing:
     redosPerItem: 2
     roundsPerStage: 3
     adviseOnly: true             # P1: recommend only; switch to deciding once agreement is high (P2)
+    trustAfterDecisions: 10      # P2 'auto' trust: decide alone once it has agreed with the owner on enough decisions
+    trustAgreementPct: 80
   routing:
     lambdaPerInr: 0.02            # quality points one rupee is worth with a full budget
     jobs:

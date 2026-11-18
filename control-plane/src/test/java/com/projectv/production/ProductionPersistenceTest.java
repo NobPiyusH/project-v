@@ -132,7 +132,7 @@ class ProductionPersistenceTest {
     @Test
     void allMigrationsApplyAndLicencesAreSeeded() {
         assertEquals(11, jdbc.sql("SELECT count(*) FROM licence").query(Integer.class).single());
-        assertEquals(18, jdbc.sql("SELECT count(*) FROM flyway_schema_history WHERE success").query(Integer.class).single());
+        assertEquals(19, jdbc.sql("SELECT count(*) FROM flyway_schema_history WHERE success").query(Integer.class).single());
     }
 
     @Test
@@ -506,5 +506,56 @@ class ProductionPersistenceTest {
     void producerSpendAdviceFollowsTheOwnersLimits() {
         assertTrue(producer.spendAdvice(video, new BigDecimal("30")).contains("would APPROVE"));
         assertTrue(producer.spendAdvice(video, new BigDecimal("60")).contains("would ASK YOU"), "above the Rs 50 line");
+    }
+
+    // ---- AI Producer (P2): acting within the owner's trust and limits
+
+    @Test
+    void producerTrustSwitchDecidesWhenItMayAct() {
+        producer.setTrust("advise");
+        assertFalse(producer.deciding());
+        producer.setTrust("decide");
+        assertTrue(producer.deciding());
+        producer.setTrust("auto");
+        assertFalse(producer.deciding(), "auto: not before it has agreed with the owner on enough decisions");
+        assertThrows(IllegalArgumentException.class, () -> producer.setTrust("yolo"));
+    }
+
+    @Test
+    void producerRedoLimitsAndSpendDecisionsFollowTheOwnersLimits() {
+        producer.setTrust("decide");
+        assertTrue(producer.mayRedo(video, 1));
+        assertFalse(producer.mayRedo(video, 4), "at most 3 redo rounds per stage");
+        assertTrue(producer.spendDecision(video, "DRAFT_GEN", new BigDecimal("30")).approve(), "inside the limits: it approves");
+        assertFalse(producer.spendDecision(video, "UPSCALE", new BigDecimal("60")).approve(), "above Rs 50: it asks");
+        var sum = producer.videoSummary(video);
+        assertEquals(1L, ((Number) sum.get("spend_approved")).longValue());
+        assertEquals(1L, ((Number) sum.get("asked")).longValue());
+        producer.setTrust("auto");
+    }
+
+    @Test
+    void producerRulesCanBeAddedEditedSwitchedOffAndDeleted() {
+        producer.addRule("NARRATION", "no theatrical whispering");
+        var rule = producer.rulesList().stream().filter(r -> "no theatrical whispering".equals(r.get("rule_text"))).findFirst().orElseThrow();
+        UUID id = (UUID) rule.get("id");
+        assertTrue(producer.rules("NARRATION").contains("no theatrical whispering"), "rules go into every review");
+        producer.updateRule(id, null, false);
+        assertFalse(producer.rules("NARRATION").contains("no theatrical whispering"), "switched off");
+        producer.updateRule(id, "calm, warm documentary narration", true);
+        assertTrue(producer.rules("NARRATION").contains("calm, warm documentary narration"));
+        producer.deleteRule(id);
+        assertTrue(producer.rulesList().stream().noneMatch(r -> id.equals(r.get("id"))));
+    }
+
+    @Test
+    void producerVoiceRedoUsesItsNotesAsTheReadingStyle() {
+        var base = new com.projectv.media.MediaTypes.NarrationRequest("v", "tts", "check", "Aoede", "in a warm voice", "en",
+                List.of(new com.projectv.media.MediaTypes.NarrationLine(0, "Hi.", "hushed")));
+        var redo = ProducerService.withStyle(base, "natural documentary voice, no whispering; say 'This bug' exactly");
+        assertEquals("natural documentary voice, no whispering; say 'This bug' exactly", redo.style());
+        assertEquals("Aoede", redo.voiceName(), "same voice, only the direction changes");
+        assertEquals("hushed", redo.lines().getFirst().delivery());
+        assertEquals(base, ProducerService.withStyle(base, " "));
     }
 }

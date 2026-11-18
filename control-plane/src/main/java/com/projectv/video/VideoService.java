@@ -50,6 +50,13 @@ public class VideoService {
     private final WorkflowClient temporal;
     private final ObjectMapper json;
 
+    private org.springframework.beans.factory.ObjectProvider<com.projectv.production.ProducerService> producer;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setProducer(org.springframework.beans.factory.ObjectProvider<com.projectv.production.ProducerService> producer) {
+        this.producer = producer;
+    }
+
     public VideoService(JdbcClient jdbc, WorkflowClient temporal, ObjectMapper json) {
         this.jdbc = jdbc;
         this.temporal = temporal;
@@ -304,6 +311,19 @@ public class VideoService {
         // (agreement score) and kept with the owner's notes as a lesson for later reviews.
         if (stage != null && (decision.equals("approve") || decision.equals("reject"))) {
             com.projectv.production.ProducerService.recordOwnerDecision(jdbc, id, stageName, decision, notes);
+            // P2: notes are lessons: re-learn this stage's rules in the background (a small text call).
+            if (notes != null && !notes.isBlank() && producer != null) {
+                var p = producer.getIfAvailable();
+                if (p != null) {
+                    java.util.concurrent.CompletableFuture.runAsync(() -> {
+                        try {
+                            p.learn(id, stageName);
+                        } catch (Exception e) {
+                            org.slf4j.LoggerFactory.getLogger(VideoService.class).warn("Producer learning failed: {}", e.getMessage());
+                        }
+                    });
+                }
+            }
         }
     }
 

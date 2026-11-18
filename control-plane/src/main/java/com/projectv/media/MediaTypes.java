@@ -287,6 +287,14 @@ public final class MediaTypes {
     }
 
     /** What the workflow shows the owner (advise-only in P1). */
-    public record ProducerAdvice(String verdict, double confidence, String summary, String redoNotes, String decisionId) {
+    public record ProducerAdvice(String verdict, double confidence, String summary, String redoNotes, String decisionId,
+                                 List<String> weakItems) {
+        public ProducerAdvice(String verdict, double confidence, String summary, String redoNotes, String decisionId) {
+            this(verdict, confidence, summary, redoNotes, decisionId, List.of());
+        }
+    }
+
+    /** P2: the Producer's call on a money step. */
+    public record SpendDecision(boolean approve, String text) {
     }
 }

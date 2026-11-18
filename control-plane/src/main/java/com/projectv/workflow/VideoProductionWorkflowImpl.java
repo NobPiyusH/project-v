@@ -125,6 +125,9 @@ public class VideoProductionWorkflowImpl implements VideoProductionWorkflow {
     }
 
     private StageFix pendingFix;
+    /** AI Producer (P2): redo rounds it started per stage, and its precise notes for a narration redo. */
+    private final java.util.Map<Stage, Integer> producerRounds = new java.util.EnumMap<>(Stage.class);
+    private String producerVoiceNotes;
 
     /** Set when the owner declines a GPU batch: the stage is recorded as skipped instead of passed. */
     private boolean skipStage;
@@ -282,6 +285,34 @@ public class VideoProductionWorkflowImpl implements VideoProductionWorkflow {
                     return result;
                 }
                 String text = result.summary() + " " + advice.summary();
+                // P2: when the owner trusts it (trust switch / agreement score), it acts on its own recommendation.
+                if (advice.decisionId() != null && producerActs.deciding()) {
+                    if ("approve".equals(advice.verdict())) {
+                        producerActs.markActed(advice.decisionId(), "approved");
+                        finish(videoId, stage, attempt, "PRODUCER_APPROVED", new StageResult(text, result.artifactJson(),
+                                result.plannedStages()), notes);
+                        return result;
+                    }
+                    int round = producerRounds.merge(stage, 1, Integer::sum);
+                    if ("redo".equals(advice.verdict()) && producerActs.mayRedo(videoId, round)) {
+                        producerActs.markActed(advice.decisionId(), "redo");
+                        finish(videoId, stage, attempt, "PRODUCER_REDO", new StageResult(text, result.artifactJson(),
+                                result.plannedStages()), notes);
+                        notes = advice.redoNotes();
+                        if ((stage == Stage.KEYFRAMES || stage == Stage.DRAFT_GEN || stage == Stage.FINAL_GEN)
+                                && advice.weakItems() != null && !advice.weakItems().isEmpty()) {
+                            List<String> shots = producerActs.shotIdsFor(videoId, advice.weakItems());
+                            if (!shots.isEmpty()) { // only the weak shots, with the Producer's precise notes
+                                pendingFix = new StageFix(stage, shots, advice.redoNotes());
+                            }
+                        }
+                        if (stage == Stage.NARRATION) {
+                            producerVoiceNotes = advice.redoNotes();
+                        }
+                        continue;
+                    }
+                    producerActs.markActed(advice.decisionId(), "asked");
+                }
                 Decision pd = awaitOwner(videoId, stage, attempt, "WAITING_APPROVAL", text,
                         text + " Approve to accept, or Reject (with notes; empty notes = use the Producer's redo notes).",
                         result.artifactJson(), notes, true);
@@ -402,6 +433,14 @@ public class VideoProductionWorkflowImpl implements VideoProductionWorkflow {
         }
     }
 
+    /** P2: in PRODUCER mode, a trusted Producer approves a money step within the owner's limits by itself. */
+    private boolean producerApprovesSpend(String videoId, Stage stage, java.math.BigDecimal inr) {
+        if (modeOf(stage) != StageMode.PRODUCER || !producerActs.deciding()) {
+            return false;
+        }
+        return producerActs.spendDecision(videoId, stage.name(), inr).approve();
+    }
+
     /** P1: the Producer's opinion on a money step, shown with the estimate (advice only, no AI call). */
     private String withSpendAdvice(String videoId, Stage stage, String summary, java.math.BigDecimal inr) {
         if (modeOf(stage) != StageMode.PRODUCER) {
@@ -429,7 +468,7 @@ public class VideoProductionWorkflowImpl implements VideoProductionWorkflow {
             skipStage = true;
             return StageResult.of(estimate.summary(), null);
         }
-        if (estimate.needsApproval()) {
+        if (estimate.needsApproval() && !producerApprovesSpend(videoId, stage, estimate.inr())) {
             String ask = withSpendAdvice(videoId, stage, estimate.summary(), estimate.inr());
             Decision d = awaitOwner(videoId, stage, attempt, "WAITING_APPROVAL", ask,
                     ask + " Approve to start, or Reject to skip this stage (nothing is spent).", null, notes, false);
@@ -480,6 +519,11 @@ public class VideoProductionWorkflowImpl implements VideoProductionWorkflow {
                 return activities.saveMusic(videoId, media.generateMusic(agents.musicRequest(videoId, notes)));
             case NARRATION:
                 // Voiced before the shot plan so every shot is timed against the real narration length.
+                if (producerVoiceNotes != null) { // AI Producer redo: its precise notes become the reading style
+                    String voiceNotes = producerVoiceNotes;
+                    producerVoiceNotes = null;
+                    return activities.saveNarration(videoId, media.synthesizeNarration(producerActs.narrationRedoRequest(videoId, voiceNotes)));
+                }
                 return activities.saveNarration(videoId, media.synthesizeNarration(agents.narrationRequest(videoId)));
             case SHOT_PLAN:
                 return agents.shotPlan(videoId, notes);
@@ -588,7 +632,8 @@ public class VideoProductionWorkflowImpl implements VideoProductionWorkflow {
             skipStage = true;
             return StageResult.of(summary, null);
         }
-        if (smooth.needsApproval() || (sharp != null && sharp.needsApproval())) {
+        if ((smooth.needsApproval() || (sharp != null && sharp.needsApproval())) && !producerApprovesSpend(videoId, stage,
+                smooth.inr().add(sharp == null ? java.math.BigDecimal.ZERO : sharp.inr()))) {
             String ask = withSpendAdvice(videoId, stage, summary, smooth.inr().add(sharp == null ? java.math.BigDecimal.ZERO : sharp.inr()));
             Decision d = awaitOwner(videoId, stage, attempt, "WAITING_APPROVAL", ask,
                     ask + " Approve to start, or Reject to skip (nothing is spent).", null, notes, false);

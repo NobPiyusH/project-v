@@ -16,4 +16,17 @@ public interface ProducerActivities {
 
     /** Advice on a money step (no AI call): would the Producer approve it within the owner's limits? */
     String spendAdvice(String videoId, java.math.BigDecimal estimateInr);
+
+    // ---- P2: acting
+    boolean deciding();
+
+    void markActed(String decisionId, String acted);
+
+    boolean mayRedo(String videoId, int round);
+
+    java.util.List<String> shotIdsFor(String videoId, java.util.List<String> itemIds);
+
+    com.projectv.media.MediaTypes.NarrationRequest narrationRedoRequest(String videoId, String notes);
+
+    com.projectv.media.MediaTypes.SpendDecision spendDecision(String videoId, String stage, java.math.BigDecimal estimateInr);
 }
