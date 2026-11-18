@@ -16,9 +16,10 @@ def test_most_viewed_shorts_one_per_channel_and_nothing_long():
         {"url": "a2", "channel": "A", "views": 800, "durationSec": 20},
         {"url": "long", "channel": "B", "views": 5000, "durationSec": 600},
         {"url": "c", "channel": "C", "views": 100, "durationSec": 30},
+        {"url": "e", "channel": "E", "views": 10**9, "durationSec": 30},
         {"url": "d", "channel": "D", "views": 50, "durationSec": None},
     ]
-    assert [v["url"] for v in scout.pick(vids, 5)] == ["a", "c"]
+    assert [v["url"] for v in scout.pick(vids, 5)] == ["a", "c", "e"]  # relevance order kept, long and repeat channels out
     assert [v["url"] for v in scout.pick(vids, 1)] == ["a"]
 
 
@@ -26,3 +27,8 @@ def test_youtube_links_are_found_in_any_form():
     text = ("see https://www.youtube.com/shorts/abcdefghijk and youtube.com/watch?v=ABCDEFGHIJK&t=1 "
             "or https://youtu.be/0123456789_ and not youtube.com/channel/xyz")
     assert scout.VIDEO_ID.findall(text) == ["abcdefghijk", "ABCDEFGHIJK", "0123456789_"]
+
+
+def test_a_sentence_becomes_a_short_search_phrase():
+    assert scout.keywords("a lonely vending machine glowing in a flower field at sunset") == "lonely vending machine flower field"
+    assert scout.keywords("a lonely vending machine glowing in a flower field at sunset", 3) == "lonely vending machine"

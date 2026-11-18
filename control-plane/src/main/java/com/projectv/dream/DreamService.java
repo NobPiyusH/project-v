@@ -345,7 +345,8 @@ public class DreamService {
         Map<String, Object> d = dream(id);
         budget.require(SCOUT_ESTIMATE_INR, "Dream Short Scout (watch similar Shorts)");
         String query = Objects.toString(d.get("idea"), "") + (notes == null || notes.isBlank() ? "" : " " + notes.strip());
-        return new DreamTypes.DreamScoutRequest(storageId(id), query.strip(), listenModel, SCOUT_VIDEOS);
+        return new DreamTypes.DreamScoutRequest(storageId(id), query.strip(), listenModel, SCOUT_VIDEOS,
+                look((String) d.get("look")).brief());
     }
 
     @Transactional

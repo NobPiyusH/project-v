@@ -73,7 +73,7 @@ public final class DreamTypes {
     }
 
     /** Scout: find Shorts like this idea ({@code query}), watch up to {@code maxVideos}, with {@code model} (Gemini). */
-    public record DreamScoutRequest(String dreamId, String query, String model, int maxVideos) {
+    public record DreamScoutRequest(String dreamId, String query, String model, int maxVideos, String look) {
     }
 
     /** One similar Short as Gemini saw it. {@code views}/{@code durationSec} come from YouTube when known. */

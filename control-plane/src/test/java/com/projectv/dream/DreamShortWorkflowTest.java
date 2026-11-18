@@ -107,7 +107,7 @@ class DreamShortWorkflowTest {
 
         @Override
         public DreamTypes.DreamScoutRequest scoutRequest(String dreamId, String notes) {
-            return new DreamTypes.DreamScoutRequest(dreamId, "idea" + (notes == null ? "" : " " + notes), "gemini", 6);
+            return new DreamTypes.DreamScoutRequest(dreamId, "idea" + (notes == null ? "" : " " + notes), "gemini", 6, "look");
         }
 
         @Override
