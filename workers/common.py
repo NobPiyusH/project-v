@@ -86,6 +86,7 @@ def get_bytes(uri: str) -> bytes:
 # ----------------------------------------------------------------------------------------------------------- gemini
 
 _client: genai.Client | None = None
+_clients: dict[str, genai.Client] = {}
 _client_lock = threading.Lock()
 
 
@@ -93,6 +94,16 @@ def gemini() -> genai.Client:
     """One shared client for the process. A throwaway client (``gemini().models...``) can be garbage-collected, and
     so closed, while its request is still running ("client has been closed"), so the client is kept alive here."""
     global _client
+    from workers import gemini_pool
+
+    key = gemini_pool.current_key()
+    if key:  # inside a failover-managed request: the chosen project's client (one cached client per key)
+        with _client_lock:
+            c = _clients.get(key)
+            if c is None:
+                c = _clients[key] = genai.Client(api_key=key, http_options=types.HttpOptions(api_version="v1beta",
+                                                                                               timeout=120_000))
+            return c
     with _client_lock:
         if _client is None:
             key = os.getenv("GEMINI_API_KEY")
@@ -110,6 +121,7 @@ def _reset_gemini() -> None:
     global _client
     with _client_lock:
         _client = None
+        _clients.clear()
 
 
 class RateLimiter:
@@ -151,6 +163,9 @@ def with_retry(fn, *, attempts: int = 4, what: str = "Gemini call"):
             code = getattr(e, "code", None) or getattr(e, "status_code", None)
             if code not in (429, 500, 503, 504) or i == attempts - 1:
                 raise
+            from workers import gemini_pool
+            if code == 429 and gemini_pool.has_alternative():
+                raise  # another eligible project exists: fail over now instead of waiting here
             if code != 429:
                 overloads += 1
                 if overloads > OVERLOAD_RETRIES:
@@ -187,6 +202,9 @@ def _model_problem(e: Exception) -> bool:
         return True
     if isinstance(e, QuotaExhausted):  # each model has its own daily quota on the same account
         return True
+    from workers import gemini_pool
+    if isinstance(e, gemini_pool.NoEligibleProject):  # every project busy for this model: another model may serve
+        return True
     code = getattr(e, "code", None) or getattr(e, "status_code", None)
     if code in (404, 503, 504):
         return True
@@ -201,7 +219,8 @@ def with_models(spec: str | None, call, *, what: str, default: str | None = None
         raise ValueError(f"{what}: no model configured")
     for i, m in enumerate(models):
         try:
-            return m, with_retry(lambda: call(m), what=f"{what} ({m})")
+            from workers import gemini_pool
+            return m, gemini_pool.execute(lambda: with_retry(lambda: call(m), what=f"{what} ({m})"), f"{what} ({m})")
         except Exception as e:  # noqa: BLE001 - decide below whether the next model should be tried
             if i < len(models) - 1 and _model_problem(e):
                 log.warning("%s: model %s failed (%s), falling back to %s", what, m, str(e)[:160], models[i + 1])
