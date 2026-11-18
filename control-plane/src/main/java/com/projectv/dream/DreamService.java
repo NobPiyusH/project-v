@@ -52,15 +52,63 @@ public class DreamService {
     /** Provenance provider for pieces of the owner's music bed (cut free on the laptop). */
     static final String BED = "owner_music_bed";
     static final UUID LICENCE_OWNER_MUSIC = UUID.fromString("00000000-0000-0000-0000-00000000a012");
+    /** Pieces of the bed Gemini compares for one Short, and what that listen is held to before the call (a few paise). */
+    static final int BED_CANDIDATES = 6;
+    static final BigDecimal LISTEN_ESTIMATE_INR = new BigDecimal("0.50");
     static final int FPS = 16;          // Wan's own frame rate; the finish makes it 24
     static final int MIN_FRAMES = 33;
     static final int MAX_FRAMES = 81;
 
-    /** A look: what the writer aims for, and what every picture and clip prompt ends with. */
-    record Look(String brief, String pictureStyle, String motionStyle) {
+    /**
+     * A look: what the writer aims for, how the shots relate ({@code structure}), what every picture and clip prompt
+     * ends with, how long a shot is (0 = the configured default) and how shots join (0 = hard cut).
+     */
+    record Look(String brief, String pictureStyle, String motionStyle, String structure, double shotSeconds, double dissolveSec) {
+        Look(String brief, String pictureStyle, String motionStyle) {
+            this(brief, pictureStyle, motionStyle, ONE_WORLD, 0, 0.5);
+        }
     }
 
+    static final String ONE_WORLD = "Invent ONE coherent world and %d shots that move through it like a dream, each a single "
+            + "continuous camera move.";
+
+    /** Order shown on the new-Short form; the first is the default. */
+    static final List<String> LOOK_ORDER = List.of("lonely", "walkthrough", "dreamcore", "impossible");
+
     static final Map<String, Look> LOOKS = Map.of(
+            // Owner's examples (18 Nov 2026): one ordinary object alone and glowing in a vast empty place, a different
+            // place every shot, one feeling; sharp photo-real, vivid golden/blue-hour and neon light; slow push-in; hard cuts.
+            "lonely", new Look(
+                    "Lonely object (parallel-world core): each shot is ONE ordinary man-made object or small building "
+                            + "(vending machine, phone booth, neon kiosk, gas station, traffic light, bus stop, arcade cabinet, "
+                            + "empty classroom, pool hallway) standing alone in a vast empty real place (flower field, cornfield, "
+                            + "open road, prairie, beach), at golden hour, sunset or blue hour, glowing (neon, warm windows, "
+                            + "fluorescent light) with wet shiny reflections. Nostalgic, calm, lonely, beautiful. "
+                            + "No people, no animals, no readable words except at most one short sign.",
+                    "photograph, shot on a full-frame camera with a wide lens, photorealistic, tack sharp, vivid saturated "
+                            + "colours, golden hour or blue hour sky with glowing clouds, neon glow, wet reflections, high detail, "
+                            + "cinematic, vertical composition with the object in the lower middle, no people, no text",
+                    "very slow smooth push-in toward the object, the camera barely moving; clouds drift, neon and lights "
+                            + "flicker softly, grass and flowers sway in a light breeze; no cuts, no people, the object stays still",
+                    "Invent %d shots, each a DIFFERENT place and a DIFFERENT object, joined by one feeling (not one connected "
+                            + "world). Vary the object, the landscape and the time of light from shot to shot.",
+                    3.5, 0),
+            // Owner's example (18 Nov 2026): first-person walk through ordinary interiors where one impossible thing
+            // happens (kitchen opening onto grass, hallway flooding into a sea, stairs melting into rainbow paint).
+            "walkthrough", new Look(
+                    "Walk-through (liminal fever dream): first-person walk through ordinary empty interiors (kitchen, "
+                            + "hallway, stairwell, pool room, school corridor, hotel lobby) in pastel pink, mint and sky blue, "
+                            + "where ONE impossible thing happens in each (a doorway opening onto a meadow, the floor flooding "
+                            + "into a sea, stairs melting into rainbow paint, a night sky behind an exit door). Bright, glossy, "
+                            + "strange but calm. No people, no text.",
+                    "phone camera photo, first-person point of view at eye level, wide lens, photorealistic, sharp, bright "
+                            + "fluorescent and daylight, pastel pink mint and sky-blue colours, glossy wet tiled floors with "
+                            + "reflections, liminal space, no people, no text",
+                    "steady first-person walk forward through the space at walking pace, slight handheld sway, water and "
+                            + "light moving; continuous, no cuts, no people",
+                    "Invent %d rooms or corridors walked through one after another, each a different ordinary place with "
+                            + "its own impossible thing; the walk keeps going forward from shot to shot.",
+                    5.0, 0.35),
             "dreamcore", new Look(
                     "Dreamcore / liminal fever dream: one soft pastel world (pink, mint, cream, sky blue), surreal oversized "
                             + "or out-of-place objects, water, tiles, clouds, empty calm places, nostalgic and slightly eerie. "
@@ -92,6 +140,7 @@ public class DreamService {
     private final String musicDir;
     private final String musicModel;
     private final String musicBed;
+    private final String listenModel;
 
     public DreamService(JdbcClient jdbc, ObjectMapper json, Llm llm, AssetStore assets, Pricing pricing, BudgetGuard budget,
                         Router router, com.projectv.video.ClipProgress clipProgress,
@@ -104,7 +153,8 @@ public class DreamService {
                         @Value("${projectv.dream.shot-seconds:3.5}") double shotSeconds,
                         @Value("${projectv.dream.music-dir:}") String musicDir,
                         @Value("${projectv.models.music:lyria-3.5}") String musicModel,
-                        @Value("${projectv.dream.music-bed:}") String musicBed) {
+                        @Value("${projectv.dream.music-bed:}") String musicBed,
+                        @Value("${projectv.models.vision:gemini-3.6-flash}") String listenModel) {
         this.jdbc = jdbc;
         this.json = json;
         this.llm = llm;
@@ -123,10 +173,11 @@ public class DreamService {
         this.musicDir = musicDir;
         this.musicModel = musicModel;
         this.musicBed = musicBed;
+        this.listenModel = listenModel;
     }
 
     static Look look(String id) {
-        return LOOKS.getOrDefault(id == null ? "dreamcore" : id, LOOKS.get("dreamcore"));
+        return LOOKS.getOrDefault(id == null ? LOOK_ORDER.getFirst() : id, LOOKS.get(LOOK_ORDER.getFirst()));
     }
 
     /** 4n+1 frames covering the shot at 16 fps, within Wan's ~2-5 s range. */
@@ -149,14 +200,13 @@ public class DreamService {
         int count = ((Number) d.get("shot_count")).intValue();
         String system = """
                 You are the writer of a short, wordless, music-led vertical video (YouTube Shorts / Reels) for a channel
-                about dreams and impossible places. Invent ONE coherent world and %d shots that move through it like a
-                dream, each a single continuous camera move. Every shot must be a fresh, specific image (not generic).
+                about dreams and impossible places. %s Every shot must be a fresh, specific image (not generic).
                 Look: %s
-                Return JSON: {"title": short title, "world": one paragraph describing the shared world (materials, objects,
-                scale, mood), "palette": the exact colour palette, "light": the light and atmosphere,
+                Return JSON: {"title": short title, "world": one paragraph describing the shared feeling and world (materials,
+                objects, scale, mood), "palette": the exact colour palette, "light": the light and atmosphere,
                 "shots": [{"scene": what this shot shows (one or two sentences, concrete), "motion": the camera move and
                 the small motion inside the scene}]} with exactly %d shots.
-                """.formatted(count, look.brief(), count);
+                """.formatted(look.structure().formatted(count), look.brief(), count);
         String user = "Idea: " + d.get("idea") + (notes == null || notes.isBlank() ? "" : "\nOwner's notes for this rewrite: " + notes);
         DreamWorld w = llm.call(null, "dream.write", system, user, DreamWorld.class);
         if (w == null || w.shots() == null || w.shots().isEmpty()) {
@@ -291,7 +341,7 @@ public class DreamService {
     List<ClipJob> clipJobs(UUID id, List<String> only) {
         Map<String, Object> d = dream(id);
         int[] size = clipSize((String) d.get("quality"));
-        int frames = frames(shotSeconds);
+        int frames = frames(secondsOf(look((String) d.get("look"))));
         Set<String> wanted = only == null ? null : new HashSet<>(only);
         List<ClipJob> jobs = new ArrayList<>();
         for (Map<String, Object> s : shots(id)) {
@@ -377,9 +427,14 @@ public class DreamService {
     // ------------------------------------------------------------------------------------------- MUSIC
 
     /** Length the finished Short will have: the shots minus the dissolves between them, plus a second of tail. */
-    double shortSeconds(int shots) {
-        double clip = (double) frames(shotSeconds) / FPS;
-        return shots * clip - Math.max(0, shots - 1) * Math.min(0.5, clip / 3) + 1;
+    double shortSeconds(int shots, Look look) {
+        double clip = (double) frames(secondsOf(look)) / FPS;
+        return shots * clip - Math.max(0, shots - 1) * Math.min(look.dissolveSec(), clip / 3) + 1;
+    }
+
+    /** A look's own shot length, else the configured default. */
+    double secondsOf(Look look) {
+        return look.shotSeconds() > 0 ? look.shotSeconds() : shotSeconds;
     }
 
     @Transactional
@@ -387,7 +442,7 @@ public class DreamService {
         Map<String, Object> d = dream(id);
         Look look = look((String) d.get("look"));
         DreamWorld w = d.get("world_json") == null ? null : json.readValue(d.get("world_json").toString(), DreamWorld.class);
-        double target = shortSeconds(shots(id).size());
+        double target = shortSeconds(shots(id).size(), look);
         BigDecimal inr = pricing.musicInr(1);
         route(id, "DREAM_MUSIC", "music.dream", LYRIA, inr);
         budget.require(inr, "Dream Short music (1 Lyria generation)");
@@ -435,11 +490,37 @@ public class DreamService {
                         SELECT count(*) FROM asset a JOIN provenance p ON p.id = a.provenance_id
                         WHERE a.dream_short_id = :d AND p.provider = :p
                         """).param("d", id).param("p", BED).query(Integer.class).single();
-        return new DreamTypes.DreamBedRequest(storageId(id), musicBed, shortSeconds(shots(id).size()), id + "#" + takes, used);
+        Map<String, Object> d = dream(id);
+        List<Map<String, Object>> shots = shots(id);
+        DreamWorld w = d.get("world_json") == null ? null : json.readValue(d.get("world_json").toString(), DreamWorld.class);
+        List<String> scenes = shots.stream().map(s -> Objects.toString(s.get("scene"), "")).filter(s -> !s.isBlank()).toList();
+        String brief = String.join("\n",
+                "Look: " + look((String) d.get("look")).brief(),
+                "Idea: " + d.get("idea"),
+                w == null ? "" : "World: " + Objects.toString(w.world(), "") + " Palette: " + Objects.toString(w.palette(), "")
+                        + " Light: " + Objects.toString(w.light(), ""),
+                scenes.isEmpty() ? "" : "Shots, in order: " + String.join(" | ", scenes)).strip();
+        List<String> pictures = shots.stream().map(s -> (String) s.get("picture_uri")).filter(Objects::nonNull).limit(3).toList();
+        String model = listenModel;
+        try {
+            budget.require(LISTEN_ESTIMATE_INR, "Dream Short music pick (Gemini listens to the pieces)");
+        } catch (BudgetGuard.BudgetExceededException e) {
+            model = null; // over the Gemini cap: pick by loudness only, never block the Short over a few paise
+        }
+        return new DreamTypes.DreamBedRequest(storageId(id), musicBed, shortSeconds(shots.size(), look((String) d.get("look"))),
+                id + "#" + takes, used,
+                model, brief, pictures, BED_CANDIDATES);
     }
 
     @Transactional
     public String saveMusicBed(UUID id, DreamTypes.DreamBedResult r) {
+        if (r.usage() != null) {
+            cost(id, BudgetGuard.GEMINI, pricing.textInr(r.usage()), r.usage().totalTokens(), "token", false,
+                    "Dream Short music pick: Gemini listened to " + r.heard() + " pieces (" + r.model() + ")");
+            UUID pick = router.recordExternal(null, "DREAM_MUSIC_PICK", "audio.listen", BudgetGuard.GEMINI,
+                    "best fit of " + r.heard() + " pieces: " + Objects.toString(r.why(), ""), List.of(Map.of("provider", BudgetGuard.GEMINI)));
+            tag("routing_decision", pick, id);
+        }
         UUID decision = router.recordExternal(null, "DREAM_MUSIC", "music.dream", "local_laptop",
                 "owner's music bed: free and his own track (Lyria only when chosen for this Short)",
                 List.of(Map.of("provider", "local_laptop")));
@@ -452,7 +533,9 @@ public class DreamService {
         jdbc.sql("UPDATE asset SET dream_short_id = :d WHERE id = :a").param("d", id).param("a", asset).update();
         jdbc.sql("UPDATE dream_short SET music_asset_id = :a, final_asset_id = NULL, updated_at = now() WHERE id = :d")
                 .param("a", asset).param("d", id).update();
-        return "Music: %.0f s of your track \"%s\" from %s (free).".formatted(r.durationSec(), r.bedName(), clock(r.startSec()));
+        String how = r.usage() != null ? "best of " + r.heard() + " pieces by ear: " + r.why()
+                : r.why() == null || r.why().isBlank() ? "picked by loudness" : r.why();
+        return "Music: %.0f s of your track \"%s\" from %s (%s).".formatted(r.durationSec(), r.bedName(), clock(r.startSec()), how);
     }
 
     /** The bed's file name, e.g. "7 weeks and 3 days 1 hour.m4a" (used as the provenance model). */
@@ -484,7 +567,7 @@ public class DreamService {
                         SELECT CASE WHEN p.provider = :bed THEN 'your track (' || p.model || ')' ELSE 'Lyria score' END
                         FROM asset a JOIN provenance p ON p.id = a.provenance_id WHERE a.id = :a
                         """).param("bed", BED).param("a", d.get("music_asset_id")).query(String.class).optional().orElse(null);
-        return new DreamFinishRequest(storageId(id), (String) d.get("look"), clips, 1080, 1920, 24, 0.5,
+        return new DreamFinishRequest(storageId(id), (String) d.get("look"), clips, 1080, 1920, 24, look((String) d.get("look")).dissolveSec(),
                 musicDir == null || musicDir.isBlank() ? null : musicDir, publicUrl, musicUri, musicName);
     }
 

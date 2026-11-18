@@ -27,6 +27,9 @@ LOOKS = {
                   "noise=alls=8:allf=t+u,vignette=angle=PI/4.5"),
     "impossible": ("eq=saturation=1.04:contrast=1.03,"
                    "noise=alls=4:allf=t,vignette=angle=PI/5"),
+    # The owner's examples (18 Nov 2026) are clean: no haze, no grain, no vignette; vivid colour, crisp detail.
+    "lonely": "eq=saturation=1.12:contrast=1.04,unsharp=5:5:0.5:5:5:0",
+    "walkthrough": "eq=saturation=1.08:contrast=1.03:brightness=0.01,unsharp=5:5:0.4:5:5:0",
 }
 
 
@@ -51,6 +54,10 @@ def dissolve_graph(durations: list[float], dissolve: float, width: int, height: 
         raise ValueError("no clips")
     parts = [f"[{i}:v]scale={width}:{height}:force_original_aspect_ratio=increase:flags=lanczos,"
              f"crop={width}:{height},fps={fps},format=yuv420p,setsar=1[c{i}]" for i in range(n)]
+    if dissolve <= 0:  # hard cuts
+        parts.append("".join(f"[c{i}]" for i in range(n)) + f"concat=n={n}:v=1:a=0[x]")
+        parts.append(f"[x]{look_filter(look)},format=yuv420p[v]")
+        return ";".join(parts)
     last = "c0"
     offset = durations[0]
     for i in range(1, n):
@@ -66,6 +73,8 @@ def dissolve_graph(durations: list[float], dissolve: float, width: int, height: 
 
 def total_duration(durations: list[float], dissolve: float) -> float:
     total = durations[0] if durations else 0.0
+    if dissolve <= 0:
+        return sum(durations)
     for i in range(1, len(durations)):
         total += durations[i] - max(0.1, min(dissolve, durations[i - 1] / 3, durations[i] / 3))
     return total

@@ -33,7 +33,7 @@ public class DreamController {
 
     @GetMapping("/looks")
     public List<String> looks() {
-        return List.of("dreamcore", "impossible");
+        return DreamService.LOOK_ORDER;
     }
 
     @PostMapping

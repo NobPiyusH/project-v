@@ -55,7 +55,7 @@ class DreamServicePersistenceTest {
         Router router = new Router(jdbc, json, budget, pricing);
         dreams = new DreamService(jdbc, json, null, new AssetStore(jdbc), pricing, budget, router, new ClipProgress(),
                 "projectv-zimage", "ZImage", "projectv-wan", "Wan", "http://127.0.0.1:8080", BigDecimal.ZERO, 3.5, "", "lyria-3.5",
-                "s3://projectv/music-beds/my track.m4a");
+                "s3://projectv/music-beds/my track.m4a", "gemini-3.6-flash");
         jdbc.sql("""
                         INSERT INTO provider (id, name, kind, capabilities_json, config_json, enabled)
                         VALUES ('local_laptop', 'Laptop', 'local', CAST('["ffmpeg"]' AS jsonb), CAST('{}' AS jsonb), true)
@@ -171,9 +171,15 @@ class DreamServicePersistenceTest {
         assertEquals("s3://projectv/music-beds/my track.m4a", req.bedUri());
         assertEquals(7.625, req.targetSec(), 0.01);
         assertEquals(dream + "#0", req.seed());
-        String said = dreams.saveMusicBed(dream, new DreamTypes.DreamBedResult("s3://b/piece.wav", 8.1, 754.25, 3600, "my track.m4a"));
-        assertTrue(said.contains("12:34") && said.contains("free"), said);
+        assertEquals("gemini-3.6-flash", req.model());
+        assertEquals(6, req.candidates());
+        assertTrue(req.brief().contains("a pink pier") && req.brief().contains("Shots, in order: scene | scene"), req.brief());
+        String said = dreams.saveMusicBed(dream, new DreamTypes.DreamBedResult("s3://b/piece.wav", 8.1, 754.25, 3600, "my track.m4a",
+                "gemini-3.6-flash", new com.projectv.media.MediaTypes.Usage(3000, 60, 0, 3060), "soft and floating", 6));
+        assertTrue(said.contains("12:34") && said.contains("best of 6 pieces by ear: soft and floating"), said);
         assertEquals(1, count("SELECT count(*) FROM cost_entry WHERE dream_short_id = :d AND provider_id = 'local_laptop' AND amount_inr = 0"));
+        assertEquals(1, count("SELECT count(*) FROM cost_entry WHERE dream_short_id = :d AND provider_id = 'gemini_api' AND amount_inr > 0 AND unit_type = 'token'"));
+        assertEquals(1, count("SELECT count(*) FROM routing_decision WHERE dream_short_id = :d AND stage = 'DREAM_MUSIC_PICK'"));
         assertEquals(1, count("SELECT count(*) FROM routing_decision WHERE dream_short_id = :d AND capability = 'music.dream' AND chosen_provider_id = 'local_laptop'"));
         assertEquals(1, count("""
                 SELECT count(*) FROM dream_short d JOIN asset a ON a.id = d.music_asset_id JOIN provenance p ON p.id = a.provenance_id
@@ -189,6 +195,18 @@ class DreamServicePersistenceTest {
         assertEquals("your track (my track.m4a)", dreams.finishRequest(dream).musicName());
         jdbc.sql("UPDATE dream_short SET music_source = 'lyria' WHERE id = :d").param("d", dream).update();
         assertEquals("lyria", dreams.musicSource(dream));
+    }
+
+    @Test
+    void theNewLooksHaveTheirOwnShotLengthAndJoins() {
+        assertEquals("lonely", DreamService.LOOK_ORDER.getFirst());
+        var lonely = DreamService.look("lonely");
+        var walk = DreamService.look("walkthrough");
+        assertEquals(0, lonely.dissolveSec(), "hard cuts");
+        assertEquals(5 * 57 / 16.0 + 1, dreams.shortSeconds(5, lonely), 0.01);
+        assertEquals(4 * 81 / 16.0 - 3 * 0.35 + 1, dreams.shortSeconds(4, walk), 0.01);
+        assertTrue(lonely.structure().formatted(5).contains("DIFFERENT place"));
+        assertEquals(lonely, DreamService.look("nope"), "unknown looks fall back to the default");
     }
 
     @Test

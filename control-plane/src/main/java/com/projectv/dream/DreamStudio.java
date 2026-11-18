@@ -43,7 +43,7 @@ public class DreamStudio {
         if (req.idea() == null || req.idea().isBlank()) {
             throw new IllegalArgumentException("Type an idea first");
         }
-        String look = DreamService.LOOKS.containsKey(req.look()) ? req.look() : "dreamcore";
+        String look = DreamService.LOOKS.containsKey(req.look()) ? req.look() : DreamService.LOOK_ORDER.getFirst();
         int shots = req.shots() == null ? 5 : Math.max(2, Math.min(8, req.shots()));
         String quality = "720p".equals(req.quality()) ? "720p" : "480p";
         int review = req.reviewMinutes() == null ? 10 : Math.max(1, Math.min(240, req.reviewMinutes()));

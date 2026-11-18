@@ -58,13 +58,17 @@ public final class DreamTypes {
     }
 
     /**
-     * A piece of the owner's music bed for one Short: {@code targetSec} long, starting at a point picked from
-     * {@code seed}, away from the starts other Shorts already used ({@code usedStartsSec}), never a quiet stretch.
+     * A piece of the owner's music bed for one Short: {@code targetSec} long, away from the starts other Shorts used
+     * ({@code usedStartsSec}), never a quiet stretch, starting on a beat. {@code candidates} pieces are cut; when
+     * {@code model} is set, Gemini listens to them next to the Short's pictures and {@code brief} and keeps the best fit.
      */
-    public record DreamBedRequest(String dreamId, String bedUri, double targetSec, String seed, List<Double> usedStartsSec) {
+    public record DreamBedRequest(String dreamId, String bedUri, double targetSec, String seed, List<Double> usedStartsSec,
+                                  String model, String brief, List<String> pictureUris, int candidates) {
     }
 
-    public record DreamBedResult(String uri, double durationSec, double startSec, double bedDurationSec, String bedName) {
+    /** {@code model}/{@code usage} are null when nothing listened (one candidate, no model, or the call failed). */
+    public record DreamBedResult(String uri, double durationSec, double startSec, double bedDurationSec, String bedName,
+                                 String model, com.projectv.media.MediaTypes.Usage usage, String why, int heard) {
     }
 
     /** What the workflow shows the dashboard (Temporal query). */

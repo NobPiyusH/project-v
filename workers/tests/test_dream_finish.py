@@ -71,3 +71,15 @@ def test_finish_makes_one_vertical_24fps_short(tmp_path, monkeypatch):
                        "dissolveSec": 0.5, "musicDir": None, "musicUri": "s3://test/score.wav"}, work2)
     assert r2["music"] == "Lyria score"
     assert media_duration(work2 / "dream-short.mp4") == pytest.approx(3.5, abs=0.15)
+
+
+def test_hard_cuts_join_without_dissolves():
+    g = dream.dissolve_graph([3.5, 3.5, 3.5], 0, 1080, 1920, 24, "lonely")
+    assert "xfade" not in g and "concat=n=3:v=1:a=0" in g and g.endswith("[v]")
+    assert dream.total_duration([3.5, 3.5, 3.5], 0) == 10.5
+
+
+def test_clean_looks_have_no_haze_or_grain():
+    for look in ("lonely", "walkthrough"):
+        f = dream.look_filter(look)
+        assert "noise" not in f and "gblur" not in f and "vignette" not in f

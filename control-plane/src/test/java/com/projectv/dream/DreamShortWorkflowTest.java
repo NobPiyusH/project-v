@@ -106,7 +106,8 @@ class DreamShortWorkflowTest {
 
         @Override
         public DreamTypes.DreamBedRequest musicBedRequest(String dreamId) {
-            return new DreamTypes.DreamBedRequest(dreamId, "s3://b/bed.m4a", 16, dreamId + "#0", List.of());
+            return new DreamTypes.DreamBedRequest(dreamId, "s3://b/bed.m4a", 16, dreamId + "#0", List.of(), "gemini", "brief",
+                    List.of(), 6);
         }
 
         @Override
@@ -160,7 +161,7 @@ class DreamShortWorkflowTest {
 
         @Override
         public DreamTypes.DreamBedResult dreamMusicBed(DreamTypes.DreamBedRequest request) {
-            return new DreamTypes.DreamBedResult("s3://bed-piece", 16.5, 754.2, 3600, "bed.m4a");
+            return new DreamTypes.DreamBedResult("s3://bed-piece", 16.5, 754.2, 3600, "bed.m4a", null, null, null, 1);
         }
     }
 
