@@ -29,9 +29,11 @@ LOOKS = {
                    "noise=alls=4:allf=t,vignette=angle=PI/5"),
     # The owner's examples (18 Nov 2026) are clean: no haze, no grain, no vignette; vivid colour, crisp detail.
     # A whisper of moving grain (alls=2) breaks up the too-smooth "AI" surface without looking like a filter.
-    "lonely": "eq=saturation=1.12:contrast=1.04,unsharp=5:5:0.5:5:5:0,noise=alls=2:allf=t",
-    "drive": "eq=saturation=1.1:contrast=1.04,unsharp=5:5:0.5:5:5:0,noise=alls=2:allf=t",
-    "walkthrough": "eq=saturation=1.08:contrast=1.03:brightness=0.01,unsharp=5:5:0.4:5:5:0,noise=alls=2:allf=t",
+    # Shadows are lifted a touch first (the 19 Nov test crushed the dark ground to pure black).
+    "lonely": "curves=all='0/0.035 0.2/0.215 1/1',eq=saturation=1.12:contrast=1.04,unsharp=5:5:0.5:5:5:0,noise=alls=2:allf=t",
+    "drive": "curves=all='0/0.035 0.2/0.215 1/1',eq=saturation=1.1:contrast=1.04,unsharp=5:5:0.5:5:5:0,noise=alls=2:allf=t",
+    "walkthrough": ("curves=all='0/0.03 0.2/0.21 1/1',eq=saturation=1.08:contrast=1.03:brightness=0.01,"
+                    "unsharp=5:5:0.4:5:5:0,noise=alls=2:allf=t"),
 }
 
 
@@ -42,11 +44,38 @@ def _beat(detail) -> None:
         pass
 
 
+# How a hand-held phone moves (owner, 19 Nov 2026: Wan's glide reads as AI, not a person). Pixels of drift at 1080 wide
+# as (amplitude, frequency Hz) pairs for x and y; slow, irregular sums of sines, never repeating within a shot.
+HANDHELD = {
+    "stand": {"x": [(5, 0.17), (3, 0.41)], "y": [(4, 0.13), (2, 0.53)]},   # standing still, breathing
+    "walk": {"x": [(6, 0.45), (2, 0.19)], "y": [(5, 1.8), (3, 0.23)]},     # slow steps: bob + sway
+    "car": {"x": [(1.5, 4.7), (2, 0.3)], "y": [(2, 6.3), (2, 9.1)]},       # road vibration
+}
+HANDHELD_MARGIN = 1.04  # zoom in 4% so the drift never shows an edge
+
+
+def handheld_filter(kind: str | None, width: int, height: int, shot: int) -> str:
+    """Crop that drifts like a hand-held phone ('' for none). Phases differ per shot so cuts don't repeat a move."""
+    spec = HANDHELD.get(kind or "none")
+    if not spec:
+        return ""
+    scale = width / 1080
+
+    def axis(name: str, centre: str) -> str:
+        terms = "".join(f"+{a * scale:.2f}*sin(2*PI*{f}*t+{(shot * 1.7 + k * 2.3 + (name == 'y')):.2f})"
+                        for k, (a, f) in enumerate(spec[name]))
+        return f"{centre}{terms}"
+
+    return (f",scale={round(width * HANDHELD_MARGIN / 2) * 2}:{round(height * HANDHELD_MARGIN / 2) * 2}:flags=lanczos,"
+            f"crop={width}:{height}:x='{axis('x', '(iw-ow)/2')}':y='{axis('y', '(ih-oh)/2')}'")
+
+
 def look_filter(look: str | None) -> str:
     return LOOKS.get(look or "dreamcore", LOOKS["dreamcore"])
 
 
-def dissolve_graph(durations: list[float], dissolve: float, width: int, height: int, fps: int, look: str | None) -> str:
+def dissolve_graph(durations: list[float], dissolve: float, width: int, height: int, fps: int, look: str | None,
+                   handheld: str | None = None) -> str:
     """filter_complex joining inputs 0..n-1 with cross-dissolves, then the look; output label [v].
 
     Each input is scaled/cropped to the final frame first. A dissolve can't be longer than a third of the shorter
@@ -56,7 +85,8 @@ def dissolve_graph(durations: list[float], dissolve: float, width: int, height: 
         raise ValueError("no clips")
     parts = [f"[{i}:v]trim=duration={durations[i]:.3f},setpts=PTS-STARTPTS,"
              f"scale={width}:{height}:force_original_aspect_ratio=increase:flags=lanczos,"
-             f"crop={width}:{height},fps={fps},format=yuv420p,setsar=1[c{i}]" for i in range(n)]
+             f"crop={width}:{height}{handheld_filter(handheld, width, height, i)},fps={fps},format=yuv420p,setsar=1[c{i}]"
+             for i in range(n)]
     if dissolve <= 0:  # hard cuts
         parts.append("".join(f"[c{i}]" for i in range(n)) + f"concat=n={n}:v=1:a=0[x]")
         parts.append(f"[x]{look_filter(look)},format=yuv420p[v]")
@@ -132,9 +162,11 @@ def pick_track(music_dir: str | None, seed: str) -> Path | None:
     return tracks[rnd.randrange(len(tracks))]
 
 
-def _smooth(src: Path, dst: Path, src_fps: float, dst_fps: int) -> str:
-    """16 -> 24 fps. RIFE on the laptop GPU (same pinned model as the main finish); FFmpeg if it can't run."""
-    if src_fps >= dst_fps:
+def _smooth(src: Path, dst: Path, src_fps: float, dst_fps: int, speed: float = 1.0) -> str:
+    """16 -> 24 fps, played at `speed` (0.7 = 30% slower, new in-between frames fill the gaps). RIFE on the laptop GPU
+    (same pinned model as the main finish); FFmpeg if it can't run."""
+    src_fps = src_fps * speed  # a slowed clip is a clip shot at a lower frame rate, then interpolated up
+    if src_fps >= dst_fps and speed == 1.0:
         run_ffmpeg(["-i", str(src), "-an", "-c:v", "libx264", "-crf", "12", "-pix_fmt", "yuv420p", str(dst)])
         return "none"
     try:
@@ -144,7 +176,7 @@ def _smooth(src: Path, dst: Path, src_fps: float, dst_fps: int) -> str:
             return "rife-laptop"
     except Exception as e:  # noqa: BLE001 - e.g. out of GPU memory: FFmpeg instead
         log.warning("Laptop RIFE failed (%s); smoothing with FFmpeg", e)
-    run_ffmpeg(["-i", str(src), "-an", "-vf", f"minterpolate=fps={dst_fps}:mi_mode=mci:mc_mode=aobmc:vsbmc=1",
+    run_ffmpeg(["-i", str(src), "-an", "-vf", f"setpts=PTS/{speed},minterpolate=fps={dst_fps}:mi_mode=mci:mc_mode=aobmc:vsbmc=1",
                 "-c:v", "libx264", "-crf", "12", "-pix_fmt", "yuv420p", str(dst)])
     return "ffmpeg"
 
@@ -163,7 +195,7 @@ def finish(req: dict, tmp: Path) -> dict:
     for n, clip in enumerate(req["clips"]):
         src, dst = tmp / f"in{n}.mp4", tmp / f"smooth{n}.mp4"
         src.write_bytes(get_bytes(clip["uri"]))
-        how.add(_smooth(src, dst, float(clip.get("fps") or 16), fps))
+        how.add(_smooth(src, dst, float(clip.get("fps") or 16), fps, float(req.get("speed") or 1.0)))
         smoothed.append(dst)
         _beat({"smoothed": n + 1, "total": len(req["clips"])})
     durations = [media_duration(p) for p in smoothed]
@@ -181,7 +213,7 @@ def finish(req: dict, tmp: Path) -> dict:
         synced = sum(1 for a, b in zip(durations, new) if a != b)
         durations = new
     length = total_duration(durations, dissolve)
-    graph = dissolve_graph(durations, dissolve, width, height, fps, req.get("look"))
+    graph = dissolve_graph(durations, dissolve, width, height, fps, req.get("look"), req.get("handheld"))
     args: list[str] = []
     for p in smoothed:
         args += ["-i", str(p)]

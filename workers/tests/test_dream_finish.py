@@ -44,7 +44,7 @@ def test_finish_makes_one_vertical_24fps_short(tmp_path, monkeypatch):
         clips.append({"uri": f"s3://test/{p.name}", "fps": 16})
     saved = {}
     monkeypatch.setattr(dream, "get_bytes", lambda uri: (tmp_path / uri.rsplit("/", 1)[1]).read_bytes())
-    monkeypatch.setattr(dream, "_smooth", lambda src, dst, src_fps, dst_fps: (
+    monkeypatch.setattr(dream, "_smooth", lambda src, dst, src_fps, dst_fps, speed=1.0: (
         run_ffmpeg(["-i", str(src), "-vf", f"fps={dst_fps}", "-c:v", "libx264", "-pix_fmt", "yuv420p", str(dst)]), "ffmpeg")[1])
 
     def fake_put(key, path, content_type):
@@ -105,3 +105,20 @@ def test_no_beat_close_by_keeps_the_natural_cut():
 def test_hard_cuts_are_kept_when_the_request_says_zero():
     assert dream.dissolve_of({"dissolveSec": 0}) == 0
     assert dream.dissolve_of({}) == 0.5
+
+
+def test_handheld_drifts_inside_a_zoomed_frame_and_differs_per_shot():
+    a = dream.handheld_filter("stand", 1080, 1920, 0)
+    assert "scale=1124:1996" in a and "crop=1080:1920" in a and "sin(2*PI*0.17*t" in a
+    assert a != dream.handheld_filter("stand", 1080, 1920, 1)
+    assert dream.handheld_filter("none", 1080, 1920, 0) == "" and dream.handheld_filter(None, 1080, 1920, 0) == ""
+    worst = max(sum(x for x, _ in v[k]) for v in dream.HANDHELD.values() for k in ("x", "y"))
+    assert worst < (1124 - 1080) / 2  # the drift never shows an edge
+
+
+def test_slowed_clip_gets_longer(tmp_path):
+    src = tmp_path / "c.mp4"
+    run_ffmpeg(["-f", "lavfi", "-i", "testsrc=size=160x288:rate=16:duration=2", "-pix_fmt", "yuv420p", str(src)])
+    out = tmp_path / "s.mp4"
+    dream._smooth(src, out, 16, 24, 0.7)
+    assert media_duration(out) == pytest.approx(2 / 0.7, abs=0.15)

@@ -63,11 +63,23 @@ public class DreamService {
      * A look: what the writer aims for, how the shots relate ({@code structure}), what every picture and clip prompt
      * ends with, how long a shot is (0 = the configured default) and how shots join (0 = hard cut).
      */
-    record Look(String brief, String pictureStyle, String motionStyle, String structure, double shotSeconds, double dissolveSec) {
+    record Look(String brief, String pictureStyle, String motionStyle, String structure, double shotSeconds, double dissolveSec,
+                double speed, String handheld) {
         Look(String brief, String pictureStyle, String motionStyle) {
-            this(brief, pictureStyle, motionStyle, ONE_WORLD, 0, 0.5);
+            this(brief, pictureStyle, motionStyle, ONE_WORLD, 0, 0.5, 1.0, "none");
         }
     }
+
+    /**
+     * How a person films (owner, 19 Nov 2026: "not like a human holding a camera ... more like an AI video"). Wan
+     * glides like a drone or dolly; these words pull it towards a phone in someone's hand. Every realistic look's
+     * camera prompt ends with it.
+     */
+    static final String HUMAN_CAMERA = "filmed on a phone held in a person's hand: small natural sway, nothing gliding; "
+            + "no drone, no dolly, no crane, no zoom, no flying camera";
+
+    /** Small text comes out garbled; signs stay big and face the camera. */
+    static final String SIGNS = "at most one large sign facing the camera, no small labels, no small text";
 
     static final String ONE_WORLD = "Invent ONE coherent world and %d shots that move through it like a dream, each a single "
             + "continuous camera move.";
@@ -102,12 +114,14 @@ public class DreamService {
                     "photograph, shot on a full-frame camera with a wide lens, photorealistic, tack sharp, vivid saturated "
                             + "colours, golden hour, blue hour or night sky with glowing clouds, neon or warm lamp glow, wet "
                             + "reflections, high detail, cinematic, vertical composition with the object in the lower middle, "
-                            + "no people, no text, " + REAL_PHOTO,
-                    "very slow smooth push-in toward the object, the camera barely moving; clouds drift, neon and lights "
-                            + "flicker softly, grass and flowers sway in a light breeze; no cuts, no people, the object stays still",
+                            + "no people, " + SIGNS + ", " + REAL_PHOTO,
+                    "a person stands still looking at the object, maybe one slow step closer; the camera barely moves; the "
+                            + "scene itself is alive: clouds drift across the sky, neon and lamps flicker and pulse softly, grass "
+                            + "and flowers sway in the breeze, water ripples; the object stays still; no cuts, no people; "
+                            + HUMAN_CAMERA,
                     "Invent %d shots, each a DIFFERENT place and a DIFFERENT object, joined by one feeling (not one connected "
                             + "world). Vary the object, the landscape and the time of light from shot to shot.",
-                    3.5, 0),
+                    3.5, 0, 0.7, "stand"),
             // Owner's example (18 Nov 2026): first-person walk through ordinary interiors where one impossible thing
             // happens (kitchen opening onto grass, hallway flooding into a sea, stairs melting into rainbow paint).
             "walkthrough", new Look(
@@ -118,12 +132,12 @@ public class DreamService {
                             + "strange but calm. No people, no text.",
                     "phone camera photo, first-person point of view at eye level, wide lens, photorealistic, sharp, bright "
                             + "fluorescent and daylight, pastel pink mint and sky-blue colours, glossy wet tiled floors with "
-                            + "reflections, liminal space, no people, no text, " + REAL_PHOTO,
-                    "steady first-person walk forward through the space at walking pace, slight handheld sway, water and "
-                            + "light moving; continuous, no cuts, no people",
+                            + "reflections, liminal space, no people, " + SIGNS + ", " + REAL_PHOTO,
+                    "a person walks slowly forward at a relaxed pace, gentle up-and-down step bob, glancing a little left "
+                            + "and right; water ripples and lights shimmer; continuous, no cuts, no people in view; " + HUMAN_CAMERA,
                     "Invent %d rooms or corridors walked through one after another, each a different ordinary place with "
                             + "its own impossible thing; the walk keeps going forward from shot to shot.",
-                    5.0, 0.35),
+                    5.0, 0.35, 0.75, "walk"),
             // Owner's examples (19 Nov 2026): dashcam on a highway that curves up into space; side window passing a
             // lonely house on a snowy field at blue hour. Real road details make the impossible sight believable.
             "drive", new Look(
@@ -134,13 +148,13 @@ public class DreamService {
                             + "roadside poles, a few ordinary cars) make it believable. No readable words.",
                     "photo taken from inside a car, dashcam view through the windscreen or side-window view with the side "
                             + "mirror and window frame in frame, phone or dashcam lens, photorealistic, sharp, natural daylight "
-                            + "or golden or blue hour, vivid sky, no people visible, no text, " + REAL_PHOTO,
-                    "the car drives steadily forward along the road (dashcam), or the landscape glides past the side window "
-                            + "with natural parallax; lane markings and roadside poles move by, other cars keep driving; smooth, "
-                            + "continuous, no cuts",
+                            + "or golden or blue hour, vivid sky, no people visible, " + SIGNS + ", " + REAL_PHOTO,
+                    "filmed on a phone held by a passenger in a car driving at normal speed: light road vibration and small "
+                            + "bumps; the landscape passes with natural parallax, lane markings and roadside poles move by, other "
+                            + "cars keep driving; continuous, no cuts; no drone, no flying camera",
                     "Invent %d shots, each a different drive with its own impossible sight; the camera is inside a car in "
                             + "every shot (mix windscreen and side-window views).",
-                    5.0, 0),
+                    5.0, 0, 0.85, "car"),
             "dreamcore", new Look(
                     "Dreamcore / liminal fever dream: one soft pastel world (pink, mint, cream, sky blue), surreal oversized "
                             + "or out-of-place objects, water, tiles, clouds, empty calm places, nostalgic and slightly eerie. "
@@ -461,7 +475,7 @@ public class DreamService {
 
     /** Length the finished Short will have: the shots minus the dissolves between them, plus a second of tail. */
     double shortSeconds(int shots, Look look) {
-        double clip = (double) frames(secondsOf(look)) / FPS;
+        double clip = (double) frames(secondsOf(look)) / FPS / look.speed();
         return shots * clip - Math.max(0, shots - 1) * Math.min(look.dissolveSec(), clip / 3) + 1;
     }
 
@@ -600,8 +614,10 @@ public class DreamService {
                         SELECT CASE WHEN p.provider = :bed THEN 'your track (' || p.model || ')' ELSE 'Lyria score' END
                         FROM asset a JOIN provenance p ON p.id = a.provenance_id WHERE a.id = :a
                         """).param("bed", BED).param("a", d.get("music_asset_id")).query(String.class).optional().orElse(null);
-        return new DreamFinishRequest(storageId(id), (String) d.get("look"), clips, 1080, 1920, 24, look((String) d.get("look")).dissolveSec(),
-                musicDir == null || musicDir.isBlank() ? null : musicDir, publicUrl, musicUri, musicName);
+        Look look = look((String) d.get("look"));
+        return new DreamFinishRequest(storageId(id), (String) d.get("look"), clips, 1080, 1920, 24, look.dissolveSec(),
+                musicDir == null || musicDir.isBlank() ? null : musicDir, publicUrl, musicUri, musicName,
+                look.speed(), look.handheld());
     }
 
     @Transactional

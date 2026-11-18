@@ -49,7 +49,7 @@ public final class DreamTypes {
      */
     public record DreamFinishRequest(String dreamId, String look, List<DreamFinishClip> clips, int width, int height,
                                      int fps, double dissolveSec, String musicDir, String progressUrl, String musicUri,
-                                     String musicName) {
+                                     String musicName, double speed, String handheld) {
     }
 
     /** @param smoothing "rife-laptop" | "ffmpeg" (how 16 fps became 24); {@code music} the track used, or null */
