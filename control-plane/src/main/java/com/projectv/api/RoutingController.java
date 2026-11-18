@@ -39,6 +39,26 @@ public class RoutingController {
         router.recordExternal(d.videoId(), d.stage(), d.capability(), d.chosen(), d.reason(), d.candidates());
     }
 
+    @GetMapping("/routing/providers")
+    public List<Map<String, Object>> providers() {
+        return router.providers();
+    }
+
+    @GetMapping("/routing/budgets")
+    public List<Map<String, Object>> budgets() {
+        return router.budgets();
+    }
+
+    @org.springframework.web.bind.annotation.PutMapping("/routing/providers/{id}/enabled")
+    public void setEnabled(@PathVariable String id, @org.springframework.web.bind.annotation.RequestParam boolean on) {
+        router.setOwnerDisabled(id, !on);
+    }
+
+    @org.springframework.web.bind.annotation.PostMapping("/routing/providers/{id}/reset")
+    public void reset(@PathVariable String id) {
+        router.resetHealth(id);
+    }
+
     @GetMapping("/routing/health")
     public List<Map<String, Object>> health() {
         return jdbc.sql("SELECT provider_id, fails, cooldown_until, last_error, updated_at FROM provider_health ORDER BY provider_id")

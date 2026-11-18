@@ -158,6 +158,16 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
   return (text ? JSON.parse(text) : undefined) as T
 }
 
+export interface RouterProvider {
+  id: string; name: string; kind: string; enabled: boolean; owner_disabled: boolean; capabilities: string
+  quality: number; budget: string; fails: number | null; cooldown_until: string | null; last_error: string | null
+  chosen_this_month: number
+}
+export interface RoutingDecision {
+  id: string; stage: string; capability: string; chosen_provider_id: string | null; reason_text: string
+  candidates: string; overridden_by_owner: boolean; created_at: string
+}
+
 export const api = {
   system: () => call<{ planner: string }>('GET', '/system'),
   stages: () => call<StageInfo[]>('GET', '/stages'),
@@ -203,5 +213,10 @@ export const api = {
   selectLineVoice: (id: string, index: number, assetId: string) =>
     call<void>('PUT', `/videos/${id}/script/lines/${index}/voice`, { assetId }),
   pause: (id: string) => call<void>('POST', `/videos/${id}/pause`),
+  routerProviders: () => call<RouterProvider[]>('GET', '/routing/providers'),
+  routerBudgets: () => call<{ bucket: string; shareLeft: number; lambda: number }[]>('GET', '/routing/budgets'),
+  setProviderOn: (id: string, on: boolean) => call<void>('PUT', `/routing/providers/${id}/enabled?on=${on}`),
+  resetProvider: (id: string) => call<void>('POST', `/routing/providers/${id}/reset`),
+  routing: (videoId: string) => call<RoutingDecision[]>('GET', `/videos/${videoId}/routing`),
   resume: (id: string) => call<void>('POST', `/videos/${id}/resume`),
 }

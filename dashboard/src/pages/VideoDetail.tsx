@@ -1,4 +1,5 @@
 import { Fragment, useState } from 'react'
+import { RoutingDecisionsCard } from './Routing'
 import { api, assetUrl, type Fact, type Inspection, type Mode, type StageInfo, type StageRun, type VideoDetail as Detail } from '../api'
 import { Countdown, ModeSwitch, STATUS_TEXT, StatusBadge } from '../components'
 import { fmtTime, usePoll } from '../hooks'
@@ -218,6 +219,7 @@ export function VideoDetail({ id, stages }: { id: string; stages: StageInfo[] })
           <PlanCard video={video} />
           <TimeCostCard video={video} stages={stages} />
           <CostsCard video={video} />
+          <RoutingDecisionsCard videoId={id} />
         </>
       )}
     </>

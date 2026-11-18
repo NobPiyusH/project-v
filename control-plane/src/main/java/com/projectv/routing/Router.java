@@ -143,6 +143,9 @@ public class Router {
         if (!Boolean.TRUE.equals(p.get("enabled"))) {
             return "disabled";
         }
+        if (Boolean.TRUE.equals(p.get("owner_disabled"))) {
+            return "switched off by the owner";
+        }
         List<String> caps = json.readValue((String) p.get("capabilities"), new TypeReference<List<String>>() {
         });
         if (!caps.contains(capability)) {
@@ -201,6 +204,45 @@ public class Router {
                 .query(OffsetDateTime.class).optional().map(OffsetDateTime::toInstant).orElse(null);
     }
 
+    // ------------------------------------------------------------------------------------------- owner controls (M3b)
+
+    /** Switch a provider off (or back on) for routing; survives restarts. */
+    public void setOwnerDisabled(String providerId, boolean off) {
+        int n = jdbc.sql("UPDATE provider SET owner_disabled = :off, updated_at = now() WHERE id = :p")
+                .param("off", off).param("p", providerId).update();
+        if (n == 0) {
+            throw new IllegalArgumentException("Unknown provider " + providerId);
+        }
+    }
+
+    /** Clear a cooldown by hand (the owner knows the provider is back). */
+    public void resetHealth(String providerId) {
+        jdbc.sql("DELETE FROM provider_health WHERE provider_id = :p").param("p", providerId).update();
+    }
+
+    /** The router's providers (those with a quality tier) with health and this month's decision counts. */
+    public List<Map<String, Object>> providers() {
+        return jdbc.sql("""
+                        SELECT p.id, p.name, p.kind, p.enabled, p.owner_disabled, p.capabilities_json::text AS capabilities,
+                               (p.config_json->>'quality')::int AS quality, COALESCE(p.config_json->>'budget', 'none') AS budget,
+                               h.fails, h.cooldown_until, h.last_error,
+                               (SELECT count(*) FROM routing_decision d WHERE d.chosen_provider_id = p.id
+                                  AND d.created_at >= date_trunc('month', now())) AS chosen_this_month
+                        FROM provider p LEFT JOIN provider_health h ON h.provider_id = p.id
+                        WHERE p.config_json->>'quality' IS NOT NULL ORDER BY p.config_json->>'budget', p.id
+                        """).query().listOfRows();
+    }
+
+    /** Each budget bucket the router scores against: cap, spent, share left (what makes lambda grow). */
+    public List<Map<String, Object>> budgets() {
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (String b : List.of("gemini", "gpu", "claude")) {
+            out.add(Map.of("bucket", b, "shareLeft", Math.round(budget.remainingShare(b) * 1000) / 1000.0,
+                    "lambda", Math.round(pricing.routingLambdaPerInr() / Math.max(0.1, budget.remainingShare(b)) * 10000) / 10000.0));
+        }
+        return out;
+    }
+
     // ------------------------------------------------------------------------------------------- read model
 
     /** Decisions of one video, newest first (for the dashboard's "why this provider?"). */
@@ -214,7 +256,7 @@ public class Router {
 
     private Map<String, Object> provider(String id) {
         return jdbc.sql("""
-                        SELECT enabled, capabilities_json::text AS capabilities, config_json->>'quality' AS quality,
+                        SELECT enabled, owner_disabled, capabilities_json::text AS capabilities, config_json->>'quality' AS quality,
                                COALESCE(config_json->>'budget', 'none') AS budget
                         FROM provider WHERE id = :id
                         """).param("id", id).query().listOfRows().stream().findFirst().orElse(null);

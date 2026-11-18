@@ -1,5 +1,6 @@
 import { api } from '../api'
 import { usePoll } from '../hooks'
+import { RouterCard } from './Routing'
 
 export function Providers() {
   const { data: providers, error } = usePoll(api.providers, 10000)
@@ -7,10 +8,11 @@ export function Providers() {
 
   return (
     <>
+      <RouterCard />
       <section className="card">
         <div className="card-head">
-          <h2>Providers</h2>
-          <span className="pill">From config/providers.yaml · routing arrives in M3</span>
+          <h2>All providers</h2>
+          <span className="pill">From config/providers.yaml</span>
         </div>
         {error && <p className="error">{error}</p>}
         {providers && (

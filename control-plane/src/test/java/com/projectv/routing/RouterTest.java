@@ -50,6 +50,7 @@ class RouterTest {
     void reset() {
         jdbc.sql("DELETE FROM routing_decision").update();
         jdbc.sql("DELETE FROM provider_health").update();
+        jdbc.sql("UPDATE provider SET owner_disabled = false").update();
         jdbc.sql("DELETE FROM cost_entry").update();
         provider("modal_wan", 6, "gpu", true, "[\"video.i2v.draft\",\"video.i2v.final\"]");
         provider("gemini_omni", 8, "gemini", true, "[\"video.i2v.draft\",\"video.i2v.final\"]");
@@ -182,6 +183,21 @@ class RouterTest {
     void workerDecisionsAreLoggedToo() {
         router.recordExternal(video, "NARRATION", "tts.narration", "chatterbox", "the channel voice", null);
         assertEquals(1, logged());
+    }
+
+    @Test
+    void ownerSwitchOffIsRespectedAndReported() {
+        router.setOwnerDisabled("gemini_omni", true);
+        var c = router.choose(video, "FINAL_GEN", CAP, both(40, 90), "gemini_omni", false);
+        assertEquals("modal_wan", c.providerId());
+        assertTrue(c.considered().stream().anyMatch(r -> "switched off by the owner".equals(r.get("why"))));
+        assertTrue(router.providers().stream().anyMatch(p -> "gemini_omni".equals(p.get("id"))
+                && Boolean.TRUE.equals(p.get("owner_disabled"))));
+        router.setOwnerDisabled("gemini_omni", false);
+        router.reportFailure("gemini_omni", "x");
+        router.resetHealth("gemini_omni");
+        assertEquals("gemini_omni", router.choose(video, "FINAL_GEN", CAP, both(40, 90), "gemini_omni", false).providerId());
+        assertEquals(3, router.budgets().size());
     }
 
     @Test
