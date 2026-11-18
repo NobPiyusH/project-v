@@ -70,3 +70,8 @@ def test_the_climax_cut_lands_nearest_the_rise():
     beats = [0.5 * k for k in range(40)]
     out = dream.beat_synced([5.1, 5.1], 0, beats, prefer={0: 4.6})
     assert out[0] == 4.5
+
+
+def test_the_fade_in_is_not_the_rise():
+    energy = [(0.0, 0.0), (1.0, 0.8), (2.0, 0.5), (3.0, 0.5), (4.0, 0.9)]
+    assert edit.biggest_rise(energy) == 2.0

@@ -58,10 +58,13 @@ def bar_lines(beats: list[float], strength: list[float], per_bar: int = 4) -> li
     return beats[phase::per_bar]
 
 
-def biggest_rise(energy: list[tuple[float, float]], window: float = 2.0) -> float | None:
-    """Time where the energy climbs most over the next `window` seconds (the music's lift)."""
+def biggest_rise(energy: list[tuple[float, float]], window: float = 2.0, skip: float = 1.5) -> float | None:
+    """Time where the energy climbs most over the next `window` seconds (the music's lift). The first `skip` seconds
+    are left out: the piece's own fade-in is not a lift (19 Nov test: the "rise" came out at 0.0 s)."""
     best, at = 0.0, None
     for i, (t, v) in enumerate(energy):
+        if t < skip:
+            continue
         ahead = [w for (u, w) in energy[i:] if u <= t + window]
         if ahead and max(ahead) - v > best:
             best, at = max(ahead) - v, t
