@@ -24,8 +24,10 @@ import java.util.UUID;
  *   <li>candidates come from the stage (each with its own cost estimate for this job);</li>
  *   <li>filter: in the registry, enabled, has the capability, not cooling down after failures, fits its budget
  *       bucket (Gemini / GPU / Claude caps);</li>
- *   <li>choose: the owner's preferred provider when it is eligible; otherwise the highest quality tier (owner rule:
- *       quality first), then the lowest cost;</li>
+ *   <li>choose: the owner's preferred provider when it is eligible. Otherwise (owner, 18 Nov 2026) only providers
+ *       reaching the job's quality floor compete, scored {@code min(quality, enough) - lambda x cost} with lambda
+ *       growing as that provider's budget runs low; when none reaches the floor, the best-scoring one is a noted
+ *       fallback;</li>
  *   <li>none eligible: the job is deferred with a non-retryable budget failure, so the stage waits for the owner
  *       with the reasons;</li>
  *   <li>every decision is logged in {@code routing_decision} (CLAUDE.md rule 6).</li>
@@ -48,11 +50,19 @@ public class Router {
     private final JdbcClient jdbc;
     private final ObjectMapper json;
     private final BudgetGuard budget;
+    private final com.projectv.ledger.Pricing pricing;
 
-    public Router(JdbcClient jdbc, ObjectMapper json, BudgetGuard budget) {
+    public Router(JdbcClient jdbc, ObjectMapper json, BudgetGuard budget, com.projectv.ledger.Pricing pricing) {
         this.jdbc = jdbc;
         this.json = json;
         this.budget = budget;
+        this.pricing = pricing;
+    }
+
+    /** min(quality, enough) - lambda x cost; lambda = lambdaPerInr / max(0.1, share of the budget left). */
+    double score(int quality, BigDecimal costInr, String bucket, double enough) {
+        double lambda = pricing.routingLambdaPerInr() / Math.max(0.1, budget.remainingShare(bucket));
+        return Math.min(quality, enough) - lambda * costInr.doubleValue();
     }
 
     /**
@@ -62,8 +72,13 @@ public class Router {
     public Choice choose(UUID videoId, String stage, String capability, List<Candidate> candidates, String preferred,
                          boolean log) {
         List<Map<String, Object>> considered = new ArrayList<>();
-        Candidate best = null;
-        int bestQuality = Integer.MIN_VALUE;
+        double[] q = pricing.routingQuality(capability);
+        double floor = q[0];
+        double enough = q[1];
+        Candidate best = null;          // best score among providers reaching the quality floor
+        double bestScore = Double.NEGATIVE_INFINITY;
+        Candidate fallback = null;      // best score among eligible providers below the floor
+        double fallbackScore = Double.NEGATIVE_INFINITY;
         Candidate pref = null;
         for (Candidate c : candidates) {
             Map<String, Object> row = new LinkedHashMap<>();
@@ -80,15 +95,24 @@ public class Router {
                 if (c.providerId().equals(preferred)) {
                     pref = c;
                 }
-                if (best == null || quality > bestQuality
-                        || (quality == bestQuality && c.estimateInr().compareTo(best.estimateInr()) < 0)) {
-                    best = c;
-                    bestQuality = quality;
+                double s = score(quality, c.estimateInr(), String.valueOf(p.get("budget")), enough);
+                row.put("score", Math.round(s * 100) / 100.0);
+                if (quality >= floor) {
+                    if (s > bestScore) {
+                        best = c;
+                        bestScore = s;
+                    }
+                } else {
+                    row.put("belowFloor", floor);
+                    if (s > fallbackScore) {
+                        fallback = c;
+                        fallbackScore = s;
+                    }
                 }
             }
             considered.add(row);
         }
-        Candidate chosen = pref != null ? pref : best;
+        Candidate chosen = pref != null ? pref : best != null ? best : fallback;
         String reason;
         if (chosen == null) {
             reason = "No provider can run " + capability + " now: " + String.join("; ", considered.stream()
@@ -96,7 +120,8 @@ public class Router {
         } else if (chosen == pref) {
             reason = chosen.providerId() + ": the owner's preference, and it fits its budget";
         } else {
-            reason = chosen.providerId() + ": highest quality eligible provider"
+            reason = chosen.providerId() + (chosen == best ? ": best score at or above the quality floor ("
+                    + (int) floor + ")" : ": fallback BELOW the quality floor (" + (int) floor + "), nothing better fits")
                     + (preferred != null ? " (preferred " + preferred + " is not available: "
                     + considered.stream().filter(r -> preferred.equals(r.get("provider"))).map(r -> String.valueOf(r.get("why")))
                     .findFirst().orElse("not a candidate") + ")" : "");

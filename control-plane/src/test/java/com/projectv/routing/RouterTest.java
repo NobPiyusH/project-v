@@ -42,7 +42,8 @@ class RouterTest {
     static void setUp() throws Exception {
         Flyway.configure().dataSource(PG.getJdbcUrl(), PG.getUsername(), PG.getPassword()).load().migrate();
         jdbc = JdbcClient.create(new DriverManagerDataSource(PG.getJdbcUrl(), PG.getUsername(), PG.getPassword()));
-        router = new Router(jdbc, JsonMapper.builder().build(), new BudgetGuard(jdbc, new Pricing("../config")));
+        Pricing pricing = new Pricing("../config");
+        router = new Router(jdbc, JsonMapper.builder().build(), new BudgetGuard(jdbc, pricing), pricing);
     }
 
     @BeforeEach
@@ -131,6 +132,41 @@ class RouterTest {
         assertEquals("modal_wan", c.providerId());
         assertTrue(c.considered().stream().anyMatch(r -> "disabled".equals(r.get("why"))));
         assertTrue(c.considered().stream().anyMatch(r -> "not in the provider registry".equals(r.get("why"))));
+    }
+
+    // ---- the scoring formula (owner, 18 Nov 2026): floor, then min(quality, enough) - lambda x cost
+
+    @Test
+    void draftsGoToTheCheapToolBecauseExtraQualityBuysNothing() {
+        var c = router.choose(video, "DRAFT_GEN", "video.i2v.draft", both(3, 46), null, false);
+        assertEquals("modal_wan", c.providerId(), c.reason());
+    }
+
+    @Test
+    void finalsGoToTheOnlyProviderAboveTheFloor() {
+        var c = router.choose(video, "FINAL_GEN", CAP, both(46, 46), null, false);
+        assertEquals("gemini_omni", c.providerId(), "Wan (6) is below the finals floor (7)");
+    }
+
+    @Test
+    void belowTheFloorIsANotedFallbackWhenNothingElseFits() {
+        var c = router.choose(video, "FINAL_GEN", CAP, both(46, 5000), null, true);
+        assertEquals("modal_wan", c.providerId());
+        assertTrue(c.reason().contains("BELOW the quality floor"), c.reason());
+    }
+
+    @Test
+    void aBudgetRunningLowTipsTheChoiceToTheCheaperGoodEnoughProvider() {
+        provider("omni_premium", 9, "gemini", true, "[\"video.i2v.final\"]");
+        provider("omni_lite", 8, "gemini", true, "[\"video.i2v.final\"]");
+        var pair = List.of(new Candidate("omni_premium", BigDecimal.valueOf(40)), new Candidate("omni_lite", BigDecimal.valueOf(5)));
+        assertEquals("omni_premium", router.choose(video, "FINAL_GEN", CAP, pair, null, false).providerId(),
+                "full budget: quality wins (9 - 0.8 > 8 - 0.1)");
+        jdbc.sql("INSERT INTO cost_entry (id, video_id, provider_id, amount_inr, units, unit_type, estimated, note) "
+                + "VALUES (:id, :v, 'gemini_api', 900, 1, 'call', true, 'spent')")
+                .param("id", UUID.randomUUID()).param("v", video).update();
+        assertEquals("omni_lite", router.choose(video, "FINAL_GEN", CAP, pair, null, false).providerId(),
+                "10% of the Gemini cap left: the cheaper good-enough tool wins");
     }
 
     @Test

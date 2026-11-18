@@ -89,6 +89,30 @@ public class BudgetGuard {
         }
     }
 
+    /** Share of a budget bucket (gemini | gpu | claude) still left this month, 0..1; 1 for unbudgeted buckets. */
+    public double remainingShare(String bucket) {
+        BigDecimal cap;
+        BigDecimal left;
+        switch (bucket) {
+            case "gemini" -> {
+                cap = pricing.geminiMonthlyCapInr();
+                left = geminiRemaining();
+            }
+            case "gpu" -> {
+                cap = pricing.gpuMonthlyCapInr();
+                left = gpuRemaining();
+            }
+            case "claude" -> {
+                cap = pricing.claudeMonthlyCapInr();
+                left = cap.subtract(claudeSpentThisMonth());
+            }
+            default -> {
+                return 1;
+            }
+        }
+        return cap.signum() <= 0 ? 0 : Math.max(0, Math.min(1, left.doubleValue() / cap.doubleValue()));
+    }
+
     public static class BudgetExceededException extends RuntimeException {
         public BudgetExceededException(String message) {
             super(message);

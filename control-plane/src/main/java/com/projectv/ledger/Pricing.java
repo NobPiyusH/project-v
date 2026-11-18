@@ -90,6 +90,22 @@ public class Pricing {
         return inr(num(map(modal, "gpuPerSecondUsd"), gpu) * seconds);
     }
 
+    /** Router: quality points one rupee is worth with a full budget (pricing.routing.lambdaPerInr). */
+    public double routingLambdaPerInr() {
+        return num(map(pricing, "routing"), "lambdaPerInr");
+    }
+
+    /** Router: {minQuality, enoughQuality} for a job capability; defaults 0 / 10 when not configured. */
+    public double[] routingQuality(String capability) {
+        Object job = map(map(pricing, "routing"), "jobs").get(capability);
+        if (!(job instanceof Map<?, ?> m)) {
+            return new double[]{0, 10};
+        }
+        double min = m.get("minQuality") instanceof Number n ? n.doubleValue() : 0;
+        double enough = m.get("enoughQuality") instanceof Number n ? n.doubleValue() : 10;
+        return new double[]{min, enough};
+    }
+
     /** Hard monthly cap on Claude (owner-funded), in rupees. */
     public BigDecimal claudeMonthlyCapInr() {
         return inr(num(map(pricing, "anthropic"), "monthlyCapUsd"));
