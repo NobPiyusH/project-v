@@ -59,7 +59,7 @@ public class DreamService {
     static final BigDecimal LISTEN_ESTIMATE_INR = new BigDecimal("0.50");
     /** Scout: Shorts watched per idea, and the estimate held before it runs (unmeasured until the first runs). */
     static final int SCOUT_VIDEOS = 6;
-    static final BigDecimal SCOUT_ESTIMATE_INR = new BigDecimal("5");
+    static final BigDecimal SCOUT_ESTIMATE_INR = new BigDecimal("6"); // measured Rs 4.56 and Rs 5.96 (19 Nov)
     static final int FPS = 16;          // Wan's own frame rate; the finish makes it 24
     static final int MIN_FRAMES = 33;
     static final int MAX_FRAMES = 81;
