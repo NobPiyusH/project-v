@@ -227,5 +227,8 @@ class DreamServicePersistenceTest {
         assertTrue(est.needsApproval());
         assertTrue(est.inr().compareTo(BigDecimal.ZERO) > 0);
         assertTrue(est.summary().startsWith("1 clips on Modal Wan"));
+        jdbc.sql("UPDATE dream_short SET quality = '720p' WHERE id = :d").param("d", dream).update();
+        // measured 19 Nov: ~133 s per 81 frames at 720p, +64 s warm-up for the first clip, +140 s container start
+        assertEquals((133.0 * 57 / 81 + 64 + 140) / 60, dreams.clipEstimate(dream, null).minutes(), 0.01);
     }
 }

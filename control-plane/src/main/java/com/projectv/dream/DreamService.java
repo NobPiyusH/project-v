@@ -398,10 +398,10 @@ public class DreamService {
         if (jobs.isEmpty()) {
             return 0;
         }
-        int[] size = clipSize(quality);
-        double pixels = (double) size[0] * size[1] / (480.0 * 832.0);
-        double per81 = pricing.wanSecondsPer81Frames("draft") * pixels;
-        return jobs.stream().mapToDouble(j -> per81 * j.numFrames() / MAX_FRAMES).sum() + pricing.gpuContainerStartSeconds();
+        // 720p is measured on its own: render time grows faster than the pixel count (19 Nov 2026: ~2x the old guess).
+        double per81 = pricing.wanSecondsPer81Frames("720p".equals(quality) ? "draft720" : "draft");
+        return jobs.stream().mapToDouble(j -> per81 * j.numFrames() / MAX_FRAMES).sum()
+                + pricing.wanFirstClipExtraSeconds() + pricing.gpuContainerStartSeconds();
     }
 
     @Transactional

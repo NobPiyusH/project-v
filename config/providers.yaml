@@ -163,4 +163,5 @@ pricing:
     monthlyCapUsd: 30            # hard stop for GPU work (default: the free credit only); raise to allow paid GPU
     zimageSecondsPerImage: 6     # L40S render time per keyframe, router estimate only (verify on the ledger)
     containerStartSeconds: 140   # Wan container start + model load, billed once per container (measured 16 Nov)
-    wanSecondsPer81Frames: { draft: 30, final: 480 }   # H100 render time per 5 s clip: fast@480p (measured 17 Nov: ~12 s for 33 frames), hybrid@720p (measured 483)
+    wanSecondsPer81Frames: { draft: 30, draft720: 133, final: 480 }   # H100 render time per 5 s clip: fast@480p (measured 17 Nov: ~12 s for 33 frames), fast@720p (measured 19 Nov: ~95 s for 57 frames), hybrid@720p (measured 483)
+    wanFirstClipExtraSeconds: 64   # the first clip in a container is slower (warm-up), measured 19 Nov at 720p
