@@ -166,6 +166,9 @@ public class VideoStage extends StageSupport {
             if (!draft && wanted == null && (s.get("draft_clip_asset_id") == null || !Boolean.TRUE.equals(s.get("final_wanted")))) {
                 continue; // finals only for shots with a draft that the owner didn't mark "keep the draft"
             }
+            if (!draft && wanted == null && omni(kind) && !"hero".equals(s.get("priority"))) {
+                continue; // cost (owner, 18 Nov): Omni finals only for hero shots; others keep their Wan draft unless picked
+            }
             Map<String, Object> p = json.readValue((String) s.get("prompt_json"), new TypeReference<Map<String, Object>>() {
             });
             String prompt = String.join(". ", List.of(
