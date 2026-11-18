@@ -72,7 +72,7 @@ providers:
 pricing:
   fxInrPerUsd: 88
   gemini:
-    monthlyCapInr: 400          # owner's cap; the app stops paid Gemini calls at this amount (Google budgets only alert)
+    monthlyCapInr: 1000         # owner's cap; the app stops paid Gemini calls at this amount (Google budgets only alert)
     reserveInr: 20              # keep this much back for voice/music when deciding hero images
     calibration: 1.5            # Google's real bill ran ×1.53 the ledger's estimates (Nov 1-17 2026); recheck monthly
     text:  { inputPerMTokUsd: 0.50, outputPerMTokUsd: 3.00 }        # gemini-3.6-flash (verify)

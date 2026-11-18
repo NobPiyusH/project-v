@@ -34,5 +34,5 @@ Spring Boot **4.1** / Spring AI **2.0** (not 3.5/1.1 as the book says), plain Te
 - `./gradlew :control-plane:test`: workflow tests
 - `uv run python -m workers.main`: local Python worker (needs FFmpeg on PATH)
 - `uv run modal deploy workers/modal_apps/zimage.py`: deploy the Z-Image keyframe app to the owner's Modal account
-- Models are set in `application.properties` (`projectv.models.*`), overridable via `.env`; prices and the ₹400 Gemini cap live in `config/providers.yaml`. Gemini media models need the `v1beta` API.
+- Models are set in `application.properties` (`projectv.models.*`), overridable via `.env`; prices and the ₹1000 Gemini cap live in `config/providers.yaml`. Gemini media models need the `v1beta` API.
 - `npm --prefix dashboard run dev`: dashboard on 127.0.0.1:5173
