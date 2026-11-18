@@ -18,11 +18,15 @@ import threading
 import time
 import urllib.request
 import uuid
+import base64
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import modal
 from temporalio import activity
 
-from workers.common import get_bytes, log, put_bytes
+from workers import gemini_pool
+from workers.common import gemini, get_bytes, log, put_bytes, put_file, run_ffmpeg, workdir
 
 POLL_SECONDS = 5
 
@@ -173,6 +177,69 @@ def _sequential(wan, progress, base: str, video_id: str, jobs: list) -> tuple[li
     return clips, stopped
 
 
+OMNI_WORKERS = 3  # clips in flight at once on Gemini Omni (each ~40 s)
+
+
+def _omni_one(model: str, video_id: str, j: dict, resolution: str) -> dict:
+    """One clip on Gemini Omni Flash (Interactions API), first frame = the approved keyframe. Runs through the
+    multi-project failover; the clip's own audio track is dropped (narration, music and sound are mixed later)."""
+    seconds = max(3, min(10, round(j["numFrames"] / 24)))
+    aspect = "9:16" if j["height"] > j["width"] else "16:9"
+    text = (f"Animate this image as a {seconds}-second {aspect} cinematic shot, starting exactly on this frame. "
+            f"{j['prompt']}. No text, no dialogue, no music.")
+    started = time.time()
+
+    def call():
+        return gemini().interactions.create(
+            api_version="v1beta", model=model,
+            input=[{"type": "image", "data": base64.b64encode(get_bytes(j["imageUri"])).decode(), "mime_type": "image/png"},
+                   {"type": "text", "text": text}],
+            response_format={"type": "video", "duration": f"{seconds}s", "resolution": resolution, "aspect_ratio": aspect})
+    try:
+        r = gemini_pool.execute(call, f"omni clip shot {j['shotNumber']}")
+        video = getattr(r, "output_video", None)
+        if not video or not video.data:
+            raise RuntimeError("Gemini Omni returned no video")
+        usage = getattr(r, "usage", None)
+        tokens = int(getattr(usage, "total_output_tokens", 0) or 0)
+        with workdir("omni") as d:
+            raw, silent = Path(d) / "raw.mp4", Path(d) / "clip.mp4"
+            raw.write_bytes(base64.b64decode(video.data))
+            run_ffmpeg(["-i", str(raw), "-an", "-c:v", "copy", str(silent)])
+            uri = put_file(f"videos/{video_id}/clips/{j['kind']}/shot{j['shotNumber']:03d}-take{j['take']}.mp4",
+                           silent, "video/mp4")
+        log.info("Omni clip shot %s %s saved (%.0f s, %d tokens)", j["shotNumber"], j["kind"], time.time() - started, tokens)
+        return {"shotId": j["shotId"], "take": j["take"], "kind": j["kind"], "uri": uri, "gpuSeconds": 0,
+                "frames": seconds * 24, "fps": 24, "mode": "omni", "error": None, "outputTokens": tokens}
+    except Exception as e:  # noqa: BLE001 - one failed clip never fails the batch
+        log.warning("Omni clip shot %s failed: %s", j["shotNumber"], e)
+        return {**_stopped(j, f"{type(e).__name__}: {e}"[:600]), "outputTokens": 0}
+
+
+def _omni(req: dict, base: str, video_id: str) -> tuple[list[dict], bool]:
+    """Clips on Gemini Omni: a few in flight at once; the owner's Stop cancels the clips not yet started."""
+    model, resolution = req.get("omniModel") or "gemini-omni-flash-preview", req.get("resolution") or "720p"
+    jobs = [(j, f"{j['shotId'][:8]}-{j['kind']}{j['take']}") for j in req["jobs"]]
+    clips: list[dict] = []
+    stopped = False
+    with ThreadPoolExecutor(OMNI_WORKERS, thread_name_prefix="omni") as pool:
+        pending = {pool.submit(_omni_one, model, video_id, j, resolution): (j, key) for j, key in jobs}
+        while pending:
+            for f in [f for f in pending if f.done()]:
+                pending.pop(f)
+                clips.append(f.result())
+            if not stopped and _stop_requested(base, video_id):
+                stopped = True
+                for f, (j, _) in list(pending.items()):
+                    if f.cancel():
+                        pending.pop(f)
+                        clips.append({**_stopped(j), "outputTokens": 0})
+            _report(base, video_id, list(pending.values()), clips, {}, len(jobs))
+            if pending:
+                time.sleep(POLL_SECONDS)
+    return clips, stopped
+
+
 @activity.defn(name="generate_clips")
 def generate_clips(req: dict) -> dict:
     """req: ClipRequest {videoId, modalApp, modalClass, progressUrl, containers,
@@ -180,6 +247,11 @@ def generate_clips(req: dict) -> dict:
     -> ClipResult {clips:[{shotId, take, kind, uri, gpuSeconds, frames, fps, mode, error}], containers, stopped}"""
     video_id = req["videoId"]
     base = (req.get("progressUrl") or "http://127.0.0.1:8080").rstrip("/")
+    if req.get("provider") == "omni":
+        log.info("Starting %d clips for video %s on Gemini Omni", len(req["jobs"]), video_id)
+        clips, stopped = _omni(req, base, video_id)
+        _post(f"{base}/api/internal/clips/progress", {"videoId": video_id, "clips": [], "finished": True})
+        return {"clips": clips, "containers": 0, "stopped": stopped}
     wan = modal.Cls.from_name(req.get("modalApp") or "projectv-wan", req.get("modalClass") or "Wan")()
     progress = modal.Dict.from_name("projectv-progress", create_if_missing=True)
     containers = max(1, min(4, int(req.get("containers") or 4), len(req["jobs"]) or 1))

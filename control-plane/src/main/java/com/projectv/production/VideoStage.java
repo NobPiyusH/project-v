@@ -34,6 +34,9 @@ import java.util.UUID;
  * </ul>
  * Every batch is estimated first; the owner approves it unless it is under the auto-approve amount, and the monthly
  * GPU cap stops it either way. Every clip is an asset with provenance + licence, and every clip a cost entry.
+ * <p>
+ * {@code projectv.video.provider=omni} (owner, 18 Nov 2026) makes the clips on Gemini Omni Flash instead: drafts at
+ * 720p, finals at 1080p, 3-10 s at 24 fps, priced per output token and held to the monthly Gemini cap.
  */
 @Component
 public class VideoStage extends StageSupport {
@@ -50,25 +53,60 @@ public class VideoStage extends StageSupport {
     private final String publicUrl;
     private final BigDecimal autoApproveInr;
     private final int heroTakes;
+    private final String provider;
+    private final String omniModel;
 
     public VideoStage(ProductionDeps d,
                       @Value("${projectv.video.modal-app:projectv-wan}") String wanApp,
                       @Value("${projectv.video.modal-class:Wan}") String wanClass,
                       @Value("${projectv.public-url:http://127.0.0.1:8080}") String publicUrl,
                       @Value("${projectv.video.auto-approve-inr:0}") BigDecimal autoApproveInr,
-                      @Value("${projectv.video.hero-draft-takes:2}") int heroTakes) {
+                      @Value("${projectv.video.hero-draft-takes:2}") int heroTakes,
+                      @Value("${projectv.video.provider:wan}") String provider,
+                      @Value("${projectv.video.omni-model:gemini-omni-flash-preview}") String omniModel) {
         super(d);
         this.wanApp = wanApp;
         this.wanClass = wanClass;
         this.publicUrl = publicUrl;
         this.autoApproveInr = autoApproveInr;
         this.heroTakes = Math.max(1, Math.min(4, heroTakes));
+        this.provider = provider == null ? "wan" : provider.strip().toLowerCase();
+        this.omniModel = omniModel;
+    }
+
+    boolean omni() {
+        return "omni".equals(provider);
+    }
+
+    static String omniResolution(String kind) {
+        return DRAFT.equals(kind) ? "720p" : "1080p";
+    }
+
+    /** Omni clip length: the shot's length in whole seconds, 3-10 s. */
+    static int omniSeconds(double shotSeconds) {
+        return Math.max(3, Math.min(10, (int) Math.ceil(shotSeconds)));
+    }
+
+    BigDecimal omniInr(List<ClipJob> jobs, String kind) {
+        return jobs.stream().map(j -> pricing.omniInr(j.numFrames() / 24.0, omniResolution(kind)))
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
     }
 
     // ------------------------------------------------------------------------------------------- estimate & request
 
     public ClipEstimate estimate(UUID videoId, String kind, List<UUID> only) {
         List<ClipJob> jobs = jobs(videoId, kind, only);
+        if (omni()) {
+            BigDecimal inr = omniInr(jobs, kind).setScale(2, RoundingMode.HALF_UP);
+            String what = "%s clips (Gemini Omni, %s)".formatted(kind, omniResolution(kind));
+            double wall = jobs.isEmpty() ? 0 : Math.ceil(jobs.size() / 3.0) * 0.75;
+            String summary = jobs.isEmpty() ? "No shots need " + what + "."
+                    : "Ready to make %d %s: about ₹%s ($%.2f) of Gemini and %.0f min. ₹%s of this month's Gemini cap left."
+                    .formatted(jobs.size(), what, inr.setScale(0, RoundingMode.HALF_UP), inr.doubleValue() / pricing.fx(),
+                            Math.ceil(wall), budget.geminiRemaining().max(BigDecimal.ZERO).setScale(0, RoundingMode.HALF_UP));
+            return new ClipEstimate(kind, jobs.size(), 0, inr, inr.doubleValue() / pricing.fx(), wall,
+                    !jobs.isEmpty() && inr.compareTo(autoApproveInr) > 0, summary);
+        }
         double gpu = gpuSeconds(jobs, kind);
         BigDecimal inr = pricing.modalGpuInr("H100", gpu).setScale(2, RoundingMode.HALF_UP);
         double usd = inr.doubleValue() / pricing.fx();
@@ -90,10 +128,17 @@ public class VideoStage extends StageSupport {
             throw new IllegalStateException(DRAFT.equals(kind) ? "No shots with images to animate"
                     : "No approved drafts need a final render");
         }
+        if (omni()) {
+            BigDecimal inr = omniInr(jobs, kind);
+            budget.require(inr, jobs.size() + " " + kind + " clips on Gemini Omni");
+            return new ClipRequest(videoId.toString(), wanApp, wanClass, publicUrl, jobs, 0, 0,
+                    inr.setScale(2, RoundingMode.HALF_UP), "omni", omniResolution(kind), omniModel);
+        }
         double gpu = gpuSeconds(jobs, kind);
         BigDecimal inr = pricing.modalGpuInr("H100", gpu);
         budget.requireGpu(inr, jobs.size() + " " + kind + " clips");
-        return new ClipRequest(videoId.toString(), wanApp, wanClass, publicUrl, jobs, containers(kind, jobs.size()), gpu, inr.setScale(2, RoundingMode.HALF_UP));
+        return new ClipRequest(videoId.toString(), wanApp, wanClass, publicUrl, jobs, containers(kind, jobs.size()), gpu,
+                inr.setScale(2, RoundingMode.HALF_UP), "wan", null, null);
     }
 
     List<ClipJob> jobs(UUID videoId, String kind, List<UUID> only) {
@@ -126,10 +171,16 @@ public class VideoStage extends StageSupport {
             // Renders vary like seeds (owner, 17 Nov: one FA3 render "had better motion"): hero shots get several draft
             // takes with different seeds, so the best motion can be picked. Finals render the chosen draft once.
             int takes = draft && "hero".equals(s.get("priority")) ? heroTakes : 1;
+            if (omni()) {
+                longSide = draft ? 1280 : 1920;
+                shortSide = draft ? 720 : 1080;
+            }
             for (int take = first; take < first + takes; take++) {
-                jobs.add(new ClipJob(id, ((Number) s.get("ord")).intValue() + 1, take, kind, draft ? "fast" : "hybrid",
+                jobs.add(new ClipJob(id, ((Number) s.get("ord")).intValue() + 1, take, kind,
+                        omni() ? "omni" : draft ? "fast" : "hybrid",
                         (String) s.get("keyframe_uri"), prompt, vertical ? shortSide : longSide, vertical ? longSide : shortSide,
-                        frames(num(s.get("duration_target_sec"))), Math.abs((long) id.hashCode()) + take));
+                        omni() ? omniSeconds(num(s.get("duration_target_sec"))) * 24 : frames(num(s.get("duration_target_sec"))),
+                        Math.abs((long) id.hashCode()) + take));
             }
         }
         return jobs;
@@ -184,6 +235,12 @@ public class VideoStage extends StageSupport {
             }
             UUID shotId = UUID.fromString(o.shotId());
             gpu += o.gpuSeconds();
+            if (o.outputTokens() > 0) {
+                ledger.record(videoId, com.projectv.ledger.BudgetGuard.GEMINI, pricing.omniTokensInr(o.outputTokens()),
+                        BigDecimal.valueOf(o.outputTokens()), "output_tokens", false,
+                        "%s clip shot %d take %d (Gemini Omni %s)".formatted(job.kind().toUpperCase(), job.shotNumber(),
+                                job.take(), request.resolution()));
+            }
             if (o.gpuSeconds() > 0) {
                 ledger.record(videoId, "modal_h100", pricing.modalGpuInr("H100", o.gpuSeconds()),
                         BigDecimal.valueOf(o.gpuSeconds()), "gpu_seconds", true,
@@ -201,8 +258,10 @@ public class VideoStage extends StageSupport {
                 continue;
             }
             UUID assetId = assets.create(new NewAsset(videoId, "video", o.uri(), "video/mp4", job.width(), job.height(),
-                    o.fps() > 0 ? (double) o.frames() / o.fps() : null, "modal_wan", "wan2.2-i2v-a14b " + o.mode(),
-                    job.prompt(), job.seed(), AssetStore.LICENCE_WAN, true));
+                    o.fps() > 0 ? (double) o.frames() / o.fps() : null,
+                    "omni".equals(request.provider()) ? "gemini_omni" : "modal_wan",
+                    "omni".equals(request.provider()) ? request.omniModel() + " " + request.resolution() : "wan2.2-i2v-a14b " + o.mode(),
+                    job.prompt(), job.seed(), "omni".equals(request.provider()) ? AssetStore.LICENCE_GEMINI : AssetStore.LICENCE_WAN, true));
             jdbc.sql("UPDATE asset SET shot_id = :s, clip_kind = :k WHERE id = :a")
                     .param("s", shotId).param("k", job.kind()).param("a", assetId).update();
             if (activated.add(o.shotId())) {
@@ -226,8 +285,10 @@ public class VideoStage extends StageSupport {
                 java.util.stream.Collectors.counting())).values().stream().filter(n -> n > 1).count();
         String takesNote = multiTake > 0 ? "; %d hero shot%s ha%s takes to compare".formatted(multiTake,
                 multiTake == 1 ? "" : "s", multiTake == 1 ? "s" : "ve") : "";
-        String summary = "%d/%d %s clips (%s) in %.0f s of GPU render time%s%s%s.".formatted(ok, jobs.size(), kind,
-                DRAFT.equals(kind) ? "fast, 480p" : "hybrid, 720p", gpu,
+        String how = "omni".equals(request.provider()) ? "Gemini Omni, " + request.resolution()
+                : DRAFT.equals(kind) ? "fast, 480p" : "hybrid, 720p";
+        String summary = "%d/%d %s clips (%s)%s%s%s%s.".formatted(ok, jobs.size(), kind, how,
+                gpu > 0 ? " in %.0f s of GPU render time".formatted(gpu) : "",
                 stopped > 0 ? "; stopped by owner before " + stopped + " finished" : "",
                 errors.isEmpty() ? "" : "; " + errors.size() + " failed: " + errors.getFirst(), takesNote);
         return StageResult.of(summary, json.writeValueAsString(Map.of("ok", ok, "failed", errors, "stopped", stopped,

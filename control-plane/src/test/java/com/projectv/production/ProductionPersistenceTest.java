@@ -73,7 +73,7 @@ class ProductionPersistenceTest {
         shots = new ShotStage(deps);
         inspector = new Inspector(deps);
         creative = new CreativeDirector(deps, null, "gemini-3.6-flash");
-        clips = new VideoStage(deps, "projectv-wan", "Wan", "http://127.0.0.1:8080", BigDecimal.ZERO, 2);
+        clips = new VideoStage(deps, "projectv-wan", "Wan", "http://127.0.0.1:8080", BigDecimal.ZERO, 2, "wan", "gemini-omni-flash-preview");
         footage = new FootageStage(deps);
         assembly = new AssemblyStage(deps);
         finish = new FinishStage(deps, "http://127.0.0.1:8080", BigDecimal.ZERO);
@@ -253,8 +253,8 @@ class ProductionPersistenceTest {
         assertTrue(job.prompt().startsWith("slow push in. stars wheel overhead. Visual style:"), job.prompt());
 
         var result = new com.projectv.media.MediaTypes.ClipResult(List.of(
-                new com.projectv.media.MediaTypes.ClipOutput(a.toString(), 1, "draft", "s3://b/a.mp4", 50, 49, 16, "fast", null),
-                new com.projectv.media.MediaTypes.ClipOutput(b.toString(), 1, "draft", null, 0, 0, 0, "fast", "stopped")), 2, true);
+                new com.projectv.media.MediaTypes.ClipOutput(a.toString(), 1, "draft", "s3://b/a.mp4", 50, 49, 16, "fast", null, 0),
+                new com.projectv.media.MediaTypes.ClipOutput(b.toString(), 1, "draft", null, 0, 0, 0, "fast", "stopped", 0)), 2, true);
         var saved = clips.saveClips(video, request, result);
         assertTrue(saved.summary().startsWith("1/2 draft clips"), saved.summary());
         assertEquals("READY", jdbc.sql("SELECT clip_status FROM shot WHERE id = :s").param("s", a).query(String.class).single());
@@ -314,9 +314,9 @@ class ProductionPersistenceTest {
         assertTrue(request.jobs().get(0).seed() != request.jobs().get(1).seed(), "different seeds per take");
 
         var result = new com.projectv.media.MediaTypes.ClipResult(List.of(
-                new com.projectv.media.MediaTypes.ClipOutput(hero.toString(), 1, "draft", null, 10, 0, 0, "fast", "CUDA error"),
-                new com.projectv.media.MediaTypes.ClipOutput(hero.toString(), 2, "draft", "s3://b/h2.mp4", 12, 49, 16, "fast", null),
-                new com.projectv.media.MediaTypes.ClipOutput(plain.toString(), 1, "draft", "s3://b/p1.mp4", 12, 49, 16, "fast", null)), 1, false);
+                new com.projectv.media.MediaTypes.ClipOutput(hero.toString(), 1, "draft", null, 10, 0, 0, "fast", "CUDA error", 0),
+                new com.projectv.media.MediaTypes.ClipOutput(hero.toString(), 2, "draft", "s3://b/h2.mp4", 12, 49, 16, "fast", null, 0),
+                new com.projectv.media.MediaTypes.ClipOutput(plain.toString(), 1, "draft", "s3://b/p1.mp4", 12, 49, 16, "fast", null, 0)), 1, false);
         var saved = clips.saveClips(video, request, result);
         assertTrue(saved.summary().contains("1 hero shot has takes to compare"), saved.summary());
         UUID inUse = jdbc.sql("SELECT draft_clip_asset_id FROM shot WHERE id = :s").param("s", hero).query(UUID.class).single();

@@ -74,6 +74,17 @@ public class Pricing {
         return calibrated(inr(num(gemini(), "groundingPerQueryUsd") * queries));
     }
 
+    /** Gemini Omni Flash clip: video output tokens per second at this resolution (config), estimated before the call. */
+    public BigDecimal omniInr(double seconds, String resolution) {
+        Map<String, Object> o = map(gemini(), "omni");
+        return omniTokensInr((long) (num(map(o, "tokensPerSecond"), resolution) * seconds));
+    }
+
+    /** Gemini Omni Flash: actual output tokens reported by Google. */
+    public BigDecimal omniTokensInr(long outputTokens) {
+        return calibrated(inr(num(map(gemini(), "omni"), "outputPerMTokUsd") * outputTokens / 1_000_000.0));
+    }
+
     public BigDecimal modalGpuInr(String gpu, double seconds) {
         Map<String, Object> modal = map(pricing, "modal");
         return inr(num(map(modal, "gpuPerSecondUsd"), gpu) * seconds);
