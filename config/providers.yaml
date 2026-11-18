@@ -14,7 +14,7 @@ providers:
   - id: modal_wan
     name: Wan 2.2 image-to-video (Modal H100)
     kind: gpu_serverless
-    capabilities: [video.i2v.draft, video.i2v.final]
+    capabilities: [video.i2v.draft, video.i2v.final, video.i2v.dream]   # dream: Dream Shorts clips (fast mode)
     quality: 6
     budget: gpu
     enabled: true
@@ -31,7 +31,7 @@ providers:
   - id: modal_zimage
     name: Z-Image Turbo (Modal L40S, keyframes)
     kind: gpu_serverless
-    capabilities: [image.keyframe.hero, image.keyframe.standard]
+    capabilities: [image.keyframe.hero, image.keyframe.standard, image.dream]
     quality: 6
     budget: gpu
     enabled: true
@@ -125,6 +125,8 @@ pricing:
       video.i2v.final: { minQuality: 7, enoughQuality: 10 }
       image.keyframe.hero: { minQuality: 7, enoughQuality: 10 }      # opening, reveals, climax, ending
       image.keyframe.standard: { minQuality: 5, enoughQuality: 6 }   # the rest: good enough is enough
+      image.dream: { minQuality: 5, enoughQuality: 6 }          # Dream Shorts pictures (owner target: under ₹20 a Short)
+      video.i2v.dream: { minQuality: 5, enoughQuality: 6 }      # Dream Shorts clips: soft dreamcore look forgives fast mode
   gemini:
     monthlyCapInr: 1000         # owner's cap; the app stops paid Gemini calls at this amount (Google budgets only alert)
     reserveInr: 20              # keep this much back for voice/music when deciding hero images

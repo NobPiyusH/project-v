@@ -3,6 +3,7 @@ import { api } from './api'
 import { useHashRoute, usePoll } from './hooks'
 import { Home } from './pages/Home'
 import { Providers } from './pages/Providers'
+import { DreamShorts } from './pages/DreamShorts'
 import { VideoDetail } from './pages/VideoDetail'
 
 type Theme = 'dark' | 'light'
@@ -53,6 +54,7 @@ export default function App() {
   const { data: budget } = usePoll(api.budget, 10000)
   const { data: videos } = usePoll(api.videos, 5000)
   const videoMatch = route.match(/^#\/video\/([0-9a-f-]{36})/)
+  const dreamMatch = route.match(/^#\/dream\/([0-9a-f-]{36})/)
   const needsYou = (videos ?? []).filter((v) => v.status === 'WAITING').length
 
   return (
@@ -64,6 +66,7 @@ export default function App() {
             Studio{needsYou > 0 && <span className="needs-dot" title={`${needsYou} video(s) waiting for you`}>{needsYou}</span>}
           </a>
           <a href="#/providers" className={route.startsWith('#/providers') ? 'active' : ''}>Providers</a>
+          <a href="#/dream" className={route.startsWith('#/dream') ? 'active' : ''}>Dream Shorts</a>
         </nav>
         <span className="spacer" />
         {budget && (
@@ -84,7 +87,9 @@ export default function App() {
         {error && !stages && <p className="error">Can't reach the control plane at /api. Is it running? ({error})</p>}
         {stages && (videoMatch
           ? <VideoDetail id={videoMatch[1]} stages={stages} />
-          : route.startsWith('#/providers') ? <Providers /> : <Home stages={stages} videos={videos} />)}
+          : route.startsWith('#/providers') ? <Providers />
+          : dreamMatch ? <DreamShorts id={dreamMatch[1]} />
+          : route.startsWith('#/dream') ? <DreamShorts /> : <Home stages={stages} videos={videos} />)}
       </main>
     </>
   )

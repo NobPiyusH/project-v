@@ -23,6 +23,7 @@ from workers.activities.review import review_images
 from workers.activities.producer import producer_review
 from workers.activities.sources import check_sources
 from workers.activities.voice import synthesize_narration
+from workers.dream.finish import dream_finish
 from workers import modal_billing
 from workers.common import ensure_bucket
 
@@ -47,7 +48,7 @@ async def main() -> None:
             activities=[tool_versions, research_topic, synthesize_narration, generate_music,
                         generate_keyframes, render_animatic, inspect_media, review_images,
                         generate_clips, search_footage, fetch_footage, assemble_video,
-                        smooth_clips, upscale_clips, check_sources, producer_review],
+                        smooth_clips, upscale_clips, check_sources, producer_review, dream_finish],
             activity_executor=pool,
             max_concurrent_activities=8,
         )
