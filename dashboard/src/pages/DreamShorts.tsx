@@ -224,7 +224,8 @@ function DreamView({ id }: { id: string }) {
         </div>
       </section>
 
-      <Check d={d} />
+      <Check json={d.check_json} title="Quality check" />
+      <Check json={d.picture_check_json} title="Picture check (before clips)" />
 
       <Scout d={d} onPick={(n) => void act(() => dreamApi.pickAngle(id, n))} />
 
@@ -329,13 +330,13 @@ const CHECK_LABEL: Record<string, string> = {
 }
 
 /** Learning loop, phase 3: Gemini's check of the finished Short against the owner's checklist. */
-function Check({ d }: { d: DreamDetail }) {
-  if (!d.check_json) return null
-  const c = parse(d.check_json) as { overall: number; summary: string; scores: Record<string, number>;
+function Check({ json, title }: { json: string | null; title: string }) {
+  if (!json) return null
+  const c = parse(json) as { overall: number; summary: string; scores: Record<string, number>;
     issues: { shot: number; atSec: number; problem: string; fix: string }[] }
   return (
     <section className="card">
-      <div className="card-head"><h2>Quality check</h2><span className="pill">{c.overall}/10</span></div>
+      <div className="card-head"><h2>{title}</h2><span className="pill">{c.overall}/10</span></div>
       <p className="small">{c.summary}</p>
       {c.issues.length > 0 && <ul className="small">{c.issues.map((i, k) => (
         <li key={k}><strong>{i.shot > 0 ? `Shot ${i.shot}` : 'Whole Short'}{i.atSec ? ` at ${i.atSec.toFixed(1)} s` : ''}:</strong>{' '}
