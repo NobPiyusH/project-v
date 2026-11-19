@@ -262,7 +262,7 @@ def finish(req: dict, tmp: Path) -> dict:
             log.warning("Music map failed (%s); plain beat sync", e)
     order = list(range(len(srcs)))
     climax_slot = None
-    if pacing:
+    if pacing and not req.get("keepOrder"):  # a story told in order (picked Scout angle) keeps the writer's order
         scores = [edit.striking(s, tmp) for s in srcs]
         order = edit.order_shots(scores, expected, mm["rise"] if mm else None)
         if len(order) > 2:

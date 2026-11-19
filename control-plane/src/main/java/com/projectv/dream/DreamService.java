@@ -56,7 +56,7 @@ public class DreamService {
     static final UUID LICENCE_OWNER_MUSIC = UUID.fromString("00000000-0000-0000-0000-00000000a012");
     /** Pieces of the bed Gemini compares for one Short, and what that listen is held to before the call (a few paise). */
     static final int BED_CANDIDATES = 6;
-    static final BigDecimal LISTEN_ESTIMATE_INR = new BigDecimal("0.50");
+    static final BigDecimal LISTEN_ESTIMATE_INR = new BigDecimal("0.80"); // measured Rs 0.57-0.79 (19 Nov)
     /** Scout: Shorts watched per idea, and the estimate held before it runs (unmeasured until the first runs). */
     static final int SCOUT_VIDEOS = 6;
     static final BigDecimal SCOUT_ESTIMATE_INR = new BigDecimal("6"); // measured Rs 4.56 and Rs 5.96 (19 Nov)
@@ -835,7 +835,9 @@ public class DreamService {
         return new DreamFinishRequest(storageId(id), (String) d.get("look"), clips, 1080, 1920, 24, look.dissolveSec(),
                 musicDir == null || musicDir.isBlank() ? null : musicDir, publicUrl, musicUri, musicName,
                 look.speed(), look.handheld(), !Boolean.FALSE.equals(d.get("edit_music")),
-                !Boolean.FALSE.equals(d.get("edit_ambience")), !Boolean.FALSE.equals(d.get("edit_pacing")));
+                !Boolean.FALSE.equals(d.get("edit_ambience")), !Boolean.FALSE.equals(d.get("edit_pacing")),
+                // a picked Scout angle is one story told in order: pacing must not reshuffle it (19 Nov: the ending played third)
+                scouted(d) != null && scouted(d).chosen() != null);
     }
 
     @Transactional
