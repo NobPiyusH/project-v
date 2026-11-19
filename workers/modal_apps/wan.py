@@ -112,6 +112,7 @@ class Wan:
             self.offloaded = True
         self.pipe = pipe
         self.load_seconds = time.time() - t
+        self.cold = True   # the first clip this container renders reports the cold start (the ledger books observed ones)
 
     def _offload(self) -> None:
         import torch
@@ -219,6 +220,7 @@ class Wan:
         import torch
 
         t = time.time()
+        cold, self.cold = getattr(self, "cold", False), False
         try:
             mode = job.get("mode") or ("fast" if job.get("fast", True) else "standard")
             cfg = self.MODES[mode]
@@ -243,11 +245,12 @@ class Wan:
                                    "state": "done"}
             return {"id": job["id"], "mp4": data, "seconds": time.time() - t, "frames": len(frames), "fps": 16,
                     "mode": mode, "steps": steps, "offloaded": self.offloaded, "error": None,
-                    "attention": self.attention_used, "attentionFallback": self.attention_fallback}
+                    "attention": self.attention_used, "attentionFallback": self.attention_fallback,
+                    "coldStart": cold, "loadSeconds": round(self.load_seconds, 1)}
         except Exception as e:
             progress[job["id"]] = {"state": "failed", "error": f"{type(e).__name__}: {e}"[:300]}
             return {"id": job["id"], "mp4": None, "seconds": time.time() - t, "mode": job.get("mode"),
-                    "error": f"{type(e).__name__}: {e}"[:600]}
+                    "error": f"{type(e).__name__}: {e}"[:600], "coldStart": cold}
 
     @modal.method()
     def generate_one(self, job: dict) -> dict:

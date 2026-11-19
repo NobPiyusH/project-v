@@ -322,11 +322,11 @@ public class VideoStage extends StageSupport {
             }
             ok++;
         }
-        if (r.containers() > 0) {
-            double start = r.containers() * pricing.gpuContainerStartSeconds();
+        if (r.startUps() > 0) { // observed cold starts, not containers requested
+            double start = r.startUps() * pricing.gpuContainerStartSeconds();
             ledger.record(videoId, "modal_h100", pricing.modalGpuInr("H100", start), BigDecimal.valueOf(start), "gpu_seconds",
-                    true, "Wan GPU start-up + model load (%d container%s, estimated)".formatted(r.containers(),
-                            r.containers() == 1 ? "" : "s"));
+                    true, "Wan GPU start-up + model load (%d cold start%s, estimated)".formatted(r.startUps(),
+                            r.startUps() == 1 ? "" : "s"));
         }
         String kind = request.jobs().isEmpty() ? DRAFT : request.jobs().getFirst().kind();
         if (router != null) { // M3a health: a batch where every clip failed cools the provider down

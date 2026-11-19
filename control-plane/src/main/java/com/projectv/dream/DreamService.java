@@ -684,7 +684,7 @@ public class DreamService {
         double gpu = 0;
         BigDecimal spent = BigDecimal.ZERO;
         String kind = clipKind((String) dream(id).get("quality"));
-        boolean first = r.containers() > 0;
+        boolean first = r.startUps() > 0;
         List<String> errors = new ArrayList<>();
         for (ClipOutput o : r.clips()) {
             ClipJob job = jobs.get(o.shotId() + ":" + o.take());
@@ -720,8 +720,8 @@ public class DreamService {
                     .param("a", asset).param("s", shotId).update();
             ok++;
         }
-        if (r.containers() > 0) {
-            double start = r.containers() * pricing.gpuContainerStartSeconds();
+        if (r.startUps() > 0) { // observed cold starts: a redo on a warm GPU pays none
+            double start = r.startUps() * pricing.gpuContainerStartSeconds();
             cost(id, "modal_h100", pricing.modalGpuInr("H100", start), start, "gpu_seconds", true,
                     "Dream Short: Wan GPU start-up + model load (estimated)");
             spent = spent.add(pricing.modalGpuInr("H100", start));

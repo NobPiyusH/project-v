@@ -115,7 +115,7 @@ providers:
 # Pricing and budgets (M2a). Prices from Google's Gemini API pricing page, 16 Nov 2026: VERIFY before relying on them
 # (CLAUDE.md rule 7). Used to estimate every CostEntry and to enforce the hard monthly cap.
 pricing:
-  fxInrPerUsd: 88
+  fxInrPerUsd: 94               # re-verified 19 Nov 2026: closes 93.9-94.2 (12-16 Nov, PTI/HDFC Sky); recheck monthly
   # Router scoring (M3a, owner 18 Nov 2026): a provider must reach minQuality for the job; among those,
   # score = min(quality, enoughQuality) - lambda x cost, where lambda = lambdaPerInr / (share of that budget left,
   # floor 0.1): quality first, the cheaper tool when extra quality isn't needed, thriftier as a cap runs low.

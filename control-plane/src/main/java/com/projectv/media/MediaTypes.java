@@ -198,7 +198,15 @@ public final class MediaTypes {
     }
 
     /** @param containers GPU containers the batch started (each billed its start-up + model load once) */
-    public record ClipResult(List<ClipOutput> clips, int containers, boolean stopped) {
+    public record ClipResult(List<ClipOutput> clips, int containers, boolean stopped, Integer coldStarts) {
+        public ClipResult(List<ClipOutput> clips, int containers, boolean stopped) {
+            this(clips, containers, stopped, null);
+        }
+
+        /** Start-ups to book: the cold starts the GPU reported, else (older app) one per container used. */
+        public int startUps() {
+            return coldStarts == null ? containers : coldStarts;
+        }
     }
 
     /** What a batch would cost, for the owner's go-ahead before any GPU time is spent. */

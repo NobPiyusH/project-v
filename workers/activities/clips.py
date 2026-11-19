@@ -62,7 +62,8 @@ def _clip(video_id: str, j: dict, r: dict) -> dict:
     log.info("Clip shot %s %s: %s", j["shotNumber"], j["kind"], "saved" if uri else r.get("error"))
     return {"shotId": j["shotId"], "take": j["take"], "kind": j["kind"], "uri": uri,
             "gpuSeconds": round(float(r.get("seconds") or 0), 1), "frames": int(r.get("frames") or 0),
-            "fps": int(r.get("fps") or 0), "mode": r.get("mode") or j["mode"], "error": r.get("error")}
+            "fps": int(r.get("fps") or 0), "mode": r.get("mode") or j["mode"], "error": r.get("error"),
+            "coldStart": r.get("coldStart")}
 
 
 def _stopped(j: dict, error: str = "stopped") -> dict:
@@ -303,4 +304,11 @@ def generate_clips(req: dict) -> dict:
     run = _sequential if containers == 1 else _parallel
     clips, stopped = run(wan, progress, base, video_id, jobs)
     _post(f"{base}/api/internal/clips/progress", {"videoId": video_id, "clips": [], "finished": True})
-    return {"clips": clips, "containers": containers if jobs else 0, "stopped": stopped}
+    return {"clips": clips, "containers": containers if jobs else 0, "stopped": stopped, "coldStarts": cold_starts(clips)}
+
+
+def cold_starts(clips: list[dict]) -> int | None:
+    """GPU start-ups this batch really paid: clips that were the first in a fresh container. None when the deployed
+    app does not report it yet (the ledger then books one per container, as before)."""
+    flags = [c.get("coldStart") for c in clips if c.get("coldStart") is not None]
+    return sum(1 for f in flags if f) if flags else None
