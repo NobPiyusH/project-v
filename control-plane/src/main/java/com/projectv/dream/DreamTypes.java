@@ -75,7 +75,12 @@ public final class DreamTypes {
     }
 
     /** Scout: find Shorts like this idea ({@code query}), watch up to {@code maxVideos}, with {@code model} (Gemini). */
-    public record DreamScoutRequest(String dreamId, String query, String model, int maxVideos, String look) {
+    /** @param known Shorts already watched (by YouTube id), reused instead of paying Gemini to watch them again */
+    public record DreamScoutRequest(String dreamId, String query, String model, int maxVideos, String look,
+                                    Map<String, ScoutVideo> known) {
+        public DreamScoutRequest(String dreamId, String query, String model, int maxVideos, String look) {
+            this(dreamId, query, model, maxVideos, look, Map.of());
+        }
     }
 
     /** One similar Short as Gemini saw it. {@code views}/{@code durationSec} come from YouTube when known. */

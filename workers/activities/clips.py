@@ -62,7 +62,8 @@ def _clip(video_id: str, j: dict, r: dict) -> dict:
     log.info("Clip shot %s %s: %s", j["shotNumber"], j["kind"], "saved" if uri else r.get("error"))
     return {"shotId": j["shotId"], "take": j["take"], "kind": j["kind"], "uri": uri,
             "gpuSeconds": round(float(r.get("seconds") or 0), 1), "frames": int(r.get("frames") or 0),
-            "fps": int(r.get("fps") or 0), "mode": r.get("mode") or j["mode"], "error": r.get("error")}
+            "fps": int(r.get("fps") or 0), "mode": r.get("mode") or j["mode"], "error": r.get("error"),
+            "coldStart": r.get("coldStart")}
 
 
 def _stopped(j: dict, error: str = "stopped") -> dict:
@@ -258,6 +259,26 @@ def _omni(req: dict, base: str, video_id: str) -> tuple[list[dict], bool]:
     return clips, stopped
 
 
+HOLD_MAX_SECONDS = 300  # a held GPU stays warm for minutes, never hours (rule 8)
+
+
+def hold_seconds(req: dict, containers: int) -> int:
+    """How long the one GPU should stay warm after this batch: only when the AI Producer may redo clips by itself
+    (holdSeconds > 0) and the batch runs on one container. Every call for that Short uses the same value, so its redo
+    lands on the same warm container (a with_options variant autoscales on its own)."""
+    hold = int(req.get("holdSeconds") or 0)
+    return min(hold, HOLD_MAX_SECONDS) if hold > 0 and containers == 1 else 0
+
+
+def _wan(req: dict, containers: int):
+    cls = modal.Cls.from_name(req.get("modalApp") or "projectv-wan", req.get("modalClass") or "Wan")
+    hold = hold_seconds(req, containers)
+    if hold:
+        log.info("Holding the GPU warm for %d s after this batch (AI Producer may redo)", hold)
+        cls = cls.with_options(scaledown_window=hold)
+    return cls()
+
+
 @activity.defn(name="generate_clips")
 def generate_clips(req: dict) -> dict:
     """req: ClipRequest {videoId, modalApp, modalClass, progressUrl, containers,
@@ -270,16 +291,24 @@ def generate_clips(req: dict) -> dict:
         clips, stopped = _omni(req, base, video_id)
         _post(f"{base}/api/internal/clips/progress", {"videoId": video_id, "clips": [], "finished": True})
         return {"clips": clips, "containers": 0, "stopped": stopped}
-    wan = modal.Cls.from_name(req.get("modalApp") or "projectv-wan", req.get("modalClass") or "Wan")()
     progress = modal.Dict.from_name("projectv-progress", create_if_missing=True)
     containers = max(1, min(4, int(req.get("containers") or 4), len(req["jobs"]) or 1))
+    wan = _wan(req, containers)
     jobs = []
     for j in req["jobs"]:
         key = f"{video_id[:8]}-{j['shotId'][:8]}-{j['kind']}{j['take']}"
         jobs.append((j, key, {"id": key, "image": get_bytes(j["imageUri"]), "prompt": j["prompt"], "width": j["width"],
-                              "height": j["height"], "numFrames": j["numFrames"], "seed": j["seed"], "mode": j["mode"]}))
+                              "height": j["height"], "numFrames": j["numFrames"], "seed": j["seed"], "mode": j["mode"],
+                              "negative": j.get("negative")}))
     log.info("Starting %d clips for video %s on %d GPU container(s)", len(jobs), video_id, containers)
     run = _sequential if containers == 1 else _parallel
     clips, stopped = run(wan, progress, base, video_id, jobs)
     _post(f"{base}/api/internal/clips/progress", {"videoId": video_id, "clips": [], "finished": True})
-    return {"clips": clips, "containers": containers if jobs else 0, "stopped": stopped}
+    return {"clips": clips, "containers": containers if jobs else 0, "stopped": stopped, "coldStarts": cold_starts(clips)}
+
+
+def cold_starts(clips: list[dict]) -> int | None:
+    """GPU start-ups this batch really paid: clips that were the first in a fresh container. None when the deployed
+    app does not report it yet (the ledger then books one per container, as before)."""
+    flags = [c.get("coldStart") for c in clips if c.get("coldStart") is not None]
+    return sum(1 for f in flags if f) if flags else None

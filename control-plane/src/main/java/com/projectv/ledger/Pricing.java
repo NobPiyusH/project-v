@@ -168,6 +168,12 @@ public class Pricing {
         return num(map(map(pricing, "modal"), "wanSecondsPer81Frames"), kind);
     }
 
+    /** Seconds the Wan GPU stays warm after a Producer-run Short's clip batch, for its redo (0 = off). */
+    public int wanRedoHoldSeconds() {
+        Object v = map(pricing, "modal").get("wanRedoHoldSeconds");
+        return v instanceof Number x ? x.intValue() : 0;
+    }
+
     /** Container start + model load, billed once per GPU container a batch uses. */
     public double gpuContainerStartSeconds() {
         return num(map(pricing, "modal"), "containerStartSeconds");
@@ -187,8 +193,30 @@ public class Pricing {
         return BigDecimal.valueOf(usd * fx()).setScale(4, RoundingMode.HALF_UP);
     }
 
+    /** Clock for dated price changes (tests move it). */
+    java.time.Clock clock = java.time.Clock.systemUTC();
+
+    /** Gemini prices in force today: the base section with every announced change whose date has come laid over it. */
+    @SuppressWarnings("unchecked")
     private Map<String, Object> gemini() {
-        return map(pricing, "gemini");
+        Map<String, Object> base = map(pricing, "gemini");
+        Object changes = base.get("priceChanges");
+        if (!(changes instanceof java.util.List<?> list) || list.isEmpty()) {
+            return base;
+        }
+        java.time.LocalDate today = java.time.LocalDate.now(clock);
+        Map<String, Object> out = new java.util.LinkedHashMap<>(base);
+        for (Object o : list) {
+            Map<String, Object> c = (Map<String, Object>) o;
+            if (!today.isBefore(java.time.LocalDate.parse(String.valueOf(c.get("from"))))) {
+                c.forEach((k, v) -> {
+                    if (!"from".equals(k)) {
+                        out.put(k, v);
+                    }
+                });
+            }
+        }
+        return out;
     }
 
     @SuppressWarnings("unchecked")

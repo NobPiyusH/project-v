@@ -1,5 +1,6 @@
 package com.projectv.dream;
 
+import com.projectv.production.RedoStopRule;
 import com.projectv.agents.Llm;
 import com.projectv.assets.AssetStore;
 import com.projectv.assets.AssetStore.NewAsset;
@@ -389,7 +390,40 @@ public class DreamService {
         budget.require(SCOUT_ESTIMATE_INR, "Dream Short Scout (watch similar Shorts)");
         String query = Objects.toString(d.get("idea"), "") + (notes == null || notes.isBlank() ? "" : " " + notes.strip());
         return new DreamTypes.DreamScoutRequest(storageId(id), query.strip(), listenModel, SCOUT_VIDEOS,
-                look((String) d.get("look")).brief());
+                look((String) d.get("look")).brief(), watchedShorts());
+    }
+
+    static final java.util.regex.Pattern YT_ID = java.util.regex.Pattern.compile(
+            "(?:youtube\\.com/(?:shorts/|watch\\?v=)|youtu\\.be/)([A-Za-z0-9_-]{11})");
+
+    static String videoKey(String url) {
+        var m = YT_ID.matcher(Objects.toString(url, ""));
+        return m.find() ? m.group(1) : null;
+    }
+
+    /** Shorts the Scout already watched (last 90 days, newest 200), so it doesn't pay to watch them again. */
+    Map<String, DreamTypes.ScoutVideo> watchedShorts() {
+        Map<String, DreamTypes.ScoutVideo> out = new java.util.LinkedHashMap<>();
+        jdbc.sql("""
+                        SELECT video_key, watched::text AS w FROM scout_watch
+                        WHERE watched_at > now() - interval '90 days' ORDER BY watched_at DESC LIMIT 200
+                        """).query().listOfRows()
+                .forEach(r -> out.put((String) r.get("video_key"), json.readValue((String) r.get("w"), DreamTypes.ScoutVideo.class)));
+        return out;
+    }
+
+    void rememberWatched(List<DreamTypes.ScoutVideo> videos, String model) {
+        for (DreamTypes.ScoutVideo v : videos == null ? List.<DreamTypes.ScoutVideo>of() : videos) {
+            String key = videoKey(v.url());
+            boolean watched = v.shows() != null || "not about this idea".equals(v.error());
+            if (key == null || !watched) {
+                continue; // a failed watch (private, removed, timeout) is not remembered: next time it is tried again
+            }
+            jdbc.sql("""
+                            INSERT INTO scout_watch (video_key, url, watched, model) VALUES (:k, :u, CAST(:w AS jsonb), :m)
+                            ON CONFLICT (video_key) DO NOTHING
+                            """).param("k", key).param("u", v.url()).param("w", json.writeValueAsString(v)).param("m", model).update();
+        }
     }
 
     @Transactional
@@ -411,6 +445,7 @@ public class DreamService {
                 "found %d similar Shorts via %s; Gemini watches them from their links (only model that takes video)"
                         .formatted(r.videos() == null ? 0 : r.videos().size(), r.source()), List.of(Map.of("provider", BudgetGuard.GEMINI)));
         tag("routing_decision", decision, id);
+        rememberWatched(r.videos(), req == null ? null : req.model());
         List<DreamTypes.ScoutVideo> seen = r.videos() == null ? List.of()
                 : r.videos().stream().filter(v -> v.error() == null && v.shows() != null).toList();
         if (seen.isEmpty()) {
@@ -610,9 +645,17 @@ public class DreamService {
         BigDecimal inr = pricing.modalGpuInr("H100", gpu);
         route(id, "DREAM_CLIPS", "video.i2v.dream", WAN, inr);
         budget.requireGpu(inr, jobs.size() + " Dream Short clips");
-        // One GPU, clips in turn: the ~2 min start-up + model load is paid once for the whole Short.
+        // One GPU, clips in turn: the ~2 min start-up + model load is paid once for the whole Short. When the AI
+        // Producer runs this Short by itself, the GPU stays warm a little after each batch so its redo skips a start-up.
         return new ClipRequest(storageId(id), wanApp, wanClass, publicUrl, jobs, 1, gpu, inr.setScale(2, RoundingMode.HALF_UP),
-                "wan", null, null);
+                "wan", null, null, holdSeconds(id));
+    }
+
+    /** Warm-redo hold for this Short's clip batches: only when the AI Producer decides on it by itself (autopilot). */
+    int holdSeconds(UUID id) {
+        boolean producerDecides = jdbc.sql("SELECT producer_decides FROM dream_short WHERE id = :d").param("d", id)
+                .query(Boolean.class).optional().orElse(false);
+        return producerDecides ? pricing.wanRedoHoldSeconds() : 0;
     }
 
     List<ClipJob> clipJobs(UUID id, List<String> only) {
@@ -621,6 +664,15 @@ public class DreamService {
         int frames = frames(secondsOf(look((String) d.get("look"))));
         Set<String> wanted = only == null ? null : new HashSet<>(only);
         List<ClipJob> jobs = new ArrayList<>();
+        // The Producer's stop-rule fixes for this Short's clips (a cause that came back twice): firm prompt + negative.
+        List<RedoStopRule.Cause> fixes = jdbc.sql("""
+                        SELECT DISTINCT stop_cause FROM producer_decision
+                        WHERE dream_short_id = :d AND stage = 'DREAM_CLIPS' AND stop_rule = 'prompt_fix'
+                        """).param("d", id).query(String.class).list().stream().map(RedoStopRule::causeByKey)
+                .filter(java.util.Objects::nonNull).toList();
+        String fixPrompt = fixes.stream().map(c -> " " + c.promptFix()).collect(java.util.stream.Collectors.joining());
+        String negative = fixes.isEmpty() ? null
+                : fixes.stream().map(RedoStopRule.Cause::negative).collect(java.util.stream.Collectors.joining(", "));
         for (Map<String, Object> s : shots(id)) {
             String shotId = s.get("id").toString();
             if (s.get("picture_uri") == null) {
@@ -631,8 +683,8 @@ public class DreamService {
             }
             int take = ((Number) s.get("clip_takes")).intValue() + 1;
             jobs.add(new ClipJob(shotId, ((Number) s.get("ord")).intValue() + 1, take, "dream", "fast",
-                    (String) s.get("picture_uri"), (String) s.get("motion_prompt"), size[0], size[1], frames,
-                    Math.abs((long) shotId.hashCode()) + take));
+                    (String) s.get("picture_uri"), fixPrompt.isEmpty() ? (String) s.get("motion_prompt") : s.get("motion_prompt") + fixPrompt, size[0], size[1], frames,
+                    Math.abs((long) shotId.hashCode()) + take, negative));
         }
         return jobs;
     }
@@ -666,7 +718,7 @@ public class DreamService {
         double gpu = 0;
         BigDecimal spent = BigDecimal.ZERO;
         String kind = clipKind((String) dream(id).get("quality"));
-        boolean first = r.containers() > 0;
+        boolean first = r.startUps() > 0;
         List<String> errors = new ArrayList<>();
         for (ClipOutput o : r.clips()) {
             ClipJob job = jobs.get(o.shotId() + ":" + o.take());
@@ -702,8 +754,8 @@ public class DreamService {
                     .param("a", asset).param("s", shotId).update();
             ok++;
         }
-        if (r.containers() > 0) {
-            double start = r.containers() * pricing.gpuContainerStartSeconds();
+        if (r.startUps() > 0) { // observed cold starts: a redo on a warm GPU pays none
+            double start = r.startUps() * pricing.gpuContainerStartSeconds();
             cost(id, "modal_h100", pricing.modalGpuInr("H100", start), start, "gpu_seconds", true,
                     "Dream Short: Wan GPU start-up + model load (estimated)");
             spent = spent.add(pricing.modalGpuInr("H100", start));

@@ -5,7 +5,10 @@ Pre-fetch:  uv run modal run workers/modal_apps/wan.py::download   (CPU only: no
 
 Efficiency: the lightx2v 4-step distillation LoRAs (Apache-2.0) cut sampling from ~30-40 steps to 4. Both modes run in
 the same container (the LoRAs are switched on/off per clip), so quality can be compared without a second model load.
-Weights live in a Modal Volume from Hugging Face (CLAUDE.md rule 9); the container scales down after 2 idle minutes.
+Weights live in a Modal Volume from Hugging Face (CLAUDE.md rule 9); the container scales down after 30 idle seconds.
+When the AI Producer may redo clips by itself, the worker calls a "held" variant (Cls.with_options(scaledown_window=...),
+at most HOLD_MAX_SECONDS) so the redo lands on the same warm GPU instead of paying a new start-up. No min_containers:
+every variant still scales to zero by itself once idle (rule 8).
 """
 
 import io
@@ -80,7 +83,7 @@ progress = modal.Dict.from_name("projectv-progress", create_if_missing=True)
     volumes={"/cache": hf_cache},
     timeout=3600,
     memory=98304,          # room for the offload fallback
-    scaledown_window=30,   # owner (19 Nov): back to 30 s - reloading is free (time only) and the AI Producer acts after the 2 min window anyway (rule 8)
+    scaledown_window=30,   # default; a Producer-run Short uses a held variant (minutes, never hours) set by workers/activities/clips.py
     max_containers=4,      # parallel clips across at most 4 GPUs: faster, same total GPU time, capped spend rate
     enable_memory_snapshot=SNAPSHOT,
     experimental_options={"enable_gpu_snapshot": True} if SNAPSHOT else None,
@@ -109,6 +112,7 @@ class Wan:
             self.offloaded = True
         self.pipe = pipe
         self.load_seconds = time.time() - t
+        self.cold = True   # the first clip this container renders reports the cold start (the ledger books observed ones)
 
     def _offload(self) -> None:
         import torch
@@ -200,7 +204,7 @@ class Wan:
         return self.pipe(
             image=img,
             prompt=job["prompt"],
-            negative_prompt=NEGATIVE,
+            negative_prompt=NEGATIVE + (", " + job["negative"] if job.get("negative") else ""),
             width=w,
             height=h,
             num_frames=int(job.get("numFrames", 81)),   # 81 frames = ~5 s at Wan's native 16 fps
@@ -216,6 +220,7 @@ class Wan:
         import torch
 
         t = time.time()
+        cold, self.cold = getattr(self, "cold", False), False
         try:
             mode = job.get("mode") or ("fast" if job.get("fast", True) else "standard")
             cfg = self.MODES[mode]
@@ -240,11 +245,12 @@ class Wan:
                                    "state": "done"}
             return {"id": job["id"], "mp4": data, "seconds": time.time() - t, "frames": len(frames), "fps": 16,
                     "mode": mode, "steps": steps, "offloaded": self.offloaded, "error": None,
-                    "attention": self.attention_used, "attentionFallback": self.attention_fallback}
+                    "attention": self.attention_used, "attentionFallback": self.attention_fallback,
+                    "coldStart": cold, "loadSeconds": round(self.load_seconds, 1)}
         except Exception as e:
             progress[job["id"]] = {"state": "failed", "error": f"{type(e).__name__}: {e}"[:300]}
             return {"id": job["id"], "mp4": None, "seconds": time.time() - t, "mode": job.get("mode"),
-                    "error": f"{type(e).__name__}: {e}"[:600]}
+                    "error": f"{type(e).__name__}: {e}"[:600], "coldStart": cold}
 
     @modal.method()
     def generate_one(self, job: dict) -> dict:

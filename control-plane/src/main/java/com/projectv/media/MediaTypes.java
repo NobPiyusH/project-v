@@ -168,16 +168,28 @@ public final class MediaTypes {
      * @param kind      draft (fast mode, 480p) or final (hybrid mode, 720p)
      * @param mode      Wan quality mode: fast | hybrid | standard
      * @param numFrames 4n+1 frames at 16 fps (81 = ~5 s, Wan's limit)
+     * @param negative  extra Wan negative-prompt terms (the Producer's stop-rule fix for a recurring cause), or null
      */
     public record ClipJob(String shotId, int shotNumber, int take, String kind, String mode, String imageUri, String prompt,
-                          int width, int height, int numFrames, long seed) {
+                          int width, int height, int numFrames, long seed, String negative) {
+        public ClipJob(String shotId, int shotNumber, int take, String kind, String mode, String imageUri, String prompt,
+                       int width, int height, int numFrames, long seed) {
+            this(shotId, shotNumber, take, kind, mode, imageUri, prompt, width, height, numFrames, seed, null);
+        }
     }
 
     /** @param estimateInr GPU estimate for the whole batch incl. container start-up (shown to the owner first) */
     /** @param containers GPU containers to use: 1 = render in turn on one GPU (one start-up), else up to 4 in parallel */
+    /** @param holdSeconds keep the one GPU warm this long after the batch (the AI Producer may redo by itself), 0 = no */
     public record ClipRequest(String videoId, String modalApp, String modalClass, String progressUrl, List<ClipJob> jobs,
                               int containers, double estimateGpuSeconds, java.math.BigDecimal estimateInr,
-                              String provider, String resolution, String omniModel) {
+                              String provider, String resolution, String omniModel, int holdSeconds) {
+        public ClipRequest(String videoId, String modalApp, String modalClass, String progressUrl, List<ClipJob> jobs,
+                           int containers, double estimateGpuSeconds, java.math.BigDecimal estimateInr,
+                           String provider, String resolution, String omniModel) {
+            this(videoId, modalApp, modalClass, progressUrl, jobs, containers, estimateGpuSeconds, estimateInr, provider,
+                    resolution, omniModel, 0);
+        }
     }
 
     /** One finished (or failed / stopped) clip. {@code gpuSeconds} is render time on the GPU. */
@@ -186,7 +198,15 @@ public final class MediaTypes {
     }
 
     /** @param containers GPU containers the batch started (each billed its start-up + model load once) */
-    public record ClipResult(List<ClipOutput> clips, int containers, boolean stopped) {
+    public record ClipResult(List<ClipOutput> clips, int containers, boolean stopped, Integer coldStarts) {
+        public ClipResult(List<ClipOutput> clips, int containers, boolean stopped) {
+            this(clips, containers, stopped, null);
+        }
+
+        /** Start-ups to book: the cold starts the GPU reported, else (older app) one per container used. */
+        public int startUps() {
+            return coldStarts == null ? containers : coldStarts;
+        }
     }
 
     /** What a batch would cost, for the owner's go-ahead before any GPU time is spent. */

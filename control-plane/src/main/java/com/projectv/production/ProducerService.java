@@ -176,27 +176,40 @@ public class ProducerService extends StageSupport {
         }
         UUID id = UUID.randomUUID();
         String verdict = r.verdict() == null ? "ask" : r.verdict().toLowerCase(java.util.Locale.ROOT);
+        // Stop rule: the same issue twice in a row gets one firm prompt fix, then goes to the owner (not another re-roll).
+        RedoStopRule.Outcome stop = RedoStopRule.check(jdbc, json, "video_id", videoId, stage, verdict, r.items(),
+                r.summary(), r.redoNotes());
         jdbc.sql("""
                         INSERT INTO producer_decision (id, video_id, stage, attempt, verdict, confidence, summary, redo_notes,
-                                                       items_json, model, cost_inr)
-                        VALUES (:id, :v, :s, :a, :verdict, :c, :sum, :notes, CAST(:items AS jsonb), :m, :cost)
+                                                       items_json, model, cost_inr, stop_rule, stop_cause)
+                        VALUES (:id, :v, :s, :a, :verdict, :c, :sum, :notes, CAST(:items AS jsonb), :m, :cost, :stop, :cause)
                         """)
                 .param("id", id).param("v", videoId).param("s", stage).param("a", attempt).param("verdict", verdict)
                 .param("c", BigDecimal.valueOf(r.confidence()).setScale(3, RoundingMode.HALF_UP)).param("sum", r.summary())
-                .param("notes", r.redoNotes()).param("items", json.writeValueAsString(r.items() == null ? List.of() : r.items()))
-                .param("m", r.model()).param("cost", cost).update();
+                .param("notes", stop.redoNotes()).param("items", json.writeValueAsString(r.items() == null ? List.of() : r.items()))
+                .param("m", r.model()).param("cost", cost).param("stop", stopRule(stop))
+                .param("cause", stop.cause() == null ? null : stop.cause().key()).update();
         long weak = r.items() == null ? 0 : r.items().stream().filter(i -> !i.ok()).count();
         String what = switch (verdict) {
             case "approve" -> "recommends APPROVE";
             case "redo" -> "recommends REDO of " + weak + " item" + (weak == 1 ? "" : "s");
             default -> "recommends you DECIDE (unsure)";
         };
-        String text = "AI Producer %s (%.0f%% sure): %s%s".formatted(what, r.confidence() * 100,
-                Objects.toString(r.summary(), ""), r.redoNotes() == null || r.redoNotes().isBlank() ? ""
-                        : " Suggested redo: " + r.redoNotes());
+        String text = "AI Producer %s (%.0f%% sure): %s%s%s".formatted(what, r.confidence() * 100,
+                Objects.toString(r.summary(), ""), stop.note() == null ? "" : " " + stop.note(),
+                stop.redoNotes() == null || stop.redoNotes().isBlank() ? "" : " Suggested redo: " + stop.redoNotes());
         List<String> weakItems = r.items() == null ? List.of()
                 : r.items().stream().filter(i -> !i.ok()).map(com.projectv.media.MediaTypes.ProducerItemVerdict::id).toList();
-        return new ProducerAdvice(verdict, r.confidence(), text, r.redoNotes(), id.toString(), weakItems);
+        return new ProducerAdvice(stop.verdict(), r.confidence(), text, stop.redoNotes(), id.toString(), weakItems);
+    }
+
+    /** The stop_rule column value for an outcome. */
+    public static String stopRule(RedoStopRule.Outcome stop) {
+        return switch (stop.action()) {
+            case PROMPT_FIX -> "prompt_fix";
+            case ASK -> "ask";
+            case NONE -> null;
+        };
     }
 
     // ------------------------------------------------------------------------------------------- P2: acting

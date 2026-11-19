@@ -116,6 +116,10 @@ class DreamServicePersistenceTest {
         assertEquals(57, clips.jobs().getFirst().numFrames()); // 3.5 s at 16 fps
         assertEquals(480, clips.jobs().getFirst().width());
         assertEquals(1, clips.containers());
+        assertEquals(0, clips.holdSeconds(), "the owner reviews: no warm hold");
+        jdbc.sql("UPDATE dream_short SET producer_decides = true WHERE id = :d").param("d", dream).update();
+        assertEquals(90, dreams.holdSeconds(dream), "the AI Producer runs it: the GPU stays warm for its redo");
+        jdbc.sql("UPDATE dream_short SET producer_decides = false WHERE id = :d").param("d", dream).update();
         dreams.saveClips(dream, clips, new ClipResult(List.of(
                 new ClipOutput(shot1.toString(), 1, "dream", "s3://b/c1.mp4", 20, 57, 16, "fast", null, 0),
                 new ClipOutput(shot2.toString(), 1, "dream", "s3://b/c2.mp4", 20, 57, 16, "fast", null, 0)), 1, false));
@@ -362,5 +366,43 @@ class DreamServicePersistenceTest {
         assertTrue(producer.spendDecision(dream.toString(), new BigDecimal("25")).approve());
         assertTrue(!producer.spendDecision(dream.toString(), new BigDecimal("35")).approve(), "over the daily cap: asks");
         assertEquals(1, count("SELECT count(*) FROM producer_decision WHERE dream_short_id = :d AND acted = 'approved_spend'"));
+    }
+    @Test
+    void theSameClipIssueTwiceGetsOnePromptFixOnTheClipsThenTheOwnerIsAsked() throws Exception {
+        var producer = new DreamProducer(jdbc, JsonMapper.builder().build(), dreams, null, new Pricing("../config"), "gemini-3.6-flash");
+        dreams.savePictures(dream, dreams.pictureRequest(dream, null, null), new KeyframeResult(List.of(
+                new KeyframeOutput(shot1.toString(), "s3://b/p1.png", "modal_zimage", "z", 1L, 5.0, null, null, List.of()),
+                new KeyframeOutput(shot2.toString(), "s3://b/p2.png", "modal_zimage", "z", 2L, 5.0, null, null, List.of())), 10));
+        java.util.function.Function<String, com.projectv.media.MediaTypes.ProducerReviewResult> people = problem ->
+                new com.projectv.media.MediaTypes.ProducerReviewResult("redo", 0.8, "shot 1 has people", "remove them", List.of(
+                        new com.projectv.media.MediaTypes.ProducerItemVerdict("shot-1", 4, false, problem, "empty pier")),
+                        "gemini-3.6-flash", null);
+
+        assertEquals("redo", producer.saveReview(dream.toString(), "CLIPS", 1, people.apply("visible human figures")).verdict());
+        assertNull(dreams.clipJobs(dream, null).getFirst().negative(), "first redo: an ordinary re-roll");
+
+        var fix = producer.saveReview(dream.toString(), "CLIPS", 2, people.apply("a man stands on the pier"));
+        assertEquals("redo", fix.verdict());
+        assertTrue(fix.redoNotes().startsWith("RECURRING ISSUE (visible people)"), fix.redoNotes());
+        var job = dreams.clipJobs(dream, null).getFirst();
+        assertTrue(job.negative().contains("human figure"), "the redo clip carries the firm negative prompt");
+        assertTrue(job.prompt().startsWith("walk forward ") && job.prompt().contains("empty of people"), job.prompt());
+
+        var ask = producer.saveReview(dream.toString(), "CLIPS", 3, people.apply("silhouette in the fog"));
+        assertEquals("ask", ask.verdict(), "the fix did not hold: ask the owner instead of re-rolling");
+        assertEquals(1, count("SELECT count(*) FROM producer_decision WHERE dream_short_id = :d AND stop_rule = 'prompt_fix' AND stop_cause = 'people'"));
+        assertEquals(1, count("SELECT count(*) FROM producer_decision WHERE dream_short_id = :d AND stop_rule = 'ask' AND verdict = 'redo'"));
+    }
+
+    @Test
+    void aWatchedShortIsRememberedAndOfferedToTheNextScout() {
+        var seen = new DreamTypes.ScoutVideo("https://www.youtube.com/shorts/AbCdEfGhIjK", "t", "c", 10L, 20.0, "a pier",
+                "soft", "handheld", 4, 2.0, "piano", "fog", "AI", "calm", null);
+        var failed = new DreamTypes.ScoutVideo("https://youtu.be/ZZZZZZZZZZZ", "t", "c", 1L, 20.0, null, null, null, null,
+                null, null, null, null, null, "TimeoutError: slow");
+        dreams.rememberWatched(List.of(seen, failed), "gemini-3.6-flash");
+        var known = dreams.scoutRequest(dream, null).known();
+        assertEquals("a pier", known.get("AbCdEfGhIjK").shows());
+        assertTrue(!known.containsKey("ZZZZZZZZZZZ"), "a failed watch is tried again next time");
     }
 }

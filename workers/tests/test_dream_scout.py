@@ -32,3 +32,23 @@ def test_youtube_links_are_found_in_any_form():
 def test_a_sentence_becomes_a_short_search_phrase():
     assert scout.keywords("a lonely vending machine glowing in a flower field at sunset") == "lonely vending machine flower field"
     assert scout.keywords("a lonely vending machine glowing in a flower field at sunset", 3) == "lonely vending machine"
+
+
+def test_a_short_watched_before_is_reused_not_paid_for_again(monkeypatch):
+    found = [{"url": "https://www.youtube.com/shorts/AAAAAAAAAAA", "title": "new title", "channel": "c", "views": 9},
+             {"url": "https://www.youtube.com/shorts/BBBBBBBBBBB", "title": "b", "channel": "d", "views": 1}]
+    monkeypatch.setenv("YOUTUBE_API_KEY", "x")
+    monkeypatch.setattr(scout, "youtube_find", lambda *a, **k: (found, []))
+    watched = []
+
+    def fake_watch(v, q, m):
+        watched.append(v["url"])
+        return {"relevant": True, "shows": "fresh", "look": "", "camera": "", "shots": 3, "avgShotSec": 1.0, "music": "",
+                "hook": "", "tools": "", "works": ""}, {"inputTokens": 1, "outputTokens": 1, "thinkingTokens": 0, "totalTokens": 2}
+
+    monkeypatch.setattr(scout, "watch", fake_watch)
+    known = {"AAAAAAAAAAA": {"url": "u", "title": "old", "shows": "a pier at dusk", "shots": 5, "error": None}}
+    out = scout.scout({"query": "pier", "maxVideos": 2, "known": known})
+    assert watched == ["https://www.youtube.com/shorts/BBBBBBBBBBB"], "only the new Short is paid for"
+    assert out["videos"][0]["shows"] == "a pier at dusk" and out["videos"][0]["title"] == "new title"
+    assert len(out["usage"]) == 1
