@@ -158,6 +158,12 @@ public class Pricing {
     }
 
     /** Expected H100 render seconds for one 81-frame Wan clip of this kind (draft / final). */
+    /** Extra GPU seconds the first clip in a fresh container takes (warm-up); 0 when not configured. */
+    public double wanFirstClipExtraSeconds() {
+        Object v = map(pricing, "modal").get("wanFirstClipExtraSeconds");
+        return v instanceof Number x ? x.doubleValue() : 0;
+    }
+
     public double wanSecondsPer81Frames(String kind) {
         return num(map(map(pricing, "modal"), "wanSecondsPer81Frames"), kind);
     }
