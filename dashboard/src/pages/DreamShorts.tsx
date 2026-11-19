@@ -99,7 +99,11 @@ function DreamHome() {
               <tr key={d.id} style={{ cursor: 'pointer' }} onClick={() => { window.location.hash = `#/dream/${d.id}` }}>
                 <td style={{ width: 40 }}>{d.thumb_asset_id && <img src={assetUrl(d.thumb_asset_id)} alt="" style={{ width: 32, borderRadius: 4 }} />}</td>
                 <td><strong>{d.title ?? d.idea}</strong>{d.title && <div className="muted small">{d.idea}</div>}</td>
-                <td>{statusBadge(d.status)}</td>
+                <td>{statusBadge(d.status)}
+                  {d.status === 'WAITING_COST' && (
+                    <div><button className="primary small" style={{ marginTop: 6 }}
+                      onClick={(e) => { e.stopPropagation(); void dreamApi.approve(d.id, 'CLIPS').then(refresh) }}>
+                      Approve cost</button></div>)}</td>
                 <td className="hide-sm">{d.step ? STEP_LABEL[d.step as DreamStep] ?? d.step : ''}</td>
                 <td>₹{Number(d.spent_inr).toFixed(0)}</td>
               </tr>))}

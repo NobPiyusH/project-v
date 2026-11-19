@@ -112,6 +112,9 @@ export default function App() {
                   title={`Modal's own bill this month: $${budget.modal.meteredUsd.toFixed(2)} used, $${budget.modal.creditLeftUsd.toFixed(2)} of the $${budget.modal.freeCreditUsd.toFixed(0)} free credit left, $${budget.modal.billedUsd.toFixed(2)} billed (updated ${new Date(budget.modal.fetchedAt).toLocaleTimeString()}). Studio's own GPU estimate: ₹${Number(budget.gpuSpentInr ?? 0).toFixed(0)}.`} />
               : <Meter label="GPU" spent={Number(budget.gpuSpentInr ?? 0)} cap={Number(budget.gpuCapInr ?? 0)}
                   title="Modal GPU spend this month recorded by the studio (cap = modal.monthlyCapUsd)" />}
+            {budget.claudeCapInr != null && (
+              <Meter label="Claude" spent={Number(budget.claudeSpentInr ?? 0)} cap={Number(budget.claudeCapInr)}
+                title="Claude API spend this month (script, shot plan, concept, Dream Scout); at the cap Gemini takes over" />)}
           </div>
         )}
         <BackendPower />

@@ -312,6 +312,8 @@ public class ApiController {
         Map<String, Object> out = new java.util.LinkedHashMap<>(Map.of("geminiCapInr", pricing.geminiMonthlyCapInr(),
                 "geminiSpentInr", budget.geminiSpentThisMonth(), "geminiRemainingInr", budget.geminiRemaining(),
                 "gpuCapInr", pricing.gpuMonthlyCapInr(), "gpuSpentInr", budget.gpuSpentThisMonth()));
+        out.put("claudeCapInr", pricing.claudeMonthlyCapInr());
+        out.put("claudeSpentInr", budget.claudeSpentThisMonth());
         Map<String, Object> modal = modalBilling.get();
         if (modal != null) { // Modal's own numbers, refreshed by the media worker every 10 min
             Map<String, Object> m = new java.util.LinkedHashMap<>(modal);
