@@ -143,8 +143,14 @@ pricing:
     monthlyCapInr: 1000         # owner's cap; the app stops paid Gemini calls at this amount (Google budgets only alert)
     reserveInr: 20              # keep this much back for voice/music when deciding hero images
     calibration: 1.5            # Google's real bill ran ×1.53 the ledger's estimates (Nov 1-17 2026); recheck monthly
-    text:  { inputPerMTokUsd: 0.50, outputPerMTokUsd: 3.00 }        # gemini-3.6-flash (verify)
-    tts:   { inputPerMTokUsd: 0.50, outputPerMTokUsd: 9.00 }        # gemini-3.8-flash-tts, audio out (verify; doubles 1 Jan 2027)
+    text:  { inputPerMTokUsd: 0.75, outputPerMTokUsd: 3.75 }        # gemini-3.6/3.8-flash (pricing page re-verified 19 Nov 2026)
+    tts:   { inputPerMTokUsd: 0.50, outputPerMTokUsd: 9.00 }        # gemini-3.8-flash-tts, audio out (re-verified 19 Nov 2026)
+    # Announced on the Gemini API pricing page (re-verified 19 Nov 2026): from this date these replace the prices above,
+    # so caps and estimates stay right after the date. Dates are UTC days, quoted.
+    priceChanges:
+      - from: "2027-01-01"
+        text: { inputPerMTokUsd: 1.50, outputPerMTokUsd: 7.50 }
+        tts:  { inputPerMTokUsd: 1.00, outputPerMTokUsd: 18.00 }
     image: { perImageUsd: { "1K": 0.0336, "2K": 0.0504, "4K": 0.113 } }  # gemini-nano-banana-2.1 (verify)
     music: { perSongUsd: 0.08 }                                     # lyria-3.5 per generated song (verify)
     groundingPerQueryUsd: 0.014                                     # Google Search grounding (verify)
