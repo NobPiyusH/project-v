@@ -138,3 +138,37 @@ def test_two_takes_of_one_shot_in_parallel_are_both_saved(fake, monkeypatch):
     assert sorted(c["take"] for c in out["clips"]) == [1, 2]
     assert all(c["uri"] for c in out["clips"]), "neither take overwrote the other"
     assert len(fake.saved) == 2
+
+
+class _FlakyDict:
+    """A Modal Dict whose network fails for the first `fails` calls (19 Nov: an internet drop mid-batch)."""
+
+    def __init__(self, fails: int):
+        self.fails, self.data = fails, {}
+
+    def _maybe_fail(self):
+        if self.fails > 0:
+            self.fails -= 1
+            raise ConnectionError("getaddrinfo failed")
+
+    def get(self, key):
+        self._maybe_fail()
+        return self.data.get(key)
+
+    def __setitem__(self, key, value):
+        self._maybe_fail()
+        self.data[key] = value
+
+
+def test_a_network_blip_in_a_progress_read_does_not_fail_the_batch():
+    from workers.activities import clips
+    assert clips._progress_of(_FlakyDict(1), "k") is None
+    assert clips._progress_of(_FlakyDict(0), "k") is None
+
+
+def test_the_stop_flag_is_retried_until_the_network_is_back():
+    from workers.activities import clips
+    d = _FlakyDict(3)
+    assert clips._set_stop(d, "stop-1", tries=5, wait=0) is True
+    assert d.data["stop-1"] is True
+    assert clips._set_stop(_FlakyDict(10), "stop-2", tries=3, wait=0) is False
