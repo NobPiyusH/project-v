@@ -51,6 +51,8 @@ public class DreamService {
 
     static final String ZIMAGE = "modal_zimage";
     static final String WAN = "modal_wan";
+    /** The Salad route's provider id (pictures and clips): config/providers.yaml, docs/plans/salad-route.md. */
+    static final String SALAD = "salad";
     static final String LYRIA = "gemini_lyria";
     /** Provenance provider for pieces of the owner's music bed (cut free on the laptop). */
     static final String BED = "owner_music_bed";
@@ -205,7 +207,21 @@ public class DreamService {
     private final DreamEvidence evidence;
     private final String briefModel;
     private final boolean qualityCheck;
+    private final com.projectv.salad.SaladSessions salad; // null on the Modal route
+    private final boolean useSalad;
 
+    /** Modal route (the default): what every existing caller and test uses. */
+    public DreamService(JdbcClient jdbc, ObjectMapper json, Llm llm, AssetStore assets, Pricing pricing, BudgetGuard budget,
+                        Router router, com.projectv.video.ClipProgress clipProgress, String zimageApp, String zimageClass,
+                        String wanApp, String wanClass, String publicUrl, BigDecimal autoApproveInr, double shotSeconds,
+                        String musicDir, String musicModel, String musicBed, String listenModel, String briefModel,
+                        boolean qualityCheck) {
+        this(jdbc, json, llm, assets, pricing, budget, router, clipProgress, zimageApp, zimageClass, wanApp, wanClass,
+                publicUrl, autoApproveInr, shotSeconds, musicDir, musicModel, musicBed, listenModel, briefModel,
+                qualityCheck, null, "modal");
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
     public DreamService(JdbcClient jdbc, ObjectMapper json, Llm llm, AssetStore assets, Pricing pricing, BudgetGuard budget,
                         Router router, com.projectv.video.ClipProgress clipProgress,
                         @Value("${projectv.modal.zimage-app:projectv-zimage}") String zimageApp,
@@ -220,7 +236,9 @@ public class DreamService {
                         @Value("${projectv.dream.music-bed:}") String musicBed,
                         @Value("${projectv.models.vision:gemini-3.6-flash}") String listenModel,
                         @Value("${projectv.models.story:claude:claude-sonnet-5-5}") String briefModel,
-                        @Value("${projectv.dream.quality-check:true}") boolean qualityCheck) {
+                        @Value("${projectv.dream.quality-check:true}") boolean qualityCheck,
+                        com.projectv.salad.SaladSessions salad,
+                        @Value("${projectv.dream.gpu-provider:modal}") String gpuProvider) {
         this.jdbc = jdbc;
         this.json = json;
         this.llm = llm;
@@ -243,6 +261,35 @@ public class DreamService {
         this.evidence = new DreamEvidence(jdbc, json);
         this.briefModel = briefModel;
         this.qualityCheck = qualityCheck;
+        this.salad = salad;
+        if (!"modal".equalsIgnoreCase(gpuProvider) && !"salad".equalsIgnoreCase(gpuProvider)) {
+            throw new IllegalArgumentException("projectv.dream.gpu-provider must be modal or salad, not '" + gpuProvider + "'");
+        }
+        this.useSalad = "salad".equalsIgnoreCase(gpuProvider);
+        if (useSalad && salad == null) {
+            throw new IllegalStateException("projectv.dream.gpu-provider=salad needs the Salad beans");
+        }
+    }
+
+    /** True when this control plane sends Dream Short pictures and clips to Salad instead of Modal. */
+    public boolean usesSalad() {
+        return useSalad;
+    }
+
+    /** Start the Short's Salad group while the writer works, so the weight download overlaps the writing. Best effort. */
+    private void warmSalad(UUID id) {
+        if (!useSalad) {
+            return;
+        }
+        try {
+            salad.ensure(id);
+        } catch (RuntimeException e) {
+            log.warn("Salad warm-up for Short {} failed ({}); the pictures step will try again", id, e.getMessage());
+        }
+    }
+
+    private int readySeconds() {
+        return salad.settings().readyTimeoutMinutes() * 60;
     }
 
     public DreamEvidence evidence() {
@@ -280,6 +327,7 @@ public class DreamService {
 
     @Transactional
     public String writeShots(UUID id, String notes) {
+        warmSalad(id);
         Map<String, Object> d = dream(id);
         Look look = look((String) d.get("look"));
         int count = ((Number) d.get("shot_count")).intValue();
@@ -569,8 +617,19 @@ public class DreamService {
             }
             int attempt = ((Number) s.get("picture_takes")).intValue() + 1;
             // One seed for the whole Short (owner, 19 Nov: the shelter changed shape every shot); a redo moves it on.
-            jobs.add(new KeyframeJob(shotId, attempt, ZIMAGE, prompt, 768, 1344, "9:16", "1K", null,
+            jobs.add(new KeyframeJob(shotId, attempt, useSalad ? SALAD : ZIMAGE, prompt, 768, 1344, "9:16", "1K", null,
                     Math.abs((long) id.hashCode()) + attempt - 1));
+        }
+        if (useSalad) {
+            if (jobs.isEmpty()) {
+                return new KeyframeRequest(storageId(id), null, zimageApp, zimageClass, jobs);
+            }
+            double gpu = jobs.size() * pricing.saladSecondsPerPicture() + (salad.open(id).isPresent() ? 0 : pricing.saladStartSeconds());
+            BigDecimal inr = pricing.saladInr(salad.liveHourlyUsd(), gpu);
+            route(id, "DREAM_PICTURES", "image.dream", SALAD, inr);
+            budget.requireSalad(inr, jobs.size() + " Dream Short pictures on Salad");
+            var session = salad.ensure(id);
+            return new KeyframeRequest(storageId(id), null, zimageApp, zimageClass, jobs, session.url(), readySeconds());
         }
         if (!jobs.isEmpty()) {
             BigDecimal inr = pricing.zimageInr(jobs.size());
@@ -598,7 +657,7 @@ public class DreamService {
                 continue;
             }
             UUID asset = assets.create(new NewAsset(null, "image", o.uri(), "image/png", job.width(), job.height(), null,
-                    ZIMAGE, Objects.toString(o.model(), "Tongyi-MAI/Z-Image-Turbo"), job.prompt(), o.seed(),
+                    job.provider(), Objects.toString(o.model(), "Tongyi-MAI/Z-Image-Turbo"), job.prompt(), o.seed(),
                     AssetStore.LICENCE_ZIMAGE, true));
             jdbc.sql("UPDATE asset SET dream_short_id = :d WHERE id = :a").param("d", id).param("a", asset).update();
             // A new picture makes the old clip stale: it must be made again from this picture.
@@ -612,19 +671,37 @@ public class DreamService {
             cost(id, "modal_l40s", pricing.modalGpuInr("L40S", r.modalGpuSeconds()), r.modalGpuSeconds(), "gpu_seconds", true,
                     "Dream Short pictures (Z-Image, %d)".formatted(ok));
         }
-        router.reportBatch(ZIMAGE, ok, errors.size(), errors.isEmpty() ? null : errors.getFirst());
+        if (r.saladGpuSeconds() > 0 && useSalad) {
+            bookSalad(id, r.saladGpuSeconds(), "Dream Short pictures (Z-Image on Salad, %d)".formatted(ok));
+        }
+        router.reportBatch(useSalad ? SALAD : ZIMAGE, ok, errors.size(), errors.isEmpty() ? null : errors.getFirst());
         if (ok == 0) {
             throw new IllegalStateException("No pictures were made: " + String.join(" | ", errors.stream().filter(Objects::nonNull).toList()));
         }
         staleFinal(id);
-        return "%d/%d pictures made (Z-Image)%s.".formatted(ok, req.jobs().size(),
+        return "%d/%d pictures made (Z-Image%s)%s.".formatted(ok, req.jobs().size(), useSalad ? " on Salad" : "",
                 errors.isEmpty() ? "" : "; " + errors.size() + " failed: " + errors.getFirst());
+    }
+
+    /** Salad job seconds at the group's live rate: a CostEntry (rule 6); the release books the rest of the group's time. */
+    private void bookSalad(UUID id, double seconds, String note) {
+        double rate = salad.open(id).map(com.projectv.salad.SaladSessions.Session::hourlyUsd).orElseGet(salad::liveHourlyUsd);
+        cost(id, SALAD, pricing.saladInr(rate, seconds), seconds, "gpu_seconds", true, note + "; $%.4f/h live rate".formatted(rate));
+        salad.bookedJobSeconds(id, seconds);
     }
 
     // ------------------------------------------------------------------------------------------- CLIPS
 
     public DreamEstimate clipEstimate(UUID id, List<String> only) {
         List<ClipJob> jobs = clipJobs(id, only);
+        if (useSalad && !jobs.isEmpty()) {
+            double gpu = saladClipSeconds(id, jobs);
+            BigDecimal inr = pricing.saladInr(salad.liveHourlyUsd(), gpu).setScale(2, RoundingMode.HALF_UP);
+            return new DreamEstimate(DreamStep.CLIPS, inr, gpu / 60, inr.compareTo(autoApproveInr) > 0,
+                    "%d clips on Salad Wan fp8 (%s): about ₹%s of GPU and %.0f min. ₹%s of the Salad cap left."
+                            .formatted(jobs.size(), dream(id).get("quality"), inr.setScale(0, RoundingMode.HALF_UP), Math.ceil(gpu / 60),
+                                    budget.saladRemaining().max(BigDecimal.ZERO).setScale(0, RoundingMode.HALF_UP)));
+        }
         double gpu = gpuSeconds(jobs, (String) dream(id).get("quality"));
         BigDecimal inr = pricing.modalGpuInr("H100", gpu).setScale(2, RoundingMode.HALF_UP);
         boolean ask = !jobs.isEmpty() && inr.compareTo(autoApproveInr) > 0;
@@ -635,11 +712,26 @@ public class DreamService {
         return new DreamEstimate(DreamStep.CLIPS, inr, gpu / 60, ask, summary);
     }
 
+    /** Salad clip seconds: configured per-81-frames render time, plus the group start-up unless one is already open. */
+    private double saladClipSeconds(UUID id, List<ClipJob> jobs) {
+        return jobs.stream().mapToDouble(j -> pricing.saladSecondsPer81Frames() * j.numFrames() / MAX_FRAMES).sum()
+                + (salad.open(id).isPresent() ? 0 : pricing.saladStartSeconds());
+    }
+
     @Transactional
     public ClipRequest clipRequest(UUID id, List<String> only) {
         List<ClipJob> jobs = clipJobs(id, only);
         if (jobs.isEmpty()) {
             throw new IllegalStateException("No shots with a picture need a clip");
+        }
+        if (useSalad) {
+            double sec = saladClipSeconds(id, jobs);
+            BigDecimal inr = pricing.saladInr(salad.liveHourlyUsd(), sec);
+            route(id, "DREAM_CLIPS", "video.i2v.dream", SALAD, inr);
+            budget.requireSalad(inr, jobs.size() + " Dream Short clips on Salad");
+            var session = salad.ensure(id);
+            return new ClipRequest(storageId(id), wanApp, wanClass, publicUrl, jobs, 1, sec, inr.setScale(2, RoundingMode.HALF_UP),
+                    "salad", null, null, 0, session.url(), readySeconds());
         }
         double gpu = gpuSeconds(jobs, (String) dream(id).get("quality"));
         BigDecimal inr = pricing.modalGpuInr("H100", gpu);
@@ -718,6 +810,7 @@ public class DreamService {
         double gpu = 0;
         BigDecimal spent = BigDecimal.ZERO;
         String kind = clipKind((String) dream(id).get("quality"));
+        boolean onSalad = "salad".equals(req.provider());
         boolean first = r.startUps() > 0;
         List<String> errors = new ArrayList<>();
         for (ClipOutput o : r.clips()) {
@@ -726,12 +819,15 @@ public class DreamService {
                 continue;
             }
             gpu += o.gpuSeconds();
-            if (o.gpuSeconds() > 0) {
+            if (onSalad && o.gpuSeconds() > 0) {
+                bookSalad(id, o.gpuSeconds(), "Dream Short clip, shot %d take %d (Wan fp8 on Salad)".formatted(job.shotNumber(), job.take()));
+                spent = spent.add(pricing.saladInr(salad.open(id).map(com.projectv.salad.SaladSessions.Session::hourlyUsd).orElse(0.0), o.gpuSeconds()));
+            } else if (o.gpuSeconds() > 0) {
                 evidence.gpuTiming(id, kind, o.frames() > 0 ? o.frames() : job.numFrames(), o.gpuSeconds(), first);
                 first = false;
                 spent = spent.add(pricing.modalGpuInr("H100", o.gpuSeconds()));
             }
-            if (o.gpuSeconds() > 0) {
+            if (!onSalad && o.gpuSeconds() > 0) {
                 cost(id, "modal_h100", pricing.modalGpuInr("H100", o.gpuSeconds()), o.gpuSeconds(), "gpu_seconds", true,
                         "Dream Short clip, shot %d take %d (Wan fast)".formatted(job.shotNumber(), job.take()));
             }
@@ -747,14 +843,15 @@ public class DreamService {
             }
             int fps = o.fps() > 0 ? o.fps() : FPS;
             UUID asset = assets.create(new NewAsset(null, "video", o.uri(), "video/mp4", job.width(), job.height(),
-                    o.frames() > 0 ? (double) o.frames() / fps : null, WAN, "wan2.2-i2v-a14b " + o.mode(), job.prompt(),
+                    o.frames() > 0 ? (double) o.frames() / fps : null, onSalad ? SALAD : WAN,
+                    (onSalad ? "wan2.2-i2v-a14b-fp8 " : "wan2.2-i2v-a14b ") + o.mode(), job.prompt(),
                     job.seed(), AssetStore.LICENCE_WAN, true));
             jdbc.sql("UPDATE asset SET dream_short_id = :d, fps = :f WHERE id = :a").param("d", id).param("f", fps).param("a", asset).update();
             jdbc.sql("UPDATE dream_shot SET clip_asset_id = :a, clip_takes = clip_takes + 1, error = NULL, updated_at = now() WHERE id = :s")
                     .param("a", asset).param("s", shotId).update();
             ok++;
         }
-        if (r.startUps() > 0) { // observed cold starts: a redo on a warm GPU pays none
+        if (!onSalad && r.startUps() > 0) { // observed cold starts: a redo on a warm GPU pays none
             double start = r.startUps() * pricing.gpuContainerStartSeconds();
             cost(id, "modal_h100", pricing.modalGpuInr("H100", start), start, "gpu_seconds", true,
                     "Dream Short: Wan GPU start-up + model load (estimated)");
@@ -763,13 +860,15 @@ public class DreamService {
         if (req.estimateInr() != null && gpu > 0) {
             evidence.costCheck(id, "CLIPS", req.estimateInr().doubleValue(), spent.doubleValue());
         }
-        evidence.recalibrate(kind).forEach(c -> log.info("Clip estimate recalibrated: {}", c));
-        router.reportBatch(WAN, ok, errors.size(), errors.isEmpty() ? null : errors.getFirst());
+        if (!onSalad) {
+            evidence.recalibrate(kind).forEach(c -> log.info("Clip estimate recalibrated: {}", c));
+        }
+        router.reportBatch(onSalad ? SALAD : WAN, ok, errors.size(), errors.isEmpty() ? null : errors.getFirst());
         if (ok == 0 && stopped == 0) {
             throw new IllegalStateException("No clips were made: " + String.join(" | ", errors));
         }
         staleFinal(id);
-        return "%d/%d clips made (Wan fast, %s)%s%s%s.".formatted(ok, req.jobs().size(), dream(id).get("quality"),
+        return "%d/%d clips made (Wan %s, %s)%s%s%s.".formatted(ok, req.jobs().size(), onSalad ? "fp8 on Salad" : "fast", dream(id).get("quality"),
                 gpu > 0 ? " in %.0f s of GPU time".formatted(gpu) : "",
                 stopped > 0 ? "; stopped before " + stopped + " finished" : "",
                 errors.isEmpty() ? "" : "; " + errors.size() + " failed: " + errors.getFirst());
@@ -1078,6 +1177,30 @@ public class DreamService {
         evidence.event(id, step, "status", null, message, Map.of("status", status));
         if ("FAILED_WAITING".equals(status)) {
             evidence.event(id, step, "failure", null, message, null);
+        }
+        releaseSaladIfDone(id, step, status);
+    }
+
+    /**
+     * The Short's Salad group is deleted as soon as it cannot be needed soon: the GPU steps are over (music, finish), the
+     * Short ended (completed, cancelled), a step failed (Retry makes a fresh group), or the owner holds a step by hand.
+     * The bounded review window and the cost approval keep it (the watchdog's idle limit bounds those).
+     */
+    private void releaseSaladIfDone(UUID id, String step, String status) {
+        if (!useSalad) {
+            return;
+        }
+        boolean over = List.of("COMPLETED", "CANCELLED", "FAILED_WAITING", "WAITING").contains(status)
+                || "MUSIC".equals(step) || "FINISH".equals(step);
+        if (over) {
+            salad.release(id, step + " " + status);
+        }
+    }
+
+    /** Keeps the Short's Salad lease warm; called through the control plane by the worker waiting on / running jobs. */
+    public void saladHeartbeat(UUID id) {
+        if (useSalad) {
+            salad.heartbeat(id);
         }
     }
 

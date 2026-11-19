@@ -17,6 +17,7 @@ import java.util.Map;
  * {@code DELETE /v2/pods/{id}} (terminate, 204). The key is sent as a bearer token and never logged.
  */
 @Component
+@org.springframework.context.annotation.Primary // the default PodApi; the Salad watchdog holds its own SaladApi
 public class RunPodApi implements PodApi {
 
     private final String baseUrl;

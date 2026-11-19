@@ -19,6 +19,17 @@ providers:
     budget: gpu
     enabled: true
 
+  # Salad route (docs/plans/salad-route.md, 20 Nov 2026): Dream Shorts pictures + clips on a Salad RTX 5090/4090 container
+  # group. Only offered when projectv.dream.gpu-provider=salad; the router still checks enabled, cooldown and the salad cap.
+  - id: salad
+    name: Salad GPU container (Z-Image pictures + Wan fp8 clips)
+    kind: gpu_container
+    capabilities: [image.dream, video.i2v.dream]
+    quality: 6                     # same models as Modal (Z-Image Turbo; Wan 2.2 fp8, owner A/B 20 Nov: no noticeable difference)
+    budget: salad
+    secret_ref: SALAD_API_KEY
+    enabled: true
+
   - id: gemini_image
     name: Gemini image (Nano Banana, keyframes)
     kind: api
@@ -174,6 +185,13 @@ pricing:
     plan: free                   # owner's account (17 Nov 2026): 10,000 credits a month, non-commercial, attribution
     monthlyCredits: 10000
     usdPer1000Credits: 0.00      # set to the paid plan's rate when upgrading (verify on elevenlabs.io/pricing)
+  salad:                         # SaladCloud (owner's ~$5 credit, auto-recharge off = the hard cap). Prices are NEVER here:
+                                 # the hourly rate is read live from GET /organizations/{org}/gpu-classes (rule 7).
+    monthlyCapUsd: 5
+    totalCapUsd: 5               # all-time ceiling for the Salad credit; whichever of the two is lower stops spending
+    secondsPerPicture: 8         # Z-Image Turbo 768x1344, 9 steps, estimate only (calibrate from the ledger)
+    secondsPer81Frames: 76       # Wan fp8 480x832 on a 4090, measured 20 Nov 2026 (a 5090 should be faster)
+    startSeconds: 900            # group start + ~42 GB weight download, billed while the instance runs (estimate)
   modal:
     monthlyFreeUsd: 30
     gpuPerSecondUsd: { L40S: 0.000542, H100: 0.001097, L4: 0.000222 }             # ~$1.95/h, ~$3.95/h (verify on modal.com/pricing)

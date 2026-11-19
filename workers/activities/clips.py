@@ -269,6 +269,7 @@ def _salad(req: dict, base: str, video_id: str) -> tuple[list[dict], bool]:
     if not url:
         raise RuntimeError("Salad route: the control plane sent no container group URL")
     ready_s = float(req.get("readyTimeoutSeconds") or 1800)
+    beat = salad.lease_beat(base, video_id, _beat)
     clips: list[dict] = []
     jobs = [(j, f"{j['shotId'][:8]}-{j['kind']}{j['take']}") for j in req["jobs"]]
     for i, (j, _) in enumerate(jobs):
@@ -281,7 +282,7 @@ def _salad(req: dict, base: str, video_id: str) -> tuple[list[dict], bool]:
                    "negative": j.get("negative"), "seed": int(j["seed"]), "frames": int(j["numFrames"]), "fps": fps,
                    "width": int(j["width"]), "height": int(j["height"])}
         try:
-            mp4, info = salad.run(url, "clip", payload, ready_s, beat=_beat)
+            mp4, info = salad.run(url, "clip", payload, ready_s, beat=beat)
             r = {"mp4": mp4, "seconds": info.get("seconds") or 0, "frames": info.get("frames"), "fps": info.get("fps"),
                  "mode": j["mode"], "coldStart": i == 0}
         except Exception as e:  # noqa: BLE001 - one failed clip never fails the batch

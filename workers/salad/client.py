@@ -115,3 +115,22 @@ def run(base: str, kind: str, payload: dict, ready_timeout_s: float, beat=lambda
             last = e
             beat({"salad": f"instance lost ({e}); retry {attempt + 1}/{RETRIES}"})
     raise RuntimeError(f"Salad {kind} failed after {RETRIES} retries: {last}")
+
+
+def lease_beat(control_plane: str, video_id: str, inner=lambda info: None, every: float = 60.0, clock=time.monotonic):
+    """A beat callback that also pings the control plane (at most every `every` s) so the Short's Salad lease stays
+    warm while the worker waits for downloads or runs jobs. Best effort: a failed ping never fails a job."""
+    last = [-1e9]
+
+    def beat(info):
+        inner(info)
+        now = clock()
+        if now - last[0] >= every:
+            last[0] = now
+            try:
+                req = urllib.request.Request(f"{control_plane.rstrip('/')}/api/internal/salad/{video_id}/heartbeat",
+                                             data=b"{}", headers={"Content-Type": "application/json"}, method="POST")
+                urllib.request.urlopen(req, timeout=5).close()
+            except Exception:  # noqa: BLE001
+                pass
+    return beat

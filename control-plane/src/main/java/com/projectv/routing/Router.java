@@ -159,6 +159,7 @@ public class Router {
         boolean fits = switch (bucket) {
             case "gemini" -> budget.canSpend(c.estimateInr());
             case "gpu" -> budget.gpuRemaining().compareTo(c.estimateInr()) >= 0;
+            case "salad" -> budget.saladRemaining().compareTo(c.estimateInr()) >= 0;
             case "claude" -> budget.canSpendClaude(c.estimateInr());
             default -> true; // free / local / manual
         };

@@ -116,6 +116,10 @@ public class BudgetGuard {
                 cap = pricing.gpuMonthlyCapInr();
                 left = gpuRemaining();
             }
+            case "salad" -> {
+                cap = pricing.saladMonthlyCapInr();
+                left = saladRemaining();
+            }
             case "claude" -> {
                 cap = pricing.claudeMonthlyCapInr();
                 left = cap.subtract(claudeSpentThisMonth());
@@ -125,6 +129,34 @@ public class BudgetGuard {
             }
         }
         return cap.signum() <= 0 ? 0 : Math.max(0, Math.min(1, left.doubleValue() / cap.doubleValue()));
+    }
+
+    // ---- Salad: its own monthly and all-time caps (the owner's prepaid credit); provider id "salad"
+
+    public static final String SALAD = "salad";
+
+    public BigDecimal saladSpentThisMonth() {
+        return spentThisMonth(SALAD);
+    }
+
+    public BigDecimal saladSpentTotal() {
+        return jdbc.sql("SELECT COALESCE(sum(amount_inr), 0) FROM cost_entry WHERE provider_id = :p")
+                .param("p", SALAD).query(BigDecimal.class).single();
+    }
+
+    /** What may still be spent on Salad: the smaller of the monthly and the all-time headroom. */
+    public BigDecimal saladRemaining() {
+        return pricing.saladMonthlyCapInr().subtract(saladSpentThisMonth())
+                .min(pricing.saladTotalCapInr().subtract(saladSpentTotal()));
+    }
+
+    public void requireSalad(BigDecimal estimateInr, String what) {
+        if (saladRemaining().compareTo(estimateInr) < 0) {
+            throw new BudgetExceededException("Salad cap would be exceeded by " + what + " (≈₹"
+                    + estimateInr.setScale(0, java.math.RoundingMode.HALF_UP) + "; ₹"
+                    + saladRemaining().max(BigDecimal.ZERO).setScale(0, java.math.RoundingMode.HALF_UP)
+                    + " left). Raise salad.monthlyCapUsd / totalCapUsd in config/providers.yaml (and top up Salad) to continue.");
+        }
     }
 
     public static class BudgetExceededException extends RuntimeException {

@@ -168,6 +168,33 @@ public class Pricing {
         return inr(searches / 1000.0 * num(map(pricing, "anthropic"), "webSearchPer1000Usd"));
     }
 
+    // ---- Salad (docs/plans/salad-route.md): the hourly rate is passed in, read live from Salad's API, never configured.
+
+    public BigDecimal saladMonthlyCapInr() {
+        return inr(num(map(pricing, "salad"), "monthlyCapUsd"));
+    }
+
+    public BigDecimal saladTotalCapInr() {
+        return inr(num(map(pricing, "salad"), "totalCapUsd"));
+    }
+
+    public double saladSecondsPerPicture() {
+        return num(map(pricing, "salad"), "secondsPerPicture");
+    }
+
+    public double saladSecondsPer81Frames() {
+        return num(map(pricing, "salad"), "secondsPer81Frames");
+    }
+
+    public double saladStartSeconds() {
+        return num(map(pricing, "salad"), "startSeconds");
+    }
+
+    /** Rupees for {@code seconds} of a Salad GPU at a live hourly rate in US dollars. */
+    public BigDecimal saladInr(double hourlyUsd, double seconds) {
+        return inr(hourlyUsd * seconds / 3600.0);
+    }
+
     /** Hard monthly cap on GPU work (Modal), in rupees. Default: the free credit. */
     public BigDecimal gpuMonthlyCapInr() {
         return inr(num(map(pricing, "modal"), "monthlyCapUsd"));
