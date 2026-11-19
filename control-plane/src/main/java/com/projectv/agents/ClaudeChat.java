@@ -57,6 +57,12 @@ public class ClaudeChat {
     /** @param onUsage called as soon as a response arrives (input, output tokens), so a paid call is always recorded */
     public <T> Result<T> call(String model, String system, String user, Class<T> type,
                               java.util.function.BiConsumer<Long, Long> onUsage) {
+        return call(model, system, user, type, OutputConfig.Effort.MEDIUM, onUsage);
+    }
+
+    /** As above with a chosen thinking effort (cost lever; MEDIUM is the A/B-tested default). */
+    public <T> Result<T> call(String model, String system, String user, Class<T> type, OutputConfig.Effort effort,
+                              java.util.function.BiConsumer<Long, Long> onUsage) {
         if (client == null) {
             throw new IllegalStateException("not supported: no ANTHROPIC_API_KEY configured");
         }
@@ -65,7 +71,7 @@ public class ClaudeChat {
         MessageCreateParams params = MessageCreateParams.builder()
                 .model(id)
                 .maxTokens(MAX_TOKENS)
-                .outputConfig(OutputConfig.builder().effort(OutputConfig.Effort.MEDIUM).build())
+                .outputConfig(OutputConfig.builder().effort(effort).build())
                 .system(system)
                 .addUserMessage(user + "\n\n" + converter.getFormat())
                 .build();

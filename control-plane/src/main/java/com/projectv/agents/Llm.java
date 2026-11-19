@@ -84,7 +84,7 @@ public class Llm {
                     if (!budget.canSpendClaude(BigDecimal.TEN)) {
                         throw new IllegalStateException("unavailable: Claude monthly cap reached");
                     }
-                    ClaudeChat.Result<T> c = claude.call(m, system, user, type, (in, out) -> ledger.record(videoId,
+                    ClaudeChat.Result<T> c = claude.call(m, system, user, type, effortFor(purpose), (in, out) -> ledger.record(videoId,
                             BudgetGuard.CLAUDE, pricing.claudeInr(in, out), BigDecimal.valueOf(in + out), "tokens", false,
                             purpose + " (" + m + ", " + in + " in / " + out + " out)"));
                     return new Out<>(c.entity(), new com.projectv.media.MediaTypes.Usage(c.inputTokens(), c.outputTokens(), 0,
@@ -129,6 +129,23 @@ public class Llm {
         } catch (Exception e) {
             throw new IllegalStateException(purpose + " failed: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * Claude thinking effort per call purpose. Off by default (empty = MEDIUM everywhere, as A/B-tested); the owner can
+     * set e.g. {@code CLAUDE_EFFORT_OVERRIDES=SHOT_PLAN:low,dream.scout:low} to A/B a cheaper setting (quality rule).
+     */
+    @Value("${projectv.claude.effort-overrides:}")
+    private String effortOverrides = "";
+
+    com.anthropic.models.messages.OutputConfig.Effort effortFor(String purpose) {
+        for (String pair : effortOverrides.split(",")) {
+            String[] kv = pair.trim().split(":");
+            if (kv.length == 2 && kv[0].trim().equalsIgnoreCase(purpose)) {
+                return com.anthropic.models.messages.OutputConfig.Effort.of(kv[1].trim().toLowerCase());
+            }
+        }
+        return com.anthropic.models.messages.OutputConfig.Effort.MEDIUM;
     }
 
     private static com.projectv.media.MediaTypes.Usage toUsage(ChatResponse response) {
