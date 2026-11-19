@@ -23,6 +23,11 @@ $env:JAVA_HOME = $jdk.FullName
 $env:GRADLE_OPTS = '-Djava.net.preferIPv4Stack=true'   # this network hangs some Java IPv6 connections
 $env:PYTHONIOENCODING = 'utf-8'
 
+# Children get an empty stdin file plus file-redirected stdout/stderr, so none inherits the caller's pipes
+# (a caller waiting for pipe EOF, e.g. the dashboard Restart button or a tool shell, otherwise hangs).
+$nullIn = "$root\.run\empty.in"
+New-Item -ItemType File -Force -Path $nullIn | Out-Null
+
 function Wait-Url($url, $name, $seconds) {
     $deadline = (Get-Date).AddSeconds($seconds)
     while ((Get-Date) -lt $deadline) {
@@ -43,7 +48,7 @@ Write-Host '  ok  docker services' -ForegroundColor Green
 Write-Host '2/4 Control plane (API :8080)'
 if (Test-Port 8080) { Write-Host '  ..  already running' } else {
     $p = Start-Process -FilePath "$root\gradlew.bat" -ArgumentList ':control-plane:bootRun', '--console=plain' -WorkingDirectory $root `
-        -RedirectStandardOutput "$root\logs\control-plane.log" -RedirectStandardError "$root\logs\control-plane.err.log" -WindowStyle Hidden -PassThru
+        -RedirectStandardInput $nullIn -RedirectStandardOutput "$root\logs\control-plane.log" -RedirectStandardError "$root\logs\control-plane.err.log" -WindowStyle Hidden -PassThru
     $p.Id | Set-Content "$root\.run\control-plane.pid"
 }
 
@@ -58,14 +63,14 @@ if ($worker) { Write-Host '  ..  already running' } else {
         else { Write-Host "  !!  PROJECTV_TMP=$tmp does not exist; using the default temp folder" -ForegroundColor Yellow }
     }
     $p = Start-Process -FilePath 'uv' -ArgumentList 'run', 'python', '-m', 'workers.main' -WorkingDirectory $root `
-        -RedirectStandardOutput "$root\logs\worker.log" -RedirectStandardError "$root\logs\worker.err.log" -WindowStyle Hidden -PassThru
+        -RedirectStandardInput $nullIn -RedirectStandardOutput "$root\logs\worker.log" -RedirectStandardError "$root\logs\worker.err.log" -WindowStyle Hidden -PassThru
     $p.Id | Set-Content "$root\.run\worker.pid"
 }
 
 Write-Host '4/4 Dashboard (:5173)'
 if (Test-Port 5173) { Write-Host '  ..  already running' } else {
     $p = Start-Process -FilePath 'npm.cmd' -ArgumentList '--prefix', 'dashboard', 'run', 'dev' -WorkingDirectory $root `
-        -RedirectStandardOutput "$root\logs\dashboard.log" -RedirectStandardError "$root\logs\dashboard.err.log" -WindowStyle Hidden -PassThru
+        -RedirectStandardInput $nullIn -RedirectStandardOutput "$root\logs\dashboard.log" -RedirectStandardError "$root\logs\dashboard.err.log" -WindowStyle Hidden -PassThru
     $p.Id | Set-Content "$root\.run\dashboard.pid"
 }
 
@@ -77,5 +82,5 @@ while (-not (Select-String -Path "$root\logs\worker.err.log", "$root\logs\worker
 if (Select-String -Path "$root\logs\worker.err.log", "$root\logs\worker.log" -Pattern 'listening' -Quiet -ErrorAction SilentlyContinue) { Write-Host '  ok  media worker' -ForegroundColor Green } else { Write-Host '  !!  media worker not listening - see logs\worker*.log' -ForegroundColor Red; $ok = $false }
 
 Write-Host ''
-if ($ok) { Write-Host 'Studio is up:  http://127.0.0.1:5173   (Temporal UI: http://localhost:8233)' -ForegroundColor Cyan }
+if ($ok) { Write-Host 'Studio is up:  http://127.0.0.1:5173   (Temporal UI: http://localhost:8233)' -ForegroundColor Cyan; exit 0 }
 else { Write-Host 'Some parts failed to start - check the logs folder.' -ForegroundColor Yellow; exit 1 }
