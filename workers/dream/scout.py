@@ -202,9 +202,18 @@ def scout(req: dict) -> dict:
         log.warning("Scout search failed: %s", type(e).__name__)
         return {"videos": [], "usage": usage, "source": source, "searches": searches, "error": f"search failed: {type(e).__name__}"}
     videos = []
+    known = req.get("known") or {}
+    reused = 0
     for k, v in enumerate(found):
         if sum(1 for x in videos if not x["error"]) >= n:
             break
+        m = VIDEO_ID.search(v.get("url") or "")
+        cached = known.get(m.group(1)) if m else None
+        if cached:  # watched before: reuse what Gemini saw (free); fresh title/views from this search win
+            keep = {f: cached.get(f) for f in Watched.model_fields if f != "relevant"}
+            videos.append({**v, **keep, "error": cached.get("error")})
+            reused += 1
+            continue
         try:
             seen, u = watch(v, query, model)
             usage.append(u)
@@ -216,7 +225,8 @@ def scout(req: dict) -> dict:
             activity.heartbeat({"watched": k + 1, "of": len(found)})
     if not found:
         error = "no Shorts found for this idea"
-    log.info("Scout: %d found via %s, %d watched", len(found), source, sum(1 for v in videos if not v["error"]))
+    log.info("Scout: %d found via %s, %d watched (%d reused from the cache)", len(found), source,
+             sum(1 for v in videos if not v["error"]), reused)
     return {"videos": videos, "usage": usage, "source": source, "searches": searches, "error": error}
 
 

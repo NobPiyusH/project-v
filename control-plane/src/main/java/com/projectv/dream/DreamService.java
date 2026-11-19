@@ -390,7 +390,40 @@ public class DreamService {
         budget.require(SCOUT_ESTIMATE_INR, "Dream Short Scout (watch similar Shorts)");
         String query = Objects.toString(d.get("idea"), "") + (notes == null || notes.isBlank() ? "" : " " + notes.strip());
         return new DreamTypes.DreamScoutRequest(storageId(id), query.strip(), listenModel, SCOUT_VIDEOS,
-                look((String) d.get("look")).brief());
+                look((String) d.get("look")).brief(), watchedShorts());
+    }
+
+    static final java.util.regex.Pattern YT_ID = java.util.regex.Pattern.compile(
+            "(?:youtube\\.com/(?:shorts/|watch\\?v=)|youtu\\.be/)([A-Za-z0-9_-]{11})");
+
+    static String videoKey(String url) {
+        var m = YT_ID.matcher(Objects.toString(url, ""));
+        return m.find() ? m.group(1) : null;
+    }
+
+    /** Shorts the Scout already watched (last 90 days, newest 200), so it doesn't pay to watch them again. */
+    Map<String, DreamTypes.ScoutVideo> watchedShorts() {
+        Map<String, DreamTypes.ScoutVideo> out = new java.util.LinkedHashMap<>();
+        jdbc.sql("""
+                        SELECT video_key, watched::text AS w FROM scout_watch
+                        WHERE watched_at > now() - interval '90 days' ORDER BY watched_at DESC LIMIT 200
+                        """).query().listOfRows()
+                .forEach(r -> out.put((String) r.get("video_key"), json.readValue((String) r.get("w"), DreamTypes.ScoutVideo.class)));
+        return out;
+    }
+
+    void rememberWatched(List<DreamTypes.ScoutVideo> videos, String model) {
+        for (DreamTypes.ScoutVideo v : videos == null ? List.<DreamTypes.ScoutVideo>of() : videos) {
+            String key = videoKey(v.url());
+            boolean watched = v.shows() != null || "not about this idea".equals(v.error());
+            if (key == null || !watched) {
+                continue; // a failed watch (private, removed, timeout) is not remembered: next time it is tried again
+            }
+            jdbc.sql("""
+                            INSERT INTO scout_watch (video_key, url, watched, model) VALUES (:k, :u, CAST(:w AS jsonb), :m)
+                            ON CONFLICT (video_key) DO NOTHING
+                            """).param("k", key).param("u", v.url()).param("w", json.writeValueAsString(v)).param("m", model).update();
+        }
     }
 
     @Transactional
@@ -412,6 +445,7 @@ public class DreamService {
                 "found %d similar Shorts via %s; Gemini watches them from their links (only model that takes video)"
                         .formatted(r.videos() == null ? 0 : r.videos().size(), r.source()), List.of(Map.of("provider", BudgetGuard.GEMINI)));
         tag("routing_decision", decision, id);
+        rememberWatched(r.videos(), req == null ? null : req.model());
         List<DreamTypes.ScoutVideo> seen = r.videos() == null ? List.of()
                 : r.videos().stream().filter(v -> v.error() == null && v.shows() != null).toList();
         if (seen.isEmpty()) {

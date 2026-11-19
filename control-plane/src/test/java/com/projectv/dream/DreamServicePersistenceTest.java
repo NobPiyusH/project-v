@@ -393,4 +393,16 @@ class DreamServicePersistenceTest {
         assertEquals(1, count("SELECT count(*) FROM producer_decision WHERE dream_short_id = :d AND stop_rule = 'prompt_fix' AND stop_cause = 'people'"));
         assertEquals(1, count("SELECT count(*) FROM producer_decision WHERE dream_short_id = :d AND stop_rule = 'ask' AND verdict = 'redo'"));
     }
+
+    @Test
+    void aWatchedShortIsRememberedAndOfferedToTheNextScout() {
+        var seen = new DreamTypes.ScoutVideo("https://www.youtube.com/shorts/AbCdEfGhIjK", "t", "c", 10L, 20.0, "a pier",
+                "soft", "handheld", 4, 2.0, "piano", "fog", "AI", "calm", null);
+        var failed = new DreamTypes.ScoutVideo("https://youtu.be/ZZZZZZZZZZZ", "t", "c", 1L, 20.0, null, null, null, null,
+                null, null, null, null, null, "TimeoutError: slow");
+        dreams.rememberWatched(List.of(seen, failed), "gemini-3.6-flash");
+        var known = dreams.scoutRequest(dream, null).known();
+        assertEquals("a pier", known.get("AbCdEfGhIjK").shows());
+        assertTrue(!known.containsKey("ZZZZZZZZZZZ"), "a failed watch is tried again next time");
+    }
 }
