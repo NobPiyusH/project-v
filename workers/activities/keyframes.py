@@ -107,8 +107,43 @@ def generate_keyframes(req: dict) -> dict:
                                     "seconds": round(r["seconds"], 2), "usage": {}, "error": None})
                 activity.heartbeat(len(results))
 
+        salad_seconds = _salad_pictures(req, [j for j in jobs if j["provider"] == "salad"], results)
+
         for f in concurrent.futures.as_completed(gem_futures):
             results.append(f.result())
             activity.heartbeat(len(results))
 
-    return {"results": results, "modalGpuSeconds": round(modal_seconds, 2)}
+    return {"results": results, "modalGpuSeconds": round(modal_seconds, 2), "saladGpuSeconds": round(salad_seconds, 2)}
+
+
+def _salad_pictures(req: dict, jobs: list[dict], results: list[dict]) -> float:
+    """Z-Image pictures on the Short's Salad container group (gpuUrl). Each picture is its own job, so a lost
+    instance only costs that picture a resubmit. Returns the GPU seconds the worker reported."""
+    if not jobs:
+        return 0.0
+    from workers.salad import client as salad
+
+    url = (req.get("gpuUrl") or "").rstrip("/")
+    seconds = 0.0
+    for j in jobs:
+        try:
+            if not url:
+                raise RuntimeError("Salad route: the control plane sent no container group URL")
+            png, info = salad.run(url, "picture", {"prompt": j["prompt"], "seed": int(j.get("seed") or 0),
+                                                    "width": int(j.get("width", 768)), "height": int(j.get("height", 1344))},
+                                  float(req.get("readyTimeoutSeconds") or 1800), beat=activity_beat)
+            uri = put_bytes(f"videos/{req['videoId']}/keyframes/{j['shotId']}-{j['attempt']}.png", png, "image/png")
+            s = float(info.get("seconds") or 0)
+            seconds += s
+            results.append({"shotId": j["shotId"], "uri": uri, "provider": "salad", "model": "Tongyi-MAI/Z-Image-Turbo",
+                            "seed": int(j.get("seed") or 0), "seconds": round(s, 2), "usage": {}, "error": None})
+        except Exception as e:  # noqa: BLE001 - one bad shot must not lose the batch
+            results.append({"shotId": j["shotId"], "uri": None, "provider": "salad", "error": f"{type(e).__name__}: {e}"[:500]})
+        activity_beat(len(results))
+    return seconds
+
+
+def activity_beat(detail) -> None:
+    from workers.common import beat
+
+    beat(detail)
