@@ -14,6 +14,7 @@ export const STATUS_TEXT: Record<string, string> = {
   WAITING: 'Waiting for you', RUNNING: 'Running', REJECTED: 'Rejected', SKIPPED: 'Skipped',
   COMPLETED: 'Completed', PAUSED: 'Paused', PENDING: 'Pending', CREATED: 'Created', FAILED: 'Failed',
   INSPECTION_FAILED: 'Sent back by Inspector',
+  PRODUCER_APPROVED: 'Approved by AI Producer', PRODUCER_REDO: 'Redone by AI Producer',
 }
 
 export const MODE_HELP: Record<Mode, string> = {

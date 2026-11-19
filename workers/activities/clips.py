@@ -26,16 +26,9 @@ import modal
 from temporalio import activity
 
 from workers import gemini_pool
-from workers.common import gemini, get_bytes, log, put_bytes, put_file, run_ffmpeg, workdir
+from workers.common import beat as _beat, gemini, get_bytes, log, put_bytes, put_file, run_ffmpeg, workdir
 
 POLL_SECONDS = 5
-
-
-def _beat(detail) -> None:
-    try:
-        activity.heartbeat(detail)
-    except RuntimeError:  # outside an activity (tests, manual runs)
-        pass
 
 
 def _post(url: str, body: dict) -> None:

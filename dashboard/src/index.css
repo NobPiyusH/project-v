@@ -183,6 +183,13 @@ input[type=text] { min-width: 0; }
 .meter .fill { height: 100%; border-radius: 99px; background: linear-gradient(90deg, var(--accent), var(--accent-2)); }
 .meter.hot .fill { background: var(--bad); }
 .icon-btn { padding: 5px 9px; font-size: 0.85rem; }
+.power { display: flex; gap: 8px; align-items: center; }
+.power .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
+.power .dot.up { background: var(--ok); }
+.power .dot.down { background: var(--bad); }
+.power .dot.busy { background: var(--warn); animation: pulse 1s ease-in-out infinite alternate; }
+@keyframes pulse { from { opacity: 0.35; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .power .dot.busy { animation: none; } }
 .needs-dot { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 99px;
   background: var(--warn); color: #1b1300; font-size: 0.72rem; font-weight: 800; margin-left: 6px; }
 

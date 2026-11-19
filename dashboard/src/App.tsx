@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { api } from './api'
+import { api, studio } from './api'
 import { useHashRoute, usePoll } from './hooks'
 import { Home } from './pages/Home'
 import { Providers } from './pages/Providers'
@@ -47,6 +47,34 @@ function UsdMeter({ label, spent, cap, title }: { label: string; spent: number; 
   )
 }
 
+/** Backend power: shows whether the control plane and media worker are up, with a Start or Restart button. */
+function BackendPower() {
+  // Cheap to poll: the dev server caches the worker check; the control-plane check is one local request.
+  const { data: st, refresh } = usePoll(studio.status, 4000)
+  const [err, setErr] = useState<string | null>(null)
+  if (!st) return null
+  const up = st.controlPlane && st.worker
+  const act = (a: 'start' | 'restart') => {
+    if (a === 'restart' && !window.confirm('Restart the backend? Running jobs pause for a minute or two and then carry on.')) return
+    setErr(null)
+    void studio.act(a).then(refresh).catch((e: Error) => setErr(e.message))
+  }
+  const parts = [`Control plane: ${st.controlPlane ? 'running' : 'stopped'}`, `Media worker: ${st.worker ? 'running' : 'stopped'}`]
+  return (
+    <div className="power" title={parts.join('\n') + (st.lastOutput ? `\n\nLast run:\n${st.lastOutput.slice(-600)}` : '')}>
+      <span className={`dot ${st.busy ? 'busy' : up ? 'up' : 'down'}`} aria-hidden="true" />
+      {st.busy
+        ? <span className="small">Backend {st.busy}… (1-2 min)</span>
+        : up
+          ? <button className="icon-btn" onClick={() => act('restart')}>Restart backend</button>
+          : <button className="primary icon-btn" onClick={() => act('start')}>
+              Start backend{st.controlPlane || st.worker ? ` (${st.controlPlane ? 'worker' : 'control plane'} is down)` : ''}
+            </button>}
+      {err && <span className="small" style={{ color: 'var(--bad)' }}>{err}</span>}
+    </div>
+  )
+}
+
 export default function App() {
   const route = useHashRoute()
   const [theme, toggleTheme] = useTheme()
@@ -80,11 +108,12 @@ export default function App() {
                   title="Modal GPU spend this month recorded by the studio (cap = modal.monthlyCapUsd)" />}
           </div>
         )}
+        <BackendPower />
         <button className="icon-btn" onClick={toggleTheme} title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
           aria-label="Toggle theme">{theme === 'dark' ? '☀' : '☾'}</button>
       </header>
       <main>
-        {error && !stages && <p className="error">Can't reach the control plane at /api. Is it running? ({error})</p>}
+        {error && !stages && <p className="error">Can't reach the control plane at /api. Press <strong>Start backend</strong> at the top right (it takes 1-2 minutes). ({error})</p>}
         {stages && (videoMatch
           ? <VideoDetail id={videoMatch[1]} stages={stages} />
           : route.startsWith('#/providers') ? <Providers />

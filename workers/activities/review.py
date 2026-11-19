@@ -15,7 +15,7 @@ from google.genai import types
 from pydantic import BaseModel
 from temporalio import activity
 
-from workers.common import download, gemini, log, run_ffmpeg, usage_dict, with_models, workdir
+from workers.common import beat as _beat, download, gemini, log, run_ffmpeg, usage_dict, with_models, workdir
 
 MAX_IMAGES_PER_CALL = 48  # beyond this, the review runs per paragraph (act) so every image keeps enough attention
 IMAGE_SIDE = 512          # long side in pixels: enough to judge content and continuity, small enough to be cheap
@@ -57,13 +57,6 @@ class CreativeReview(BaseModel):
     video: VideoCritique
     acts: list[ActCritique]
     shots: list[ShotCritique]
-
-
-def _beat(detail: str) -> None:
-    try:
-        activity.heartbeat(detail)
-    except RuntimeError:  # outside an activity (tests, manual runs)
-        pass
 
 
 def _small_jpeg(uri: str, tmp: Path, n: int) -> bytes:

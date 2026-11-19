@@ -158,6 +158,21 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
   return (text ? JSON.parse(text) : undefined) as T
 }
 
+/** Studio power (served by the dashboard's own dev server, so it works while the backend is down). */
+export interface StudioStatus { controlPlane: boolean; worker: boolean; busy: string | null; lastOutput: string }
+
+export const studio = {
+  status: async (): Promise<StudioStatus> => {
+    const r = await fetch('/studio/status')
+    if (!r.ok) throw new Error(`${r.status}`)
+    return r.json() as Promise<StudioStatus>
+  },
+  act: async (action: 'start' | 'restart') => {
+    const r = await fetch(`/studio/${action}`, { method: 'POST', headers: { 'X-Studio': '1' } })
+    if (!r.ok) throw new Error(((await r.json().catch(() => ({}))) as { error?: string }).error ?? `${r.status}`)
+  },
+}
+
 export interface RouterProvider {
   id: string; name: string; kind: string; enabled: boolean; owner_disabled: boolean; capabilities: string
   quality: number; budget: string; fails: number | null; cooldown_until: string | null; last_error: string | null
@@ -223,6 +238,13 @@ export const api = {
   setProviderOn: (id: string, on: boolean) => call<void>('PUT', `/routing/providers/${id}/enabled?on=${on}`),
   resetProvider: (id: string) => call<void>('POST', `/routing/providers/${id}/reset`),
   routing: (videoId: string) => call<RoutingDecision[]>('GET', `/videos/${videoId}/routing`),
-  producer: (videoId: string) => call<{ decisions: ProducerDecision[]; agreement: { decided: number; agreed: number; rate: number } }>('GET', `/videos/${videoId}/producer`),
+  producer: (videoId: string) => call<{ decisions: ProducerDecision[]; agreement: { decided: number; agreed: number; rate: number };
+    summary: { approved: number; redone: number; asked: number; spend_approved: number; review_cost: number; spentInr: number; budgetInr: number; trust: string; deciding: boolean } }>('GET', `/videos/${videoId}/producer`),
+  producerSettings: () => call<{ trust: 'auto' | 'advise' | 'decide'; deciding: boolean; agreement: { decided: number; agreed: number; rate: number } }>('GET', '/producer/settings'),
+  setProducerTrust: (trust: string) => call<void>('PUT', '/producer/settings', { trust }),
+  producerRules: () => call<{ id: string; stage: string | null; rule_text: string; source: string; enabled: boolean; evidence: number }[]>('GET', '/producer/rules'),
+  addProducerRule: (stage: string | null, text: string) => call<void>('POST', '/producer/rules', { stage, text }),
+  updateProducerRule: (id: string, body: { text?: string; enabled?: boolean }) => call<void>('PUT', `/producer/rules/${id}`, body),
+  deleteProducerRule: (id: string) => call<void>('DELETE', `/producer/rules/${id}`),
   resume: (id: string) => call<void>('POST', `/videos/${id}/resume`),
 }

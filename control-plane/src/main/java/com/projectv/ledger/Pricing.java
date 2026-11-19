@@ -95,6 +95,11 @@ public class Pricing {
         return BigDecimal.valueOf(num(map(pricing, "producer"), shortVideo ? "budgetPerShortInr" : "budgetPerLongInr"));
     }
 
+    /** AI Producer: a numeric setting (redosPerItem, roundsPerStage, trustAfterDecisions, trustAgreementPct). */
+    public int producerSetting(String key) {
+        return (int) num(map(pricing, "producer"), key);
+    }
+
     /** AI Producer: any single decision above this goes to the owner. */
     public BigDecimal producerAskAboveInr() {
         return BigDecimal.valueOf(num(map(pricing, "producer"), "askAboveInr"));

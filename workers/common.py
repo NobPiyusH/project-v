@@ -249,6 +249,23 @@ def usage_dict(response) -> dict:
     }
 
 
+# ----------------------------------------------------------------------------------------------------------- activity
+
+def beat(detail) -> None:
+    """Temporal heartbeat that is a no-op outside an activity (tests, manual runs)."""
+    from temporalio import activity
+
+    try:
+        activity.heartbeat(detail)
+    except RuntimeError:
+        pass
+
+
+def drawtext_escape(text: str) -> str:
+    """Text for ffmpeg drawtext with expansion=none, so "%" is plain text (escaping it broke the animatic on "90% make light")."""
+    return text.replace("\\", "\\\\").replace(":", "\\:").replace("'", "’")
+
+
 # ----------------------------------------------------------------------------------------------------------- audio / ffmpeg
 
 def ffmpeg_bin() -> str:

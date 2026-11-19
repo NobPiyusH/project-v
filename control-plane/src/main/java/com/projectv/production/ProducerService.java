@@ -46,10 +46,18 @@ public class ProducerService extends StageSupport {
             "ASSEMBLY", "Finished video: WATCH and LISTEN. Hook in the first 2 seconds, good pacing, every shot moves, captions readable and in sync, voice clear over music, no black or broken moments, strong ending.");
 
     private final String model;
+    private final com.projectv.agents.Llm llm;
 
-    public ProducerService(ProductionDeps d, @Value("${projectv.producer.model:gemini-3.6-flash}") String model) {
+    public ProducerService(ProductionDeps d, String model) {
+        this(d, model, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public ProducerService(ProductionDeps d, @Value("${projectv.producer.model:gemini-3.6-flash}") String model,
+                           com.projectv.agents.Llm llm) {
         super(d);
         this.model = model;
+        this.llm = llm;
     }
 
     /** The stages the Producer reviews in P1. */
@@ -186,7 +194,188 @@ public class ProducerService extends StageSupport {
         String text = "AI Producer %s (%.0f%% sure): %s%s".formatted(what, r.confidence() * 100,
                 Objects.toString(r.summary(), ""), r.redoNotes() == null || r.redoNotes().isBlank() ? ""
                         : " Suggested redo: " + r.redoNotes());
-        return new ProducerAdvice(verdict, r.confidence(), text, r.redoNotes(), id.toString());
+        List<String> weakItems = r.items() == null ? List.of()
+                : r.items().stream().filter(i -> !i.ok()).map(com.projectv.media.MediaTypes.ProducerItemVerdict::id).toList();
+        return new ProducerAdvice(verdict, r.confidence(), text, r.redoNotes(), id.toString(), weakItems);
+    }
+
+    // ------------------------------------------------------------------------------------------- P2: acting
+
+    /** The owner's trust switch: auto (decide once agreement is high enough), advise, or decide. */
+    public String trust() {
+        return jdbc.sql("SELECT value FROM producer_setting WHERE key = 'trust'").query(String.class).optional().orElse("auto");
+    }
+
+    public void setTrust(String trust) {
+        if (!List.of("auto", "advise", "decide").contains(trust)) {
+            throw new IllegalArgumentException("trust must be auto, advise or decide");
+        }
+        jdbc.sql("""
+                        INSERT INTO producer_setting (key, value) VALUES ('trust', :t)
+                        ON CONFLICT (key) DO UPDATE SET value = :t, updated_at = now()
+                        """).param("t", trust).update();
+    }
+
+    /** May the Producer act on its own right now? decide: yes; advise: no; auto: once it agrees with the owner enough. */
+    public boolean deciding() {
+        String t = trust();
+        if ("decide".equals(t)) {
+            return true;
+        }
+        if ("advise".equals(t)) {
+            return false;
+        }
+        Map<String, Object> a = agreement();
+        return ((Number) a.get("decided")).longValue() >= pricing.producerSetting("trustAfterDecisions")
+                && ((Number) a.get("rate")).longValue() >= pricing.producerSetting("trustAgreementPct");
+    }
+
+    /** Records what the Producer did by itself: approved | redo | asked. */
+    public void markActed(UUID decisionId, String acted) {
+        jdbc.sql("UPDATE producer_decision SET acted = :a WHERE id = :id").param("a", acted).param("id", decisionId).update();
+    }
+
+    /** Everything this video has cost so far (the Producer budget counts the whole video). */
+    private BigDecimal videoSpent(UUID videoId) {
+        return jdbc.sql("SELECT COALESCE(sum(amount_inr), 0) FROM cost_entry WHERE video_id = :v")
+                .param("v", videoId).query(BigDecimal.class).single();
+    }
+
+    /** A redo is allowed while the stage has rounds left and the video is inside the Producer budget. */
+    public boolean mayRedo(UUID videoId, int round) {
+        if (round > pricing.producerSetting("roundsPerStage")) {
+            return false;
+        }
+        BigDecimal spent = videoSpent(videoId);
+        return spent.compareTo(pricing.producerBudgetInr(plan(videoId).durationSec() <= 180)) < 0;
+    }
+
+    /** Shot ids for the weak items of a shot stage ("shot-N" = the shot at position N). */
+    public List<String> shotIdsFor(UUID videoId, List<String> itemIds) {
+        List<Integer> ords = itemIds.stream().filter(i -> i.startsWith("shot-"))
+                .map(i -> Integer.parseInt(i.substring(5)) - 1).toList();
+        if (ords.isEmpty()) {
+            return List.of();
+        }
+        return jdbc.sql("""
+                        SELECT s.id::text FROM shot s JOIN scene sc ON sc.id = s.scene_id
+                        WHERE sc.video_id = :v AND s.ord IN (:ords) ORDER BY s.ord
+                        """).param("v", videoId).param("ords", ords).query(String.class).list();
+    }
+
+    /** The narration request for a Producer redo: its precise notes become the reading style (lines keep their delivery). */
+    public static com.projectv.media.MediaTypes.NarrationRequest withStyle(com.projectv.media.MediaTypes.NarrationRequest base,
+                                                                         String notes) {
+        if (notes == null || notes.isBlank()) {
+            return base;
+        }
+        String[] w = notes.strip().split("\\s+");
+        String style = String.join(" ", java.util.Arrays.copyOf(w, Math.min(w.length, 40)));
+        return new com.projectv.media.MediaTypes.NarrationRequest(base.videoId(), base.model(), base.checkModel(),
+                base.voiceName(), style, base.language(), base.lines(), base.voiceProvider());
+    }
+
+    /** P2: the Producer's own call on a money step, recorded so it shows in the report. */
+    @Transactional
+    public com.projectv.media.MediaTypes.SpendDecision spendDecision(UUID videoId, String stage, BigDecimal estimateInr) {
+        String text = spendAdvice(videoId, estimateInr);
+        boolean approve = deciding() && text.contains("would APPROVE");
+        UUID id = UUID.randomUUID();
+        jdbc.sql("""
+                        INSERT INTO producer_decision (id, video_id, stage, attempt, verdict, confidence, summary, acted, cost_inr)
+                        VALUES (:id, :v, :s, 0, :verdict, 1, :sum, :acted, 0)
+                        """).param("id", id).param("v", videoId).param("s", stage)
+                .param("verdict", approve ? "approve" : "ask").param("sum", text)
+                .param("acted", approve ? "approved_spend" : "asked").update();
+        return new com.projectv.media.MediaTypes.SpendDecision(approve,
+                approve ? text.replace("would APPROVE this", "APPROVED this by itself") : text);
+    }
+
+    // ------------------------------------------------------------------------------------------- P2: learning
+
+    public record LearnedRules(List<String> rules) {
+    }
+
+    /**
+     * Learns from the owner's notes: distils the owner's recent feedback on a stage (and where they disagreed with the
+     * Producer) into at most 6 short rules, replacing the stage's earlier learned rules. Owner-written rules are kept.
+     */
+    public List<String> learn(UUID videoId, String stage) {
+        if (llm == null) {
+            return List.of();
+        }
+        List<String> notes = jdbc.sql("""
+                        SELECT decision || ': ' || notes FROM approval
+                        WHERE stage = :s AND actor = 'owner' AND notes IS NOT NULL AND btrim(notes) <> ''
+                        ORDER BY ts DESC LIMIT 15
+                        """).param("s", stage).query(String.class).list();
+        List<String> disagreements = jdbc.sql("""
+                        SELECT 'Producer said ' || verdict || ' (' || COALESCE(summary, '') || '); owner chose ' || owner_decision
+                               || COALESCE(' with notes: ' || owner_notes, '')
+                        FROM producer_decision WHERE stage = :s AND agreed = false ORDER BY decided_at DESC LIMIT 8
+                        """).param("s", stage).query(String.class).list();
+        if (notes.isEmpty() && disagreements.isEmpty()) {
+            return List.of();
+        }
+        List<String> owner = jdbc.sql("SELECT rule_text FROM producer_rule WHERE stage = :s AND source = 'owner' AND enabled")
+                .param("s", stage).query(String.class).list();
+        String system = """
+                You keep the taste rules of a video studio's AI producer. From the owner's feedback, write at most 6 short,
+                concrete rules (max 15 words each) that capture what the owner consistently wants or rejects for this
+                stage. Only rules the feedback supports; no duplicates of the owner's own rules. Return JSON {"rules": [...]}.""";
+        String user = "Stage: " + stage + "\nOwner's own rules: " + owner + "\nOwner feedback (newest first):\n- "
+                + String.join("\n- ", notes) + "\nDisagreements with the Producer:\n- " + String.join("\n- ", disagreements);
+        LearnedRules out = llm.call(videoId, "PRODUCER learn rules " + stage, system, user, LearnedRules.class);
+        List<String> rules = out == null || out.rules() == null ? List.of()
+                : out.rules().stream().filter(r -> r != null && !r.isBlank()).limit(6).toList();
+        jdbc.sql("DELETE FROM producer_rule WHERE stage = :s AND source = 'learned'").param("s", stage).update();
+        for (String r : rules) {
+            jdbc.sql("INSERT INTO producer_rule (id, stage, rule_text, source, evidence) VALUES (:id, :s, :t, 'learned', :e)")
+                    .param("id", UUID.randomUUID()).param("s", stage).param("t", r.strip()).param("e", notes.size()).update();
+        }
+        return rules;
+    }
+
+    public List<Map<String, Object>> rulesList() {
+        return jdbc.sql("SELECT id, stage, rule_text, source, enabled, evidence, updated_at FROM producer_rule ORDER BY stage, source DESC, evidence DESC")
+                .query().listOfRows();
+    }
+
+    public void addRule(String stage, String text) {
+        jdbc.sql("INSERT INTO producer_rule (id, stage, rule_text, source) VALUES (:id, :s, :t, 'owner')")
+                .param("id", UUID.randomUUID()).param("s", stage == null || stage.isBlank() ? null : stage).param("t", text.strip()).update();
+    }
+
+    public void updateRule(UUID id, String text, Boolean enabled) {
+        jdbc.sql("""
+                        UPDATE producer_rule SET rule_text = COALESCE(CAST(:t AS text), rule_text),
+                               enabled = COALESCE(CAST(:e AS boolean), enabled),
+                               source = CASE WHEN CAST(:t AS text) IS NULL THEN source ELSE 'owner' END, updated_at = now()
+                        WHERE id = :id
+                        """).param("t", text).param("e", enabled).param("id", id).update();
+    }
+
+    public void deleteRule(UUID id) {
+        jdbc.sql("DELETE FROM producer_rule WHERE id = :id").param("id", id).update();
+    }
+
+    /** End-of-video summary: what the Producer did by itself, and what it spent on that video. */
+    public Map<String, Object> videoSummary(UUID videoId) {
+        Map<String, Object> m = jdbc.sql("""
+                        SELECT count(*) FILTER (WHERE acted = 'approved') AS approved,
+                               count(*) FILTER (WHERE acted = 'redo') AS redone,
+                               count(*) FILTER (WHERE acted = 'asked') AS asked,
+                               count(*) FILTER (WHERE acted = 'approved_spend') AS spend_approved,
+                               COALESCE(sum(cost_inr), 0) AS review_cost
+                        FROM producer_decision WHERE video_id = :v
+                        """).param("v", videoId).query().singleRow();
+        BigDecimal spent = videoSpent(videoId);
+        Map<String, Object> out = new java.util.LinkedHashMap<>(m);
+        out.put("spentInr", spent);
+        out.put("budgetInr", pricing.producerBudgetInr(plan(videoId).durationSec() <= 180));
+        out.put("trust", trust());
+        out.put("deciding", deciding());
+        return out;
     }
 
     /**
@@ -197,8 +386,7 @@ public class ProducerService extends StageSupport {
         boolean shortVideo = plan(videoId).durationSec() <= 180;
         BigDecimal budgetInr = pricing.producerBudgetInr(shortVideo);
         BigDecimal askAbove = pricing.producerAskAboveInr();
-        BigDecimal spent = jdbc.sql("SELECT COALESCE(sum(amount_inr), 0) FROM cost_entry WHERE video_id = :v")
-                .param("v", videoId).query(BigDecimal.class).single();
+        BigDecimal spent = videoSpent(videoId);
         boolean fits = estimateInr.compareTo(askAbove) <= 0 && spent.add(estimateInr).compareTo(budgetInr) <= 0;
         return fits ? "AI Producer: would APPROVE this (≈₹%s, under your ₹%s 'ask me' line; ₹%s of the ₹%s video budget used)."
                 .formatted(r0(estimateInr), r0(askAbove), r0(spent), r0(budgetInr))
