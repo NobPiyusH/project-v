@@ -82,8 +82,8 @@ public class DreamService {
      * glides like a drone or dolly; these words pull it towards a phone in someone's hand. Every realistic look's
      * camera prompt ends with it.
      */
-    static final String HUMAN_CAMERA = "first-person view, as if through the eyes of someone holding a phone; nobody is ever visible in "
-            + "the frame (19 Nov: 'a person' in the prompt made Wan add a walking woman): small natural sway, nothing gliding; "
+    static final String HUMAN_CAMERA = "handheld first-person view at eye level, empty scene, nobody in frame (19 Nov: 'a person' and 'holding "
+            + "a phone' in the prompt made Wan add a walking woman, then a man filming): small natural sway, nothing gliding; "
             + "no drone, no dolly, no crane, no zoom, no flying camera";
 
     /** Small text comes out garbled; signs stay big and face the camera. */
@@ -105,7 +105,9 @@ public class DreamService {
             // 19 Nov test: the writer asked for drone, dolly and orbit moves and a Coca-Cola logo.
             + "Every camera move is something a person holding a phone can do: stand still, take a step, walk slowly, "
             + "turn their head, crouch; never a drone, dolly, crane, orbit, time-lapse or zoom. The person filming is never seen and "
-            + "no people appear in any shot. No brand names or logos.";
+            + "no people appear in any shot. No brand names or logos. In each shot's motion prompt describe only how the view "
+            + "moves (e.g. 'handheld, slow step forward, slight sway'); never write the words phone, person, hand, someone or "
+            + "holding (19 Nov: 'phone held at chest height' made Wan add a man filming).";
 
     /** Ends every picture prompt of the realistic looks: what makes a still read as a real photo, not an AI image. */
     static final String REAL_PHOTO = "real photograph, natural light falloff, real-world wear and small imperfections "
