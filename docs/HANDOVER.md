@@ -915,7 +915,13 @@ Topic + title + thumbnail; first 30 seconds; Shorts (~5/month correlates with +4
 3. **Book → narrated cinematic series** (public domain only, e.g. *The War of the Worlds*), adaptation agent → screenplay → episodes; prefer narration over dialogue.
 4. **Anime / motion-manga mode:** original stories or public-domain folklore and mythology in anime style; character LoRA; motion-manga (cheap) vs full AI anime.
 5. **Multi-channel and multi-language** expansion.
-6. **Productisation:** devlog content ("how I make cinematic AI films for ₹1,000"), open-sourcing the core, or offering the tool as a service.
+7. **Science channel restart (owner, 19 Nov 2026), from the "AI Documentary Studio" blueprint review:**
+   - **Claim ledger (do first, HIGH):** every factual claim in a Science script gets a row with the claim, its source (primary research or official agencies first, then review papers, then quality journalism; blogs only as leads), and a check status. Narration waits until key claims are checked. AI fact-checking is triage, not proof.
+   - **Four visual lanes per shot:** real footage, Blender/3D, AI video, and graphics/diagrams (e.g. HyperFrames explainer shots). Route each shot to the cheapest lane that meets its requirement; not every shot is Wan.
+   - **Quality scorecard:** a fixed checklist the AI Producer grades every documentary against.
+   - **Prove one documentary first:** one complete 10–20 min film end to end (e.g. "The Death of the Sun") before scaling.
+   - Skip the blueprint's selling/commercial part (Project V is private). Re-verify its 19 Nov 2026 list prices before use.
+8. **Productisation:** devlog content ("how I make cinematic AI films for ₹1,000"), open-sourcing the core, or offering the tool as a service.
 
 ---
 
