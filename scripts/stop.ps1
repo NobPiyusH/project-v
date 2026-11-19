@@ -14,9 +14,9 @@ function Stop-Port($port, $name) {
 
 Stop-Port 8080 'control plane'
 # Only this folder's worker (its .venv): a second copy of the studio (e.g. the dream-shorts test) keeps running.
-$all = Get-CimInstance Win32_Process -Filter "Name='python.exe'" | Where-Object { $_.CommandLine -like '*workers.main*' }
-$mine = @($all | Where-Object { $_.ExecutablePath -like "$root\*" })          # the .venv launcher
-$workers = $all | Where-Object { $mine.ProcessId -contains $_.ProcessId -or $mine.ProcessId -contains $_.ParentProcessId }
+$pyWorkers = Get-CimInstance Win32_Process -Filter "Name='python.exe'" | Where-Object { $_.CommandLine -like '*workers.main*' }
+$mine = @($pyWorkers | Where-Object { $_.ExecutablePath -like "$root\.venv\*" })          # the .venv launcher
+$workers = $pyWorkers | Where-Object { $mine.ProcessId -contains $_.ProcessId -or $mine.ProcessId -contains $_.ParentProcessId }
 foreach ($w in $workers) { Stop-Process -Id $w.ProcessId -Force -Confirm:$false -ErrorAction SilentlyContinue }
 if ($workers) { Write-Host '  stopped media worker' } else { Write-Host '  media worker was not running' }
 if (-not $Backend) { Stop-Port 5173 'dashboard' }
