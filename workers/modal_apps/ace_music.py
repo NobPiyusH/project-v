@@ -1,6 +1,6 @@
 """ACE-Step 1.5 (MIT) music generator on Modal: an A/B candidate for Lyria (19 Nov 2026), off by default.
 
-Deploy:  uv run modal deploy workers/modal_apps/acestep.py
+Deploy:  uv run modal deploy workers/modal_apps/ace_music.py   (not named acestep.py: that would hide the acestep package)
 Called by the media worker via modal.Cls.from_name("projectv-acestep", "AceStep").
 
 2B turbo DiT (8 steps) + the 1.7B "5Hz" planner LM, on an L4 (24 GB: both fit without offload or quantisation).
