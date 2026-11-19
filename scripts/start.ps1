@@ -26,7 +26,7 @@ $env:PYTHONIOENCODING = 'utf-8'
 # Children get an empty stdin file plus file-redirected stdout/stderr, so none inherits the caller's pipes
 # (a caller waiting for pipe EOF, e.g. the dashboard Restart button or a tool shell, otherwise hangs).
 $nullIn = "$root\.run\empty.in"
-New-Item -ItemType File -Force -Path $nullIn | Out-Null
+if (-not (Test-Path $nullIn)) { New-Item -ItemType File -Force -Path $nullIn | Out-Null }
 
 function Wait-Url($url, $name, $seconds) {
     $deadline = (Get-Date).AddSeconds($seconds)
