@@ -304,6 +304,15 @@ class DreamServicePersistenceTest {
     }
 
     @Test
+    void anIdeaWithNoSimilarShortsCarriesOnWithoutAnglesInsteadOfStopping() {
+        var req = new DreamTypes.DreamScoutRequest(dream.toString(), "idea", "gemini", 6, "lonely");
+        String said = dreams.saveScout(dream, req,
+                new DreamTypes.DreamScoutResult(List.of(), List.of(), "youtube", 2, "no Shorts found for this idea"));
+        assertTrue(said.contains("no similar Shorts") && said.contains("no angle"), said);
+        assertEquals(0, count("SELECT count(*) FROM dream_short WHERE id = :d AND scout_json IS NOT NULL"));
+    }
+
+    @Test
     void aBatchWithNoClipsFailsSoTheStepWaitsForTheOwner() {
         jdbc.sql("UPDATE dream_shot SET picture_asset_id = NULL").update();
         assertThrows(IllegalStateException.class, () -> dreams.clipRequest(dream, null));

@@ -414,8 +414,7 @@ public class DreamService {
         List<DreamTypes.ScoutVideo> seen = r.videos() == null ? List.of()
                 : r.videos().stream().filter(v -> v.error() == null && v.shows() != null).toList();
         if (seen.isEmpty()) {
-            throw new IllegalStateException("The Scout found no similar Shorts to learn from"
-                    + (r.error() == null ? "" : ": " + r.error()) + ". Retry, or switch the Scout off for this Short.");
+            return noAngles(id, paid, "found no similar Shorts" + (r.error() == null ? "" : " (" + r.error() + ")"));
         }
         Map<String, Object> d = dream(id);
         java.time.Instant since = java.time.Instant.now();
@@ -439,7 +438,7 @@ public class DreamService {
         DreamTypes.ScoutBrief brief = llm.call(null, "dream.scout", system, user.toString(), DreamTypes.ScoutBrief.class, briefModel);
         linkLlmCosts(id, "dream.scout", since);
         if (brief == null || brief.angles() == null || brief.angles().isEmpty()) {
-            throw new IllegalStateException("The Scout's brief came back empty");
+            return noAngles(id, paid + llmCostsSince(id, "dream.scout", since), "found Shorts but no useful angle");
         }
         jdbc.sql("UPDATE dream_short SET scout_json = CAST(:j AS jsonb), scout_angle = 1, updated_at = now() WHERE id = :d")
                 .param("j", json.writeValueAsString(Map.of("videos", seen, "brief", brief, "source", r.source())))
@@ -450,6 +449,16 @@ public class DreamService {
                 top > 0 ? " (top one %,d views)".formatted(top) : "",
                 brief.cliches() == null || brief.cliches().isEmpty() ? "-" : brief.cliches().getFirst(),
                 brief.angles().getFirst().title());
+    }
+
+    /**
+     * Nothing similar exists (owner, 19 Nov 2026): carry on from the idea and the look alone instead of stopping, so Auto
+     * mode and the autopilot never wait on an unusual idea. The writer then uses the look's own shot structure.
+     */
+    private String noAngles(UUID id, double paid, String why) {
+        evidence.costCheck(id, "SCOUT", SCOUT_ESTIMATE_INR.doubleValue(), paid);
+        evidence.event(id, "SCOUT", "scout", null, "Scout " + why + "; carrying on from the idea alone", null);
+        return "Scout " + why + ", so the writer works from your idea and the look alone (no angle).";
     }
 
     /** Our shots too close to an existing Short? Returns rewrite notes, or null. Cheap Gemini text call. */
