@@ -15,7 +15,7 @@ CREATE TABLE autopilot_setting (
     start_time     time NOT NULL DEFAULT '07:00',   -- local time (Asia/Kolkata), each day
     start_mode     text NOT NULL DEFAULT 'AUTO',    -- AUTO starts at the time; REVIEW waits review_minutes first; MANUAL waits for Start
     review_minutes int NOT NULL DEFAULT 30,
-    daily_cap_inr  numeric(12, 2) NOT NULL DEFAULT 100,
+    daily_cap_inr  numeric(12, 2) NOT NULL DEFAULT 50,   -- owner set 19 Nov 2026
     step_modes     jsonb NOT NULL DEFAULT '{"SCOUT":"AUTO","WRITE":"PRODUCER","PICTURES":"PRODUCER","CLIPS":"PRODUCER","MUSIC":"PRODUCER","FINISH":"PRODUCER"}',
     look           text,                            -- null = rotate through the looks
     shots          int NOT NULL DEFAULT 5,

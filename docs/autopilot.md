@@ -32,7 +32,7 @@ Every step's mode can also be changed on the Short's own page while it runs.
 ## Money and records
 
 - Limits: ₹100 per Short and "ask me above ₹50" (`config/providers.yaml`, `producer:`), and the daily cap (Autopilot tab,
-  default ₹100). The Scout (≈₹6), writer and pictures run before the clips and count toward the limits.
+  default ₹50, owner set 19 Nov 2026). The Scout (≈₹6), writer and pictures run before the clips and count toward the limits.
 - Every Producer review is a `producer_decision` row (linked to the Short) with its cost entry; the upload is a ₹0
   cost entry (YouTube quota). Provenance and routing decisions are written by the Dream Short steps as usual.
 

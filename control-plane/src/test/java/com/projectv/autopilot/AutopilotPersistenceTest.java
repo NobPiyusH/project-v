@@ -64,6 +64,7 @@ class AutopilotPersistenceTest {
         assertFalse(s.enabled());
         assertEquals("PRODUCER", s.stepModes().get("CLIPS"));
         assertEquals("private", s.privacy());
+        assertEquals(0, new java.math.BigDecimal("50").compareTo(s.dailyCapInr()), "owner set the daily cap to ₹50");
         at("08:00").tick();
         assertEquals(0, runs());
     }

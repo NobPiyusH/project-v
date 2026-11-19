@@ -156,7 +156,7 @@ function SettingsCard({ status, onSaved }: { status: Status | undefined; onSaved
         <label><input type="checkbox" checked={s.enabled} onChange={(e) => save({ ...s, enabled: e.target.checked })} />{' '}
           <strong>{s.enabled ? 'On' : 'Off'}</strong></label></div>
       <p className="muted small">Each day at the start time it makes one Dream Short from your idea list (or an unused Scout idea), with the
-        AI Producer deciding inside your limits (₹100 per Short, asks you above ₹50). It never uploads by itself: the finished Short waits
+        AI Producer deciding inside your limits (daily cap below, ₹100 per Short, asks you above ₹50). It never uploads by itself: the finished Short waits
         above for your Post. If a day fails or needs you, the next days wait. The backend must be running (if the laptop was off, it starts
         when the backend is next up that day).</p>
       <div className="row">
