@@ -158,7 +158,7 @@ pricing:
       outputPerMTokUsd: 12.00     # gemini-omni-1.2-flash video output (pricing page 18 Nov 2026; 1.1 routes to 1.2 on 3 Dec)
       tokensPerSecond: { "360p": 1931, "720p": 5792, "1080p": 8688, "4k": 17376 }   # 720p measured: 28,960 tokens / 5 s
   aicredits:                     # errors-only text fallback (AICredits.in, INR wallet; 19 Nov 2026). Price = USD list x FX x 1.05 x 1.05 (gateway fee + GST)
-    totalCapInr: 50              # hard stop for ALL fallback spend (the prepaid wallet), enforced from the cost ledger
+    totalCapInr: 150             # owner raised 19 Nov 2026 (wallet ₹150); hard stop for ALL fallback spend (the prepaid wallet), enforced from the cost ledger
     markup: 1.1025
     # primary model id -> the same model on AICredits (ids checked against GET api.aicredits.in/api/models, 19 Nov 2026) and its USD list price
     models:

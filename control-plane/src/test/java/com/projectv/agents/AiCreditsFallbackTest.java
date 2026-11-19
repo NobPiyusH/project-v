@@ -76,7 +76,7 @@ class AiCreditsFallbackTest {
     void priceIsListTimesFxTimesMarkupFromConfig() {
         assertEquals(0, new BigDecimal("1.71").compareTo(
                 pricing.aicreditsInr("gemini-3.6-flash", 1_000, 2_000).setScale(2, java.math.RoundingMode.HALF_UP)));
-        assertEquals(0, new BigDecimal("50").compareTo(pricing.aicreditsCapInr()));
+        assertEquals(0, new BigDecimal("150").compareTo(pricing.aicreditsCapInr()));
         assertEquals("anthropic/claude-sonnet-5.5", pricing.aicreditsModelId("claude-sonnet-5-5"));
     }
 
