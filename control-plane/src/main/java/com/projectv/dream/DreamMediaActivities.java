@@ -20,6 +20,10 @@ public interface DreamMediaActivities {
     DreamBedResult dreamMusicBed(DreamBedRequest request);
 
     /** Find Shorts like the idea (YouTube, else Google Search) and have Gemini watch each one. A few rupees. */
+    /** Gemini watches the finished Short against the owner's checklist; never throws for a model problem. */
+    @ActivityMethod(name = "dream_check")
+    DreamTypes.DreamCheckResult dreamCheck(DreamTypes.DreamCheckRequest request);
+
     @ActivityMethod(name = "dream_scout")
     DreamTypes.DreamScoutResult dreamScout(DreamTypes.DreamScoutRequest request);
 }

@@ -39,6 +39,17 @@ public interface DreamActivities {
 
     String saveMusic(String dreamId, com.projectv.media.MediaTypes.MusicResult result);
 
+    /** The quality check's request, or null when it is switched off (DREAM_QUALITY_CHECK) or over the Gemini cap. */
+    DreamTypes.DreamCheckRequest checkRequest(String dreamId);
+
+    /** Stores the report and its cost; returns one line for the finish message. */
+    String saveCheck(String dreamId, DreamTypes.DreamCheckResult result);
+
+    /** The same check on the pictures, before any clip is paid for; null when switched off. */
+    DreamTypes.DreamCheckRequest pictureCheckRequest(String dreamId);
+
+    String savePictureCheck(String dreamId, DreamTypes.DreamCheckResult result);
+
     /** Whether this Short runs the Scout (the owner can switch it off on the form). */
     boolean scoutWanted(String dreamId);
 

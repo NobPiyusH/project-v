@@ -56,9 +56,11 @@ public class DreamService {
     static final UUID LICENCE_OWNER_MUSIC = UUID.fromString("00000000-0000-0000-0000-00000000a012");
     /** Pieces of the bed Gemini compares for one Short, and what that listen is held to before the call (a few paise). */
     static final int BED_CANDIDATES = 6;
-    static final BigDecimal LISTEN_ESTIMATE_INR = new BigDecimal("0.50");
+    static final BigDecimal LISTEN_ESTIMATE_INR = new BigDecimal("0.80"); // measured Rs 0.57-0.79 (19 Nov)
     /** Scout: Shorts watched per idea, and the estimate held before it runs (unmeasured until the first runs). */
     static final int SCOUT_VIDEOS = 6;
+    /** Quality check: a ~360p copy watched by Gemini (estimate until measured). */
+    static final BigDecimal CHECK_ESTIMATE_INR = new BigDecimal("0.50");
     static final BigDecimal SCOUT_ESTIMATE_INR = new BigDecimal("6"); // measured Rs 4.56 and Rs 5.96 (19 Nov)
     static final int FPS = 16;          // Wan's own frame rate; the finish makes it 24
     static final int MIN_FRAMES = 33;
@@ -80,7 +82,8 @@ public class DreamService {
      * glides like a drone or dolly; these words pull it towards a phone in someone's hand. Every realistic look's
      * camera prompt ends with it.
      */
-    static final String HUMAN_CAMERA = "filmed on a phone held in a person's hand: small natural sway, nothing gliding; "
+    static final String HUMAN_CAMERA = "handheld first-person view at eye level, empty scene, nobody is ever visible (19 Nov: 'a person' and 'holding "
+            + "a phone' in the prompt made Wan add a walking woman, then a man filming): small natural sway, nothing gliding; "
             + "no drone, no dolly, no crane, no zoom, no flying camera";
 
     /** Small text comes out garbled; signs stay big and face the camera. */
@@ -101,7 +104,10 @@ public class DreamService {
             + "scale and light, small real-world imperfections; never like a 3D render, a game or an obvious AI image. "
             // 19 Nov test: the writer asked for drone, dolly and orbit moves and a Coca-Cola logo.
             + "Every camera move is something a person holding a phone can do: stand still, take a step, walk slowly, "
-            + "turn their head, crouch; never a drone, dolly, crane, orbit, time-lapse or zoom. No brand names or logos.";
+            + "turn their head, crouch; never a drone, dolly, crane, orbit, time-lapse or zoom. The person filming is never seen and "
+            + "no people appear in any shot. No brand names or logos. In each shot's motion prompt describe only how the view "
+            + "moves (e.g. 'handheld, slow step forward, slight sway'); never write the words phone, person, hand, someone or "
+            + "holding (19 Nov: 'phone held at chest height' made Wan add a man filming).";
 
     /** Ends every picture prompt of the realistic looks: what makes a still read as a real photo, not an AI image. */
     static final String REAL_PHOTO = "real photograph, natural light falloff, real-world wear and small imperfections "
@@ -123,7 +129,7 @@ public class DreamService {
                             + "colours, golden hour, blue hour or night sky with glowing clouds, neon or warm lamp glow, wet "
                             + "reflections, high detail, cinematic, vertical composition with the object in the lower middle, "
                             + "no people, " + SIGNS + ", " + REAL_PHOTO,
-                    "a person stands still looking at the object, maybe one slow step closer; the camera barely moves; the "
+                    "first-person view: we stand still looking at the object, maybe one slow step closer; the camera barely moves; the "
                             + "scene itself is alive: clouds drift across the sky, neon and lamps flicker and pulse softly, grass "
                             + "and flowers sway in the breeze, water ripples; the object stays still; no cuts, no people; "
                             + HUMAN_CAMERA,
@@ -141,7 +147,7 @@ public class DreamService {
                     "phone camera photo, first-person point of view at eye level, wide lens, photorealistic, sharp, bright "
                             + "fluorescent and daylight, pastel pink mint and sky-blue colours, glossy wet tiled floors with "
                             + "reflections, liminal space, no people, " + SIGNS + ", " + REAL_PHOTO,
-                    "a person walks slowly forward at a relaxed pace, gentle up-and-down step bob, glancing a little left "
+                    "first-person view: we walk slowly forward at a relaxed pace, gentle up-and-down step bob, glancing a little left "
                             + "and right; water ripples and lights shimmer; continuous, no cuts, no people in view; " + HUMAN_CAMERA,
                     "Invent %d rooms or corridors walked through one after another, each a different ordinary place with "
                             + "its own impossible thing; the walk keeps going forward from shot to shot.",
@@ -197,6 +203,7 @@ public class DreamService {
     private final String listenModel;
     private final DreamEvidence evidence;
     private final String briefModel;
+    private final boolean qualityCheck;
 
     public DreamService(JdbcClient jdbc, ObjectMapper json, Llm llm, AssetStore assets, Pricing pricing, BudgetGuard budget,
                         Router router, com.projectv.video.ClipProgress clipProgress,
@@ -211,7 +218,8 @@ public class DreamService {
                         @Value("${projectv.models.music:lyria-3.5}") String musicModel,
                         @Value("${projectv.dream.music-bed:}") String musicBed,
                         @Value("${projectv.models.vision:gemini-3.6-flash}") String listenModel,
-                        @Value("${projectv.models.story:claude:claude-sonnet-5-5}") String briefModel) {
+                        @Value("${projectv.models.story:claude:claude-sonnet-5-5}") String briefModel,
+                        @Value("${projectv.dream.quality-check:true}") boolean qualityCheck) {
         this.jdbc = jdbc;
         this.json = json;
         this.llm = llm;
@@ -233,6 +241,7 @@ public class DreamService {
         this.listenModel = listenModel;
         this.evidence = new DreamEvidence(jdbc, json);
         this.briefModel = briefModel;
+        this.qualityCheck = qualityCheck;
     }
 
     public DreamEvidence evidence() {
@@ -261,6 +270,13 @@ public class DreamService {
         Map<String, Object> d = dream(id);
         Look look = look((String) d.get("look"));
         int count = ((Number) d.get("shot_count")).intValue();
+        Scouted scouted = scouted(d);
+        // The owner's chosen Scout angle replaces the look's shot structure (19 Nov: as a user-message note it lost
+        // to "a different place every shot" twice). The look still sets the style.
+        String structure = scouted != null && scouted.chosen() != null
+                ? ("Invent %d shots that are consecutive moments of ONE idea the owner chose, in the same place, flowing "
+                + "into each other: %s - %s").formatted(count, scouted.chosen().title(), scouted.chosen().idea())
+                : look.structure().formatted(count);
         String system = """
                 You are the writer of a short, wordless, music-led vertical video (YouTube Shorts / Reels) for a channel
                 about dreams and impossible places. %s Every shot must be a fresh, specific image (not generic).
@@ -268,10 +284,13 @@ public class DreamService {
                 Look: %s
                 Return JSON: {"title": short title, "world": one paragraph describing the shared feeling and world (materials,
                 objects, scale, mood), "palette": the exact colour palette, "light": the light and atmosphere,
+                "hero": the main object that appears in several shots, described exactly once so it can be drawn the same
+                every time (shape, size, materials, colours, every part and where it sits; e.g. "green-painted steel bus
+                shelter, rusty corrugated tin roof sloping back, three glass side panels, wooden slat bench inside, one
+                round lamp under the roof"; empty if no object recurs), never mention the hero's look differently in a scene,
                 "shots": [{"scene": what this shot shows (one or two sentences, concrete), "motion": the camera move and
                 the small motion inside the scene}]} with exactly %d shots.
-                """.formatted(look.structure().formatted(count), FEEL, look.brief(), count);
-        Scouted scouted = scouted(d);
+                """.formatted(structure, FEEL, look.brief(), count);
         String user = "Idea: " + d.get("idea") + (notes == null || notes.isBlank() ? "" : "\nOwner's notes for this rewrite: " + notes)
                 + (scouted == null ? "" : scouted.forWriter());
         java.time.Instant since = java.time.Instant.now();
@@ -310,6 +329,12 @@ public class DreamService {
 
     /** What the Scout found and the angle the owner picked, as the writer will read it. */
     record Scouted(DreamTypes.ScoutBrief brief, List<DreamTypes.ScoutVideo> videos, int angle) {
+        /** The angle the owner picked (1-based; out of range falls back to the nearest), or null when there are none. */
+        DreamTypes.ScoutAngle chosen() {
+            return brief.angles() == null || brief.angles().isEmpty() ? null
+                    : brief.angles().get(Math.min(Math.max(angle, 1), brief.angles().size()) - 1);
+        }
+
         String forWriter() {
             StringBuilder s = new StringBuilder("\n\nWhat already exists (make this Short clearly different):");
             if (brief.cliches() != null && !brief.cliches().isEmpty()) {
@@ -460,7 +485,9 @@ public class DreamService {
     }
 
     static String picturePrompt(DreamWorld w, PlannedDreamShot s, Look look) {
-        return String.join(" ", s.scene().strip(), "World:", Objects.toString(w.world(), "").strip(),
+        String hero = Objects.toString(w.hero(), "").strip();
+        return String.join(" ", s.scene().strip(), hero.isEmpty() ? "" : "The same " + hero + " in every shot, exactly as described.",
+                "World:", Objects.toString(w.world(), "").strip(),
                 "Palette:", Objects.toString(w.palette(), "").strip(), "Light:", Objects.toString(w.light(), "").strip(),
                 "Style:", look.pictureStyle()).replaceAll("\\s+", " ");
     }
@@ -485,8 +512,9 @@ public class DreamService {
                 prompt = prompt + " Owner's notes: " + notes.strip();
             }
             int attempt = ((Number) s.get("picture_takes")).intValue() + 1;
+            // One seed for the whole Short (owner, 19 Nov: the shelter changed shape every shot); a redo moves it on.
             jobs.add(new KeyframeJob(shotId, attempt, ZIMAGE, prompt, 768, 1344, "9:16", "1K", null,
-                    Math.abs((long) shotId.hashCode()) + attempt));
+                    Math.abs((long) id.hashCode()) + attempt - 1));
         }
         if (!jobs.isEmpty()) {
             BigDecimal inr = pricing.zimageInr(jobs.size());
@@ -823,7 +851,9 @@ public class DreamService {
         return new DreamFinishRequest(storageId(id), (String) d.get("look"), clips, 1080, 1920, 24, look.dissolveSec(),
                 musicDir == null || musicDir.isBlank() ? null : musicDir, publicUrl, musicUri, musicName,
                 look.speed(), look.handheld(), !Boolean.FALSE.equals(d.get("edit_music")),
-                !Boolean.FALSE.equals(d.get("edit_ambience")), !Boolean.FALSE.equals(d.get("edit_pacing")));
+                !Boolean.FALSE.equals(d.get("edit_ambience")), !Boolean.FALSE.equals(d.get("edit_pacing")),
+                // a picked Scout angle is one story told in order: pacing must not reshuffle it (19 Nov: the ending played third)
+                scouted(d) != null && scouted(d).chosen() != null);
     }
 
     @Transactional
@@ -843,6 +873,79 @@ public class DreamService {
         return "Finished: %.1f s, %dx%d at %d fps (%s)%s.".formatted(r.durationSec(), r.width(), r.height(), r.fps(),
                 "rife-laptop".equals(r.smoothing()) ? "smoothed with RIFE on the laptop" : "smoothed with FFmpeg",
                 r.music() == null ? ", no music" : ", music: " + r.music());
+    }
+
+    // ------------------------------------------------------------------------------------------- QUALITY CHECK
+
+    public DreamTypes.DreamCheckRequest checkRequest(UUID id) {
+        Map<String, Object> d = dream(id);
+        if (!qualityCheck || d.get("final_asset_id") == null) {
+            return null;
+        }
+        try {
+            budget.require(CHECK_ESTIMATE_INR, "Dream Short quality check");
+        } catch (BudgetGuard.BudgetExceededException e) {
+            return null; // over the Gemini cap: the Short is finished anyway
+        }
+        return new DreamTypes.DreamCheckRequest(storageId(id), assets.uriOf((UUID) d.get("final_asset_id")), checkBrief(id, d),
+                listenModel, null);
+    }
+
+    /** The same check on the pictures (a few paise), so most redos happen before any GPU clip is paid for. */
+    public DreamTypes.DreamCheckRequest pictureCheckRequest(UUID id) {
+        Map<String, Object> d = dream(id);
+        List<String> pictures = shots(id).stream().map(s -> (String) s.get("picture_uri")).filter(Objects::nonNull).toList();
+        if (!qualityCheck || pictures.isEmpty()) {
+            return null;
+        }
+        try {
+            budget.require(CHECK_ESTIMATE_INR, "Dream Short picture check");
+        } catch (BudgetGuard.BudgetExceededException e) {
+            return null;
+        }
+        return new DreamTypes.DreamCheckRequest(storageId(id), null, checkBrief(id, d), listenModel, pictures);
+    }
+
+    private String checkBrief(UUID id, Map<String, Object> d) {
+        StringBuilder brief = new StringBuilder("Look: " + look((String) d.get("look")).brief());
+        brief.append("\nTitle: ").append(Objects.toString(d.get("title"), "")).append("\nIdea: ").append(d.get("idea"));
+        Scouted s = scouted(d);
+        if (s != null && s.chosen() != null) {
+            brief.append("\nThe owner's chosen angle (one story, shots in this order): ").append(s.chosen().title())
+                    .append(" - ").append(s.chosen().idea());
+        }
+        int n = 1;
+        for (Map<String, Object> shot : shots(id)) {
+            brief.append("\nShot ").append(n++).append(": ").append(shot.get("scene"));
+        }
+        return brief.toString();
+    }
+
+    @Transactional
+    public String saveCheck(UUID id, DreamTypes.DreamCheckResult r, String stage) {
+        boolean pictures = "PICTURES".equals(stage);
+        if (r.usage() != null) {
+            BigDecimal inr = pricing.textInr(r.usage());
+            cost(id, BudgetGuard.GEMINI, inr, r.usage().totalTokens(), "token", false,
+                    "Dream Short " + (pictures ? "picture" : "quality") + " check (" + r.model() + ")");
+            evidence.costCheck(id, pictures ? "PICTURE_CHECK" : "CHECK", CHECK_ESTIMATE_INR.doubleValue(), inr.doubleValue());
+            UUID decision = router.recordExternal(null, "DREAM_CHECK", "video.watch", BudgetGuard.GEMINI,
+                    "quality check: Gemini watches the finished Short (only model that takes video)",
+                    List.of(Map.of("provider", BudgetGuard.GEMINI)));
+            tag("routing_decision", decision, id);
+        }
+        if (r.error() != null || r.overall() <= 0) {
+            evidence.event(id, stage, "check", null, "check unavailable: " + r.error(), null);
+            return (pictures ? "Picture" : "Quality") + " check unavailable this time.";
+        }
+        jdbc.sql("UPDATE dream_short SET " + (pictures ? "picture_check_json" : "check_json")
+                        + " = CAST(:j AS jsonb), updated_at = now() WHERE id = :d")
+                .param("j", json.writeValueAsString(r)).param("d", id).update();
+        evidence.event(id, stage, "check", null, r.summary(), Map.of("overall", r.overall(), "issues",
+                r.issues() == null ? 0 : r.issues().size()));
+        int issues = r.issues() == null ? 0 : r.issues().size();
+        return (pictures ? "Picture" : "Quality") + " check: %d/10%s.".formatted(r.overall(), issues == 0 ? ", no issues"
+                : ", %d issue%s - %s".formatted(issues, issues > 1 ? "s" : "", r.issues().getFirst().problem()));
     }
 
     // ------------------------------------------------------------------------------------------- shared helpers

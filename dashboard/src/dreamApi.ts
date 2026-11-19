@@ -18,7 +18,7 @@ export interface DreamShot {
 
 export interface DreamDetail extends DreamSummary {
   shot_count: number; quality: string; review_minutes: number; music_asset_id: string | null; music_source: 'bed' | 'lyria'; scout: boolean; scout_json: string | null; scout_angle: number;
-  edit_music: boolean; edit_ambience: boolean; edit_pacing: boolean; modes_json: string | Record<string, DreamMode>
+  edit_music: boolean; edit_ambience: boolean; edit_pacing: boolean; check_json: string | null; picture_check_json: string | null; modes_json: string | Record<string, DreamMode>
   shots: DreamShot[]
   costs: { provider_id: string; amount_inr: number; units: number | null; unit_type: string | null; estimated: boolean; note: string; ts: string }[]
   decisions: { stage: string; capability: string; chosen_provider_id: string | null; reason_text: string; created_at: string }[]

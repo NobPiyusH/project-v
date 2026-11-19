@@ -55,7 +55,7 @@ class DreamServicePersistenceTest {
         Router router = new Router(jdbc, json, budget, pricing);
         dreams = new DreamService(jdbc, json, null, new AssetStore(jdbc), pricing, budget, router, new ClipProgress(),
                 "projectv-zimage", "ZImage", "projectv-wan", "Wan", "http://127.0.0.1:8080", BigDecimal.ZERO, 3.5, "", "lyria-3.5",
-                "s3://projectv/music-beds/my track.m4a", "gemini-3.6-flash", "claude:claude-sonnet-5-5");
+                "s3://projectv/music-beds/my track.m4a", "gemini-3.6-flash", "claude:claude-sonnet-5-5", true);
         jdbc.sql("""
                         INSERT INTO provider (id, name, kind, capabilities_json, config_json, enabled)
                         VALUES ('local_laptop', 'Laptop', 'local', CAST('["ffmpeg"]' AS jsonb), CAST('{}' AS jsonb), true)
@@ -128,12 +128,25 @@ class DreamServicePersistenceTest {
                 java.util.Map.of("motion", 1.8, "colour", 26.0)));
         assertNotNull(jdbc.sql("SELECT final_asset_id FROM dream_short WHERE id = :d").param("d", dream).query(UUID.class).single());
         assertEquals(1, count("SELECT count(*) FROM dream_metric WHERE dream_short_id = :d AND (metrics->>'colour')::float = 26"));
+        var chk = dreams.checkRequest(dream);
+        assertTrue(chk.brief().contains("Shot 1: scene") && chk.videoUri().equals("s3://b/final.mp4"), chk.brief());
+        String said = dreams.saveCheck(dream, new DreamTypes.DreamCheckResult(java.util.Map.of("noPeople", 3), 6,
+                List.of(new DreamTypes.CheckIssue(3, 7.5, "a woman walks into frame", "redo clip 3")), "one person appears",
+                "gemini-3.6-flash", new com.projectv.media.MediaTypes.Usage(5000, 200, 0, 5200), null), "FINISH");
+        assertEquals("Quality check: 6/10, 1 issue - a woman walks into frame.", said);
+        assertEquals(1, count("SELECT count(*) FROM dream_short WHERE id = :d AND (check_json->>'overall')::int = 6"));
+        assertEquals("Quality check unavailable this time.", dreams.saveCheck(dream,
+                new DreamTypes.DreamCheckResult(java.util.Map.of(), 0, List.of(), "", null, null, "no network"), "FINISH"));
+        assertEquals(2, dreams.pictureCheckRequest(dream).pictureUris().size(), "both pictures go to the picture check");
+        assertTrue(dreams.saveCheck(dream, new DreamTypes.DreamCheckResult(java.util.Map.of("noPeople", 10), 9, List.of(), "fine",
+                "gemini-3.6-flash", null, null), "PICTURES").startsWith("Picture check: 9/10"));
+        assertEquals(1, count("SELECT count(*) FROM dream_short WHERE id = :d AND (picture_check_json->>'overall')::int = 9"));
         var on = dreams.finishRequest(dream);
         assertTrue(on.musicEdit() && on.ambience() && on.pacing(), "the editing rules are on by default");
         assertEquals("scene", on.clips().getFirst().scene());
         jdbc.sql("UPDATE dream_short SET edit_ambience = false WHERE id = :d").param("d", dream).update();
         assertTrue(!dreams.finishRequest(dream).ambience() && dreams.finishRequest(dream).pacing());
-        assertEquals(3, count("SELECT count(*) FROM routing_decision WHERE dream_short_id = :d"));
+        assertEquals(4, count("SELECT count(*) FROM routing_decision WHERE dream_short_id = :d")); // + the quality check
     }
 
     @Test
@@ -213,6 +226,7 @@ class DreamServicePersistenceTest {
         assertEquals(5 * 57 / 16.0 / 0.7 + 1, dreams.shortSeconds(5, lonely), 0.01); // slowed to 70% on the laptop
         assertEquals(4 * 81 / 16.0 / 0.75 - 3 * 0.35 + 1, dreams.shortSeconds(4, walk), 0.01);
         assertTrue(lonely.motionStyle().contains("no drone") && lonely.pictureStyle().contains("no small text"));
+        assertTrue(lonely.motionStyle().contains("nobody is ever visible") && !lonely.motionStyle().contains("a person "), "no person in the camera words");
         assertEquals("stand", lonely.handheld());
         assertTrue(lonely.structure().formatted(5).contains("DIFFERENT place"));
         assertEquals(lonely, DreamService.look("nope"), "unknown looks fall back to the default");
@@ -265,6 +279,7 @@ class DreamServicePersistenceTest {
         assertTrue(forWriter.contains("build EVERY shot around it") && forWriter.contains("Dawn rain - a phone box at dawn in rain"), forWriter);
         assertTrue(forWriter.contains("Avoid these clichés: neon kiosk at dusk") && forWriter.contains("Do not copy"), forWriter);
         assertTrue(dreams.scoutWanted(dream), "the Scout is on by default");
+        assertEquals("Dawn rain", dreams.scouted(dreams.dream(dream)).chosen().title(), "the picked angle replaces the look's structure");
     }
 
     @Test

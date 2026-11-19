@@ -27,6 +27,7 @@ from workers.dream.finish import dream_finish
 from workers.dream.music_bed import dream_music_bed
 from workers.dream.scout import dream_scout
 from workers.youtube.upload import youtube_upload
+from workers.dream.check import dream_check
 from workers import modal_billing
 from workers.common import ensure_bucket
 
@@ -52,7 +53,7 @@ async def main() -> None:
                         generate_keyframes, render_animatic, inspect_media, review_images,
                         generate_clips, search_footage, fetch_footage, assemble_video,
                         smooth_clips, upscale_clips, check_sources, producer_review, dream_finish, dream_music_bed, dream_scout,
-                        youtube_upload],
+                        youtube_upload, dream_check],
             activity_executor=pool,
             max_concurrent_activities=8,
         )

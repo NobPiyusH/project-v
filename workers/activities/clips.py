@@ -70,10 +70,35 @@ def _stopped(j: dict, error: str = "stopped") -> dict:
             "fps": 0, "mode": j["mode"], "error": error}
 
 
+def _progress_of(progress, key: str) -> dict | None:
+    """A clip's live state from the Modal Dict; None when Modal can't be reached for a moment. A short internet drop
+    must never fail the whole batch (19 Nov: one failed read failed the step while the GPU kept going)."""
+    try:
+        return progress.get(key)
+    except Exception as e:  # noqa: BLE001 - transient network trouble; the next poll tries again
+        log.warning("Clip progress unavailable for a moment (%s)", type(e).__name__)
+        return None
+
+
+def _set_stop(progress, stop_key: str, tries: int = 24, wait: float = 5.0) -> bool:
+    """Raise the stop flag the GPU container checks before each clip, retrying while the internet is down (up to
+    ~2 min) so a failed or cancelled batch never leaves a GPU rendering clips nobody will collect (rule 8)."""
+    for n in range(tries):
+        try:
+            progress[stop_key] = True
+            return True
+        except Exception as e:  # noqa: BLE001
+            if n == tries - 1:
+                log.error("Could not tell the GPU to stop (%s): check Modal for a running projectv-wan container", e)
+                return False
+            time.sleep(wait)
+    return False
+
+
 def _report(base: str, video_id: str, waiting: list, clips: list[dict], progress, total: int) -> None:
     snapshot = []
     for j, key in waiting:
-        p = progress.get(key) or {"state": "queued"}
+        p = _progress_of(progress, key) or {"state": "queued"}
         snapshot.append({"shotId": j["shotId"], "shotNumber": j["shotNumber"], "kind": j["kind"], **p})
     for c in clips:
         snapshot.append({"shotId": c["shotId"], "kind": c["kind"],
@@ -159,10 +184,10 @@ def _sequential(wan, progress, base: str, video_id: str, jobs: list) -> tuple[li
                 break
             if not stopped and _stop_requested(base, video_id):
                 stopped = True
-                progress[stop_key] = True
+                _set_stop(progress, stop_key)
             _report(base, video_id, [(j, key) for j, key, _ in jobs if key not in done], clips, progress, len(jobs))
     except BaseException:
-        progress[stop_key] = True  # cancelled: the container stops after the clip in hand and scales down
+        _set_stop(progress, stop_key)  # cancelled or failed: the container stops after the clip in hand and scales down
         raise
     for j, key, _ in jobs:  # anything the stream never returned
         if key not in done:

@@ -9,11 +9,16 @@ Weights live in a Modal Volume from Hugging Face (CLAUDE.md rule 9); the contain
 """
 
 import io
+import os
 import time
 
 import modal
 
-APP_NAME = "projectv-wan"
+# WAN_SNAPSHOT=1 at deploy time builds a separate test app (projectv-wan-snap) that keeps the loaded model in a Modal
+# memory + GPU snapshot, so a cold start restores in seconds instead of re-loading for ~2 min (owner, 19 Nov: every
+# redo paid the full load). The live app (projectv-wan) is unchanged unless the test proves it out.
+SNAPSHOT = os.environ.get("WAN_SNAPSHOT") == "1"
+APP_NAME = "projectv-wan-snap" if SNAPSHOT else "projectv-wan"
 MODEL_ID = "Wan-AI/Wan2.2-I2V-A14B-Diffusers"
 LORA_REPO = "lightx2v/Wan2.2-Distill-Loras"
 LORA_HIGH = "wan2.2_i2v_A14b_high_noise_lora_rank64_lightx2v_4step_1022.safetensors"
@@ -75,11 +80,13 @@ progress = modal.Dict.from_name("projectv-progress", create_if_missing=True)
     volumes={"/cache": hf_cache},
     timeout=3600,
     memory=98304,          # room for the offload fallback
-    scaledown_window=30,   # CLAUDE.md rule 8 + cost (18 Nov): drafts stream in one call, so idle time is pure waste
+    scaledown_window=30,   # owner (19 Nov): back to 30 s - reloading is free (time only) and the AI Producer acts after the 2 min window anyway (rule 8)
     max_containers=4,      # parallel clips across at most 4 GPUs: faster, same total GPU time, capped spend rate
+    enable_memory_snapshot=SNAPSHOT,
+    experimental_options={"enable_gpu_snapshot": True} if SNAPSHOT else None,
 )
 class Wan:
-    @modal.enter()
+    @modal.enter(snap=SNAPSHOT)
     def load(self) -> None:
         import torch
         from diffusers import WanImageToVideoPipeline

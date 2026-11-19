@@ -129,6 +129,8 @@ public class DreamStudio {
         Map<String, Object> out = new LinkedHashMap<>(dreams.dream(id));
         out.remove("world_json");
         out.put("scout_json", out.get("scout_json") == null ? null : out.get("scout_json").toString());
+        out.put("check_json", out.get("check_json") == null ? null : out.get("check_json").toString());
+        out.put("picture_check_json", out.get("picture_check_json") == null ? null : out.get("picture_check_json").toString());
         out.put("shots", jdbc.sql("""
                         SELECT id, ord, scene, picture_prompt, motion_prompt, picture_asset_id, clip_asset_id, picture_takes,
                                clip_takes, error FROM dream_shot WHERE dream_short_id = :d ORDER BY ord

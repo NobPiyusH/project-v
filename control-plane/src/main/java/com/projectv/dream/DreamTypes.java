@@ -31,7 +31,8 @@ public final class DreamTypes {
     }
 
     /** The writer's output: one world shared by every shot, so the Short looks like one place. */
-    public record DreamWorld(String title, String world, String palette, String light, List<PlannedDreamShot> shots) {
+    /** {@code hero}: the one recurring object described exactly once, pasted into every picture so it stays the same. */
+    public record DreamWorld(String title, String world, String palette, String light, String hero, List<PlannedDreamShot> shots) {
     }
 
     /** What a step would cost before anything is spent. {@code needsApproval}: over the auto-approve amount. */
@@ -50,7 +51,7 @@ public final class DreamTypes {
     public record DreamFinishRequest(String dreamId, String look, List<DreamFinishClip> clips, int width, int height,
                                      int fps, double dissolveSec, String musicDir, String progressUrl, String musicUri,
                                      String musicName, double speed, String handheld, boolean musicEdit,
-                                     boolean ambience, boolean pacing) {
+                                     boolean ambience, boolean pacing, boolean keepOrder) {
     }
 
     /** @param smoothing "rife-laptop" | "ffmpeg" (how 16 fps became 24); {@code music} the track used, or null */
@@ -100,6 +101,19 @@ public final class DreamTypes {
     }
 
     public record SimilarShot(int shot, String like, String why) {
+    }
+
+    /** Quality check of a finished Short: Gemini watches a small copy against the owner's checklist. */
+    /** {@code pictureUris} set = check the stills before clips; otherwise {@code videoUri} = the finished Short. */
+    public record DreamCheckRequest(String dreamId, String videoUri, String brief, String model, List<String> pictureUris) {
+    }
+
+    public record CheckIssue(int shot, double atSec, String problem, String fix) {
+    }
+
+    /** {@code overall} 0 and {@code error} set when the check could not run (it never fails the Short). */
+    public record DreamCheckResult(Map<String, Integer> scores, int overall, List<CheckIssue> issues, String summary,
+                                   String model, com.projectv.media.MediaTypes.Usage usage, String error) {
     }
 
     /** What the workflow shows the dashboard (Temporal query). */
