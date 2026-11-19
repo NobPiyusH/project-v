@@ -125,6 +125,7 @@ public class DreamStudio {
                         """).query().listOfRows();
     }
 
+    @SuppressWarnings("unchecked")
     public Map<String, Object> detail(UUID id) {
         Map<String, Object> out = new LinkedHashMap<>(dreams.dream(id));
         out.remove("world_json");
@@ -143,7 +144,13 @@ public class DreamStudio {
                         SELECT stage, capability, chosen_provider_id, reason_text, candidates_json::text AS candidates, created_at
                         FROM routing_decision WHERE dream_short_id = :d ORDER BY created_at
                         """).param("d", id).query().listOfRows());
-        out.put("events", dreams.evidence().events(id));
+        var events = dreams.evidence().events(id);
+        out.put("events", events);
+        List<DreamTimeline.Event> parsed = events.stream().map(this::event).toList();
+        List<DreamTimeline.Cost> costs = ((List<Map<String, Object>>) out.get("costs")).stream()
+                .map(c -> new DreamTimeline.Cost(((Number) c.get("amount_inr")).doubleValue(), instant(c.get("ts")))).toList();
+        out.put("timeline", DreamTimeline.steps(parsed, costs, java.time.Instant.now(), typicalStepTimes(id)));
+        out.put("log", DreamTimeline.log(parsed));
         out.put("producer", producer.decisions(id));
         out.put("metrics", dreams.evidence().metrics(id));
         var progress = clipProgress.get(id);
@@ -180,10 +187,26 @@ public class DreamStudio {
         dreams.evidence().event(id, null, "retry", null, null, null);
     }
 
+    /**
+     * The owner's Cancel. A Short whose workflow has already ended (a second click, or it finished meanwhile) is not an
+     * error: Temporal answers NOT_FOUND for a signal to a closed workflow, which used to surface as HTTP 500.
+     */
     public void cancel(UUID id) {
+        Map<String, Object> d = dreams.dream(id);
+        boolean clipRunning = "CLIPS".equals(d.get("step")) && "RUNNING".equals(d.get("status"));
         clipProgress.requestStop(id);
-        stub(id).cancel();
-        dreams.evidence().event(id, null, "cancel", null, null, null);
+        try {
+            stub(id).cancel();
+        } catch (io.temporal.client.WorkflowNotFoundException e) {
+            jdbc.sql("""
+                            UPDATE dream_short SET status = 'CANCELLED', updated_at = now()
+                            WHERE id = :id AND status NOT IN ('COMPLETED', 'CANCELLED')
+                            """).param("id", id).update();
+            dreams.evidence().event(id, (String) d.get("step"), "cancel", null, null, Map.of("alreadyEnded", true));
+            return;
+        }
+        dreams.evidence().event(id, (String) d.get("step"), "cancel", null, null,
+                clipRunning ? Map.of("afterClip", true) : null);
     }
 
     /** The owner's Stop: clips in flight stop after the one being rendered (rule 8). */
@@ -214,6 +237,37 @@ public class DreamStudio {
 
     public List<Map<String, Object>> calibration() {
         return dreams.evidence().calibration();
+    }
+
+    /** Median work time per step over the last 20 completed Shorts (from their status events). */
+    private Map<String, Long> typicalStepTimes(UUID except) {
+        Map<Object, List<DreamTimeline.Event>> byShort = new LinkedHashMap<>();
+        jdbc.sql("""
+                        SELECT dream_short_id, step, kind, notes, data::text AS data, created_at FROM dream_event
+                        WHERE kind = 'status' AND dream_short_id IN (
+                            SELECT id FROM dream_short WHERE status = 'COMPLETED' AND id <> :d ORDER BY updated_at DESC LIMIT 20)
+                        ORDER BY created_at
+                        """).param("d", except).query().listOfRows()
+                .forEach(r -> byShort.computeIfAbsent(r.get("dream_short_id"), k -> new java.util.ArrayList<>()).add(event(r)));
+        return DreamTimeline.typical(byShort.values().stream().map(DreamTimeline::finishedWork).toList());
+    }
+
+    private DreamTimeline.Event event(Map<String, Object> r) {
+        Object data = r.get("data");
+        Map<String, Object> parsed = data == null ? null : json.readValue(data.toString(),
+                new tools.jackson.core.type.TypeReference<Map<String, Object>>() {
+                });
+        return new DreamTimeline.Event((String) r.get("step"), (String) r.get("kind"), (String) r.get("notes"), parsed,
+                instant(r.get("created_at")));
+    }
+
+    private static java.time.Instant instant(Object ts) {
+        return switch (ts) {
+            case java.sql.Timestamp t -> t.toInstant();
+            case java.time.OffsetDateTime o -> o.toInstant();
+            case java.time.Instant i -> i;
+            default -> java.time.Instant.parse(ts.toString());
+        };
     }
 
     private DreamShortWorkflow stub(UUID id) {

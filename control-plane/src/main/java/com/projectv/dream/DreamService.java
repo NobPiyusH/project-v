@@ -1074,6 +1074,8 @@ public class DreamService {
                         UPDATE dream_short SET step = :step, status = :st, message = COALESCE(:m, message), updated_at = now()
                         WHERE id = :id
                         """).param("step", step).param("st", status).param("m", message).param("id", id).update();
+        // Every status change is kept: the dashboard's step timeline and typical step times come from these.
+        evidence.event(id, step, "status", null, message, Map.of("status", status));
         if ("FAILED_WAITING".equals(status)) {
             evidence.event(id, step, "failure", null, message, null);
         }
