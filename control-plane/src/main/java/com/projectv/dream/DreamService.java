@@ -80,7 +80,8 @@ public class DreamService {
      * glides like a drone or dolly; these words pull it towards a phone in someone's hand. Every realistic look's
      * camera prompt ends with it.
      */
-    static final String HUMAN_CAMERA = "filmed on a phone held in a person's hand: small natural sway, nothing gliding; "
+    static final String HUMAN_CAMERA = "first-person view, as if through the eyes of someone holding a phone; nobody is ever visible in "
+            + "the frame (19 Nov: 'a person' in the prompt made Wan add a walking woman): small natural sway, nothing gliding; "
             + "no drone, no dolly, no crane, no zoom, no flying camera";
 
     /** Small text comes out garbled; signs stay big and face the camera. */
@@ -101,7 +102,8 @@ public class DreamService {
             + "scale and light, small real-world imperfections; never like a 3D render, a game or an obvious AI image. "
             // 19 Nov test: the writer asked for drone, dolly and orbit moves and a Coca-Cola logo.
             + "Every camera move is something a person holding a phone can do: stand still, take a step, walk slowly, "
-            + "turn their head, crouch; never a drone, dolly, crane, orbit, time-lapse or zoom. No brand names or logos.";
+            + "turn their head, crouch; never a drone, dolly, crane, orbit, time-lapse or zoom. The person filming is never seen and "
+            + "no people appear in any shot. No brand names or logos.";
 
     /** Ends every picture prompt of the realistic looks: what makes a still read as a real photo, not an AI image. */
     static final String REAL_PHOTO = "real photograph, natural light falloff, real-world wear and small imperfections "
@@ -123,7 +125,7 @@ public class DreamService {
                             + "colours, golden hour, blue hour or night sky with glowing clouds, neon or warm lamp glow, wet "
                             + "reflections, high detail, cinematic, vertical composition with the object in the lower middle, "
                             + "no people, " + SIGNS + ", " + REAL_PHOTO,
-                    "a person stands still looking at the object, maybe one slow step closer; the camera barely moves; the "
+                    "first-person view: we stand still looking at the object, maybe one slow step closer; the camera barely moves; the "
                             + "scene itself is alive: clouds drift across the sky, neon and lamps flicker and pulse softly, grass "
                             + "and flowers sway in the breeze, water ripples; the object stays still; no cuts, no people; "
                             + HUMAN_CAMERA,
@@ -141,7 +143,7 @@ public class DreamService {
                     "phone camera photo, first-person point of view at eye level, wide lens, photorealistic, sharp, bright "
                             + "fluorescent and daylight, pastel pink mint and sky-blue colours, glossy wet tiled floors with "
                             + "reflections, liminal space, no people, " + SIGNS + ", " + REAL_PHOTO,
-                    "a person walks slowly forward at a relaxed pace, gentle up-and-down step bob, glancing a little left "
+                    "first-person view: we walk slowly forward at a relaxed pace, gentle up-and-down step bob, glancing a little left "
                             + "and right; water ripples and lights shimmer; continuous, no cuts, no people in view; " + HUMAN_CAMERA,
                     "Invent %d rooms or corridors walked through one after another, each a different ordinary place with "
                             + "its own impossible thing; the walk keeps going forward from shot to shot.",

@@ -213,6 +213,7 @@ class DreamServicePersistenceTest {
         assertEquals(5 * 57 / 16.0 / 0.7 + 1, dreams.shortSeconds(5, lonely), 0.01); // slowed to 70% on the laptop
         assertEquals(4 * 81 / 16.0 / 0.75 - 3 * 0.35 + 1, dreams.shortSeconds(4, walk), 0.01);
         assertTrue(lonely.motionStyle().contains("no drone") && lonely.pictureStyle().contains("no small text"));
+        assertTrue(lonely.motionStyle().contains("nobody is ever visible") && !lonely.motionStyle().contains("a person "), "no person in the camera words");
         assertEquals("stand", lonely.handheld());
         assertTrue(lonely.structure().formatted(5).contains("DIFFERENT place"));
         assertEquals(lonely, DreamService.look("nope"), "unknown looks fall back to the default");
