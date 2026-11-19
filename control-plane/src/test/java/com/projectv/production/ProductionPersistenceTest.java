@@ -132,7 +132,7 @@ class ProductionPersistenceTest {
     @Test
     void allMigrationsApplyAndLicencesAreSeeded() {
         assertEquals(12, jdbc.sql("SELECT count(*) FROM licence").query(Integer.class).single()); // main 11 + owner music (V22)
-        assertEquals(30, jdbc.sql("SELECT count(*) FROM flyway_schema_history WHERE success").query(Integer.class).single()); // main V1-V19 + Dream Shorts V20-V25 + autopilot V26 + Dream check V27 + Dream lessons V28 + stop rule V29 + Scout cache V30
+        assertEquals(31, jdbc.sql("SELECT count(*) FROM flyway_schema_history WHERE success").query(Integer.class).single()); // main V1-V19 + Dream Shorts V20-V25 + autopilot V26 + Dream check V27 + Dream lessons V28 + stop rule V29 + Scout cache V30 + GPU watchdog V31
     }
 
     @Test
