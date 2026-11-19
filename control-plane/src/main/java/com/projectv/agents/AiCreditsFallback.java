@@ -6,6 +6,7 @@ import com.projectv.ledger.Pricing;
 import com.projectv.routing.Router;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -42,6 +43,7 @@ public class AiCreditsFallback {
     private final Router router;
     private final boolean enabled;
 
+    @Autowired
     public AiCreditsFallback(CostLedger ledger, Pricing pricing, BudgetGuard budget, Router router,
                              @Value("${projectv.aicredits.fallback-enabled:false}") boolean enabled,
                              @Value("${projectv.aicredits.api-key:}") String apiKey,

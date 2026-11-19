@@ -158,4 +158,19 @@ class AiCreditsFallbackTest {
                 OUTAGE, "s", "u", String.class));
         verify(chat, never()).call(anyString(), anyString(), anyString(), any());
     }
+
+    @Test
+    void springCanCreateBothBeans() {
+        // 19 Nov 2026: a second (test) constructor without @Autowired stopped the control plane from starting.
+        try (var ctx = new org.springframework.context.annotation.AnnotationConfigApplicationContext()) {
+            ctx.registerBean(CostLedger.class, () -> ledger);
+            ctx.registerBean(BudgetGuard.class, () -> budget);
+            ctx.registerBean(Router.class, () -> router);
+            ctx.registerBean(Pricing.class, () -> pricing);
+            ctx.register(OpenAiCompatChat.class, AiCreditsFallback.class);
+            ctx.refresh();
+            assertFalse(ctx.getBean(AiCreditsFallback.class).active(), "off by default");
+            ctx.getBean(OpenAiCompatChat.class);
+        }
+    }
 }

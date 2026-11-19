@@ -1,6 +1,7 @@
 package com.projectv.agents;
 
 import org.springframework.ai.converter.BeanOutputConverter;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
@@ -29,6 +30,7 @@ public class OpenAiCompatChat {
     private final java.util.Map<String, Provider> providers;
     private final RestClient http;
 
+    @Autowired
     public OpenAiCompatChat(@Value("${projectv.nvidia.api-key:}") String nvidiaKey,
                             @Value("${projectv.nvidia.base-url:https://integrate.api.nvidia.com/v1}") String nvidiaUrl,
                             @Value("${projectv.groq.api-key:}") String groqKey,
