@@ -80,7 +80,7 @@ progress = modal.Dict.from_name("projectv-progress", create_if_missing=True)
     volumes={"/cache": hf_cache},
     timeout=3600,
     memory=98304,          # room for the offload fallback
-    scaledown_window=30,   # CLAUDE.md rule 8 + cost (18 Nov): drafts stream in one call, so idle time is pure waste
+    scaledown_window=120,  # owner (19 Nov): stay warm 2 min so a quick redo (owner or AI Producer) skips the ~2.5 min load, then shut down (rule 8)
     max_containers=4,      # parallel clips across at most 4 GPUs: faster, same total GPU time, capped spend rate
     enable_memory_snapshot=SNAPSHOT,
     experimental_options={"enable_gpu_snapshot": True} if SNAPSHOT else None,
