@@ -68,6 +68,19 @@ public class BudgetGuard {
         return pricing.claudeMonthlyCapInr().subtract(claudeSpentThisMonth()).compareTo(estimateInr) >= 0;
     }
 
+    // ---- AICredits: errors-only text fallback with its own all-time cap (the prepaid wallet)
+
+    public static final String AICREDITS = "aicredits";
+
+    public BigDecimal aicreditsSpent() {
+        return jdbc.sql("SELECT COALESCE(sum(amount_inr), 0) FROM cost_entry WHERE provider_id = :p")
+                .param("p", AICREDITS).query(BigDecimal.class).single();
+    }
+
+    public boolean canSpendAicredits(BigDecimal estimateInr) {
+        return pricing.aicreditsCapInr().subtract(aicreditsSpent()).compareTo(estimateInr) >= 0;
+    }
+
     // ---- GPU (Modal): its own monthly cap, the free credit by default (owner rule: ask before spending money)
 
     public static final String GPU_PREFIX = "modal_";
