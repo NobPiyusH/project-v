@@ -26,6 +26,14 @@ export interface DreamDetail extends DreamSummary {
   view: { step: string | null; status: string; message: string | null; modes: Record<DreamStep, DreamMode>; deadline: string | null } | null
   events: { step: string | null; kind: string; shot_ids: string | null; notes: string | null; data: string | null; created_at: string }[]
   metrics: { asset_id: string; look: string | null; metrics: string; created_at: string }[]
+  timeline: DreamStepTime[]
+  log: { at: string; text: string }[]
+}
+
+/** One step of the Short: work time counts only while it runs (not waiting for the owner); typical = median of past Shorts. */
+export interface DreamStepTime {
+  step: DreamStep; status: string; startedAt: string | null; finishedAt: string | null; workSeconds: number
+  costInr: number; typicalSeconds: number | null
 }
 
 export interface NewDream {
