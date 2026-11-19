@@ -63,4 +63,16 @@ export const dreamApi = {
   rerun: (id: string, from: DreamStep) => call<void>('POST', `/${id}/rerun/${from}`),
   stop: (id: string) => call<void>('POST', `/${id}/stop`),
   cancel: (id: string) => call<void>('POST', `/${id}/cancel`),
+  review: (id: string, shotId: string | null, rating: number, note: string) =>
+    call<{ id: string }>('POST', `/${id}/reviews`, { shotId, rating, note }),
+  lessons: () => call<DreamLesson[]>('GET', '/lessons'),
+  lesson: (lessonId: string, l: { rule?: string; target?: LessonTarget; status?: LessonStatus }) =>
+    call<void>('POST', `/lessons/${lessonId}`, l),
+}
+
+export type LessonTarget = 'WRITER' | 'PICTURE' | 'ALL'
+export type LessonStatus = 'PROPOSED' | 'ACTIVE' | 'RETIRED'
+export interface DreamLesson {
+  id: string; rule: string; target: LessonTarget; status: LessonStatus; created_at: string
+  rating: number | null; dream_short_id: string | null; shot_ord: number | null
 }

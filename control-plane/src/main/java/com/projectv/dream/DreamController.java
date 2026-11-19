@@ -25,10 +25,41 @@ public class DreamController {
     public record ModeBody(String mode) {
     }
 
-    private final DreamStudio studio;
+    public record ReviewBody(String shotId, int rating, String note) {
+    }
 
-    public DreamController(DreamStudio studio) {
+    public record LessonBody(String rule, String target, String status) {
+    }
+
+    private final DreamStudio studio;
+    private final DreamLessons lessons;
+
+    public DreamController(DreamStudio studio, DreamLessons lessons) {
         this.studio = studio;
+        this.lessons = lessons;
+    }
+
+    /** The owner rates a clip (shotId set) or the whole Short; a note becomes a proposed lesson. */
+    @PostMapping("/{id}/reviews")
+    public Map<String, Object> review(@PathVariable UUID id, @RequestBody ReviewBody body) {
+        UUID shot = body.shotId() == null || body.shotId().isBlank() ? null : UUID.fromString(body.shotId());
+        return Map.of("id", lessons.review(id, shot, body.rating(), body.note()));
+    }
+
+    @GetMapping("/{id}/reviews")
+    public List<Map<String, Object>> reviews(@PathVariable UUID id) {
+        return lessons.reviews(id);
+    }
+
+    @GetMapping("/lessons")
+    public List<Map<String, Object>> lessons() {
+        return lessons.lessons();
+    }
+
+    /** Edit, approve (ACTIVE) or retire a lesson. */
+    @PostMapping("/lessons/{lessonId}")
+    public void lesson(@PathVariable UUID lessonId, @RequestBody LessonBody body) {
+        lessons.update(lessonId, body.rule(), body.target(), body.status());
     }
 
     @GetMapping("/looks")

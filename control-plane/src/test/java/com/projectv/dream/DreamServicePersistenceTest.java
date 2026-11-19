@@ -283,6 +283,27 @@ class DreamServicePersistenceTest {
     }
 
     @Test
+    void aReviewNoteBecomesALessonThatGoesIntoThePromptsOnlyOnceApproved() {
+        DreamLessons lessons = new DreamLessons(jdbc);
+        dreams.setLessons(lessons);
+        lessons.review(dream, shot1, 2, "a man appeared filming with a phone");
+        lessons.review(dream, null, 4, "  ");
+        assertEquals(2, count("SELECT count(*) FROM dream_review WHERE dream_short_id = :d"));
+        var mine = lessons.lessons().stream().filter(l -> dream.equals(l.get("dream_short_id"))).toList();
+        assertEquals(1, mine.size(), "only a note becomes a lesson");
+        assertEquals("WRITER", mine.getFirst().get("target"));
+        UUID lesson = (UUID) mine.getFirst().get("id");
+        assertTrue(!lessons.forPrompt("WRITER").contains("a man appeared"), "proposed lessons stay out of the prompts");
+        lessons.update(lesson, "never describe anyone filming", null, "ACTIVE");
+        assertTrue(lessons.forPrompt("WRITER").contains("never describe anyone filming"));
+        assertTrue(!lessons.forPrompt("PICTURE").contains("never describe anyone filming"), "writer rules stay with the writer");
+        lessons.update(lesson, null, null, "RETIRED");
+        assertTrue(!lessons.forPrompt("WRITER").contains("never describe anyone filming"));
+        assertThrows(IllegalArgumentException.class, () -> lessons.review(dream, null, 6, "x"));
+        dreams.setLessons(null);
+    }
+
+    @Test
     void aBatchWithNoClipsFailsSoTheStepWaitsForTheOwner() {
         jdbc.sql("UPDATE dream_shot SET picture_asset_id = NULL").update();
         assertThrows(IllegalStateException.class, () -> dreams.clipRequest(dream, null));

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { assetUrl } from '../api'
-import { DREAM_STEPS, dreamApi, type DreamDetail, type DreamMode, type DreamStep, type DreamSummary } from '../dreamApi'
+import { DREAM_STEPS, dreamApi, type DreamDetail, type DreamLesson, type DreamMode, type DreamStep, type DreamSummary, type LessonTarget } from '../dreamApi'
 import { usePoll } from '../hooks'
 
 type EditKey = 'musicEdit' | 'ambience' | 'pacing'
@@ -87,6 +87,7 @@ function DreamHome() {
           <button className="primary" disabled={busy} onClick={() => void start()}>Start</button>
         </div>
       </section>
+      <Lessons />
       <section className="card">
         <div className="card-head"><h2>Your Dream Shorts</h2></div>
         {error && <p className="error">{error}</p>}
@@ -221,12 +222,15 @@ function DreamView({ id }: { id: string }) {
               {progress.get(s.id) && progress.get(s.id) !== 'done' && <span className="badge b-info">{progress.get(s.id)}</span>}
               <p className="small" style={{ margin: '6px 0 0' }}>{s.scene}</p>
               {s.error && <p className="error small">{s.error}</p>}
+              {s.clip_asset_id && <Review dreamId={d.id} shotId={s.id} />}
             </div>))}
         </div>
       </section>
 
       <Check json={d.check_json} title="Quality check" />
       <Check json={d.picture_check_json} title="Picture check (before clips)" />
+      {d.final_asset_id && <section className="card"><div className="card-head"><h2>Your review of this Short</h2></div>
+        <Review dreamId={d.id} shotId={null} /></section>}
 
       <Scout d={d} onPick={(n) => void act(() => dreamApi.pickAngle(id, n))} />
 
@@ -343,6 +347,57 @@ function Check({ json, title }: { json: string | null; title: string }) {
         <li key={k}><strong>{i.shot > 0 ? `Shot ${i.shot}` : 'Whole Short'}{i.atSec ? ` at ${i.atSec.toFixed(1)} s` : ''}:</strong>{' '}
           {i.problem} <span className="muted">Fix: {i.fix}</span></li>))}</ul>}
       <div className="small muted">{Object.entries(c.scores).map(([k, v]) => `${CHECK_LABEL[k] ?? k} ${v}`).join(' · ')}</div>
+    </section>
+  )
+}
+
+/** Learning loop: the owner rates a clip or the Short; a note becomes a proposed lesson in the Lessons list. */
+function Review({ dreamId, shotId }: { dreamId: string; shotId: string | null }) {
+  const [rating, setRating] = useState(0)
+  const [note, setNote] = useState('')
+  const [saved, setSaved] = useState('')
+  const save = () => dreamApi.review(dreamId, shotId, rating, note)
+    .then(() => { setSaved(note.trim() ? 'Saved. Your note is now a proposed lesson.' : 'Saved.'); setNote('') })
+    .catch((e: Error) => setSaved(e.message))
+  return (
+    <div className="small" style={{ marginTop: 6 }}>
+      <div className="row" style={{ gap: 2 }} role="radiogroup" aria-label="Rating">
+        {[1, 2, 3, 4, 5].map((n) => <button key={n} type="button" aria-label={`${n} of 5`} aria-checked={rating === n} role="radio"
+          onClick={() => setRating(n)} style={{ padding: '0 4px', color: n <= rating ? 'var(--accent)' : 'var(--muted)' }}>★</button>)}
+      </div>
+      <textarea rows={2} value={note} placeholder={shotId ? 'What was wrong or right in this clip?' : 'What should the next Shorts do differently?'}
+        aria-label="Review note" onChange={(e) => setNote(e.target.value)} style={{ width: '100%', marginTop: 4 }} />
+      <div className="row"><button disabled={rating === 0} onClick={() => void save()}>Save review</button>
+        {saved && <span className="muted">{saved}</span>}</div>
+    </div>
+  )
+}
+
+const TARGET_LABEL: Record<LessonTarget, string> = { WRITER: 'Writer and camera', PICTURE: 'Pictures', ALL: 'Everything' }
+
+/** Lessons from the owner's reviews: proposed ones wait for approval; only active ones go into the prompts. */
+function Lessons() {
+  const { data, refresh } = usePoll(() => dreamApi.lessons(), 30000)
+  const [edits, setEdits] = useState<Record<string, string>>({})
+  if (!data || data.length === 0) return null
+  const set = (l: DreamLesson, change: Parameters<typeof dreamApi.lesson>[1]) => void dreamApi.lesson(l.id, change).then(refresh)
+  return (
+    <section className="card">
+      <div className="card-head"><h2>Lessons</h2><span className="muted small">Only active lessons go into the next Shorts</span></div>
+      <table className="small" style={{ width: '100%' }}><tbody>
+        {data.map((l) => (
+          <tr key={l.id}>
+            <td><span className={`badge ${l.status === 'ACTIVE' ? 'b-ok' : 'b-info'}`}>{l.status === 'ACTIVE' ? 'Active' : 'Proposed'}</span></td>
+            <td style={{ width: '60%' }}><input value={edits[l.id] ?? l.rule} aria-label="Lesson rule" style={{ width: '100%' }}
+              onChange={(e) => setEdits({ ...edits, [l.id]: e.target.value })}
+              onBlur={() => edits[l.id] !== undefined && edits[l.id] !== l.rule && set(l, { rule: edits[l.id] })} />
+              {l.shot_ord != null && <span className="muted"> from clip {l.shot_ord + 1}{l.rating ? `, rated ${l.rating}/5` : ''}</span>}</td>
+            <td><select value={l.target} aria-label="Applies to" onChange={(e) => set(l, { target: e.target.value as LessonTarget })}>
+              {(Object.keys(TARGET_LABEL) as LessonTarget[]).map((t) => <option key={t} value={t}>{TARGET_LABEL[t]}</option>)}</select></td>
+            <td className="row">{l.status !== 'ACTIVE' && <button className="primary" onClick={() => set(l, { status: 'ACTIVE' })}>Approve</button>}
+              <button onClick={() => set(l, { status: 'RETIRED' })}>Retire</button></td>
+          </tr>))}
+      </tbody></table>
     </section>
   )
 }

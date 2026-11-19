@@ -265,6 +265,18 @@ public class DreamService {
 
     // ------------------------------------------------------------------------------------------- WRITE
 
+    private DreamLessons lessons; // optional so hand-built services in tests work without it
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setLessons(DreamLessons lessons) {
+        this.lessons = lessons;
+    }
+
+    /** The owner's active lessons for a prompt (learning loop, phase 4), or "". */
+    private String lessons(String target) {
+        return lessons == null ? "" : lessons.forPrompt(target);
+    }
+
     @Transactional
     public String writeShots(UUID id, String notes) {
         Map<String, Object> d = dream(id);
@@ -290,7 +302,7 @@ public class DreamService {
                 round lamp under the roof"; empty if no object recurs), never mention the hero's look differently in a scene,
                 "shots": [{"scene": what this shot shows (one or two sentences, concrete), "motion": the camera move and
                 the small motion inside the scene}]} with exactly %d shots.
-                """.formatted(structure, FEEL, look.brief(), count);
+                """.formatted(structure, FEEL, look.brief(), count) + lessons("WRITER");
         String user = "Idea: " + d.get("idea") + (notes == null || notes.isBlank() ? "" : "\nOwner's notes for this rewrite: " + notes)
                 + (scouted == null ? "" : scouted.forWriter());
         java.time.Instant since = java.time.Instant.now();
@@ -507,7 +519,7 @@ public class DreamService {
             if (wanted == null ? s.get("picture_asset_id") != null : !wanted.contains(shotId)) {
                 continue;
             }
-            String prompt = (String) s.get("picture_prompt");
+            String prompt = (String) s.get("picture_prompt") + lessons("PICTURE");
             if (notes != null && !notes.isBlank()) {
                 prompt = prompt + " Owner's notes: " + notes.strip();
             }
@@ -908,6 +920,7 @@ public class DreamService {
 
     private String checkBrief(UUID id, Map<String, Object> d) {
         StringBuilder brief = new StringBuilder("Look: " + look((String) d.get("look")).brief());
+        brief.append(lessons("WRITER")).append(lessons("PICTURE"));
         brief.append("\nTitle: ").append(Objects.toString(d.get("title"), "")).append("\nIdea: ").append(d.get("idea"));
         Scouted s = scouted(d);
         if (s != null && s.chosen() != null) {
