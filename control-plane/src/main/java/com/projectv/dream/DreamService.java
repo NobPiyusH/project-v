@@ -261,6 +261,13 @@ public class DreamService {
         Map<String, Object> d = dream(id);
         Look look = look((String) d.get("look"));
         int count = ((Number) d.get("shot_count")).intValue();
+        Scouted scouted = scouted(d);
+        // The owner's chosen Scout angle replaces the look's shot structure (19 Nov: as a user-message note it lost
+        // to "a different place every shot" twice). The look still sets the style.
+        String structure = scouted != null && scouted.chosen() != null
+                ? ("Invent %d shots that are consecutive moments of ONE idea the owner chose, in the same place, flowing "
+                + "into each other: %s - %s").formatted(count, scouted.chosen().title(), scouted.chosen().idea())
+                : look.structure().formatted(count);
         String system = """
                 You are the writer of a short, wordless, music-led vertical video (YouTube Shorts / Reels) for a channel
                 about dreams and impossible places. %s Every shot must be a fresh, specific image (not generic).
@@ -270,8 +277,7 @@ public class DreamService {
                 objects, scale, mood), "palette": the exact colour palette, "light": the light and atmosphere,
                 "shots": [{"scene": what this shot shows (one or two sentences, concrete), "motion": the camera move and
                 the small motion inside the scene}]} with exactly %d shots.
-                """.formatted(look.structure().formatted(count), FEEL, look.brief(), count);
-        Scouted scouted = scouted(d);
+                """.formatted(structure, FEEL, look.brief(), count);
         String user = "Idea: " + d.get("idea") + (notes == null || notes.isBlank() ? "" : "\nOwner's notes for this rewrite: " + notes)
                 + (scouted == null ? "" : scouted.forWriter());
         java.time.Instant since = java.time.Instant.now();
@@ -310,6 +316,12 @@ public class DreamService {
 
     /** What the Scout found and the angle the owner picked, as the writer will read it. */
     record Scouted(DreamTypes.ScoutBrief brief, List<DreamTypes.ScoutVideo> videos, int angle) {
+        /** The angle the owner picked (1-based; out of range falls back to the nearest), or null when there are none. */
+        DreamTypes.ScoutAngle chosen() {
+            return brief.angles() == null || brief.angles().isEmpty() ? null
+                    : brief.angles().get(Math.min(Math.max(angle, 1), brief.angles().size()) - 1);
+        }
+
         String forWriter() {
             StringBuilder s = new StringBuilder("\n\nWhat already exists (make this Short clearly different):");
             if (brief.cliches() != null && !brief.cliches().isEmpty()) {
