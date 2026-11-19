@@ -33,8 +33,14 @@ class Issue(BaseModel):
     fix: str  # what to redo, in the owner's words (e.g. "redo clip 3 with no person")
 
 
+class Score(BaseModel):
+    key: str  # checklist key
+    score: int  # 1..10
+
+
 class Report(BaseModel):
-    scores: dict[str, int]  # checklist key -> 1..10
+    # A list, not dict[str, int]: the Gemini Developer API rejects schemas with additionalProperties.
+    scores: list[Score]
     overall: int  # 1..10
     issues: list[Issue]
     summary: str  # one sentence for the owner
@@ -54,7 +60,7 @@ def prompt(brief: str) -> str:
             "garbled sign or one melting object is a real problem. For each problem say which shot (1-based, in play "
             "order), roughly when (seconds), what is wrong, and the smallest fix (e.g. 'redo clip 3', 'redo picture 2 "
             "with notes: no sign').\n\nWhat this Short is meant to be:\n" + brief + "\n\nChecklist (score each 1-10):\n"
-            + items + "\n\nAnswer as JSON: scores {key: 1-10}, overall (1-10), issues [{shot, atSec, problem, fix}], "
+            + items + "\n\nAnswer as JSON: scores [{key, score 1-10}], overall (1-10), issues [{shot, atSec, problem, fix}], "
             "summary (one sentence).")
 
 
@@ -69,7 +75,7 @@ def picture_prompt(brief: str) -> str:
             "fix; after animation they cost a GPU run. Be strict about people, garbled or branded text, objects that "
             "change between pictures when they should be the same, and anything that looks like a 3D render.\n\n"
             "What this Short is meant to be:\n" + brief + "\n\nChecklist (score each 1-10):\n" + items
-            + "\n\nAnswer as JSON: scores {key: 1-10}, overall (1-10), issues [{shot, atSec (0), problem, fix}] where fix "
+            + "\n\nAnswer as JSON: scores [{key, score 1-10}], overall (1-10), issues [{shot, atSec (0), problem, fix}] where fix "
             "is e.g. 'redo picture 2 with notes: same green machine', summary (one sentence).")
 
 
@@ -94,7 +100,7 @@ def check(req: dict, tmp: Path) -> dict:
     used, r = with_models(req.get("model"), call, what="Dream Short check", default="gemini-3.6-flash")
     rep = r.parsed if isinstance(r.parsed, Report) else Report.model_validate_json(r.text)
     out = rep.model_dump()
-    out["scores"] = {k: max(1, min(10, int(v))) for k, v in out["scores"].items() if k in CHECKLIST}
+    out["scores"] = {s["key"]: max(1, min(10, int(s["score"]))) for s in out["scores"] if s["key"] in CHECKLIST}
     out["overall"] = max(1, min(10, int(out["overall"])))
     log.info("Dream Short %s check: %d/10, %d issues (%s)", req["dreamId"], out["overall"], len(out["issues"]), used)
     return {**out, "model": used, "usage": usage_dict(r), "error": None}
