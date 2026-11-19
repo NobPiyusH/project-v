@@ -262,7 +262,7 @@ class DreamServicePersistenceTest {
                            "angles": [{"title": "One", "idea": "first", "why": "a"}, {"title": "Dawn rain", "idea": "a phone box at dawn in rain", "why": "b"}]}}
                 """).update();
         String forWriter = dreams.scouted(dreams.dream(dream)).forWriter();
-        assertTrue(forWriter.contains("Follow this angle: Dawn rain - a phone box at dawn in rain"), forWriter);
+        assertTrue(forWriter.contains("build EVERY shot around it") && forWriter.contains("Dawn rain - a phone box at dawn in rain"), forWriter);
         assertTrue(forWriter.contains("Avoid these clichés: neon kiosk at dusk") && forWriter.contains("Do not copy"), forWriter);
         assertTrue(dreams.scoutWanted(dream), "the Scout is on by default");
     }

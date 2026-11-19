@@ -98,7 +98,10 @@ public class DreamService {
      */
     static final String FEEL = "Feeling: warm, nostalgic, feel-good, calm wonder; beautiful and a little strange, never "
             + "scary, sad or gloomy. It must look REAL, like footage a person actually filmed: believable places, true-to-life "
-            + "scale and light, small real-world imperfections; never like a 3D render, a game or an obvious AI image.";
+            + "scale and light, small real-world imperfections; never like a 3D render, a game or an obvious AI image. "
+            // 19 Nov test: the writer asked for drone, dolly and orbit moves and a Coca-Cola logo.
+            + "Every camera move is something a person holding a phone can do: stand still, take a step, walk slowly, "
+            + "turn their head, crouch; never a drone, dolly, crane, orbit, time-lapse or zoom. No brand names or logos.";
 
     /** Ends every picture prompt of the realistic looks: what makes a still read as a real photo, not an AI image. */
     static final String REAL_PHOTO = "real photograph, natural light falloff, real-world wear and small imperfections "
@@ -314,7 +317,10 @@ public class DreamService {
             }
             if (brief.angles() != null && !brief.angles().isEmpty()) {
                 DreamTypes.ScoutAngle a = brief.angles().get(Math.min(Math.max(angle, 1), brief.angles().size()) - 1);
-                s.append("\nFollow this angle: ").append(a.title()).append(" - ").append(a.idea());
+                // The owner's chosen angle shapes the WHOLE Short; where it conflicts with the look's usual structure
+                // (e.g. Lonely object's "a different place every shot"), the angle wins (19 Nov test).
+                s.append("\nThe owner chose this angle; build EVERY shot around it, as consecutive moments of it (it overrides ")
+                        .append("the look's usual shot structure where they conflict): ").append(a.title()).append(" - ").append(a.idea());
             }
             List<String> seen = videos.stream().map(DreamTypes.ScoutVideo::shows).filter(Objects::nonNull).limit(8).toList();
             if (!seen.isEmpty()) {
