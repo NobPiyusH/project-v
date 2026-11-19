@@ -180,9 +180,16 @@ public final class MediaTypes {
 
     /** @param estimateInr GPU estimate for the whole batch incl. container start-up (shown to the owner first) */
     /** @param containers GPU containers to use: 1 = render in turn on one GPU (one start-up), else up to 4 in parallel */
+    /** @param holdSeconds keep the one GPU warm this long after the batch (the AI Producer may redo by itself), 0 = no */
     public record ClipRequest(String videoId, String modalApp, String modalClass, String progressUrl, List<ClipJob> jobs,
                               int containers, double estimateGpuSeconds, java.math.BigDecimal estimateInr,
-                              String provider, String resolution, String omniModel) {
+                              String provider, String resolution, String omniModel, int holdSeconds) {
+        public ClipRequest(String videoId, String modalApp, String modalClass, String progressUrl, List<ClipJob> jobs,
+                           int containers, double estimateGpuSeconds, java.math.BigDecimal estimateInr,
+                           String provider, String resolution, String omniModel) {
+            this(videoId, modalApp, modalClass, progressUrl, jobs, containers, estimateGpuSeconds, estimateInr, provider,
+                    resolution, omniModel, 0);
+        }
     }
 
     /** One finished (or failed / stopped) clip. {@code gpuSeconds} is render time on the GPU. */

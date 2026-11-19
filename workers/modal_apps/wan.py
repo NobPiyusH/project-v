@@ -5,7 +5,10 @@ Pre-fetch:  uv run modal run workers/modal_apps/wan.py::download   (CPU only: no
 
 Efficiency: the lightx2v 4-step distillation LoRAs (Apache-2.0) cut sampling from ~30-40 steps to 4. Both modes run in
 the same container (the LoRAs are switched on/off per clip), so quality can be compared without a second model load.
-Weights live in a Modal Volume from Hugging Face (CLAUDE.md rule 9); the container scales down after 2 idle minutes.
+Weights live in a Modal Volume from Hugging Face (CLAUDE.md rule 9); the container scales down after 30 idle seconds.
+When the AI Producer may redo clips by itself, the worker calls a "held" variant (Cls.with_options(scaledown_window=...),
+at most HOLD_MAX_SECONDS) so the redo lands on the same warm GPU instead of paying a new start-up. No min_containers:
+every variant still scales to zero by itself once idle (rule 8).
 """
 
 import io
@@ -80,7 +83,7 @@ progress = modal.Dict.from_name("projectv-progress", create_if_missing=True)
     volumes={"/cache": hf_cache},
     timeout=3600,
     memory=98304,          # room for the offload fallback
-    scaledown_window=30,   # owner (19 Nov): back to 30 s - reloading is free (time only) and the AI Producer acts after the 2 min window anyway (rule 8)
+    scaledown_window=30,   # default; a Producer-run Short uses a held variant (minutes, never hours) set by workers/activities/clips.py
     max_containers=4,      # parallel clips across at most 4 GPUs: faster, same total GPU time, capped spend rate
     enable_memory_snapshot=SNAPSHOT,
     experimental_options={"enable_gpu_snapshot": True} if SNAPSHOT else None,

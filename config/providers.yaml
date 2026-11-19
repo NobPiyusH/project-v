@@ -167,3 +167,7 @@ pricing:
     containerStartSeconds: 140   # Wan container start + model load, billed once per container (measured 16 Nov)
     wanSecondsPer81Frames: { draft: 30, draft720: 133, final: 480 }   # H100 render time per 5 s clip: fast@480p (measured 17 Nov: ~12 s for 33 frames), fast@720p (measured 19 Nov: ~95 s for 57 frames), hybrid@720p (measured 483)
     wanFirstClipExtraSeconds: 64   # the first clip in a container is slower (warm-up), measured 19 Nov at 720p
+    # Warm redos (optimisation review item 3, 19 Nov 2026): on a Short the AI Producer runs by itself, the Wan GPU stays
+    # warm this long after each clip batch so a redo skips the ~105 s start-up + 64 s warm-up (≈₹17). The Producer's
+    # review and redo land ~30-60 s after a batch. Costs ≤60 s more idle H100 (≈₹6) after the last batch. 0 = off.
+    wanRedoHoldSeconds: 90

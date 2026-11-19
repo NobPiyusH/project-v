@@ -172,3 +172,27 @@ def test_the_stop_flag_is_retried_until_the_network_is_back():
     assert clips._set_stop(d, "stop-1", tries=5, wait=0) is True
     assert d.data["stop-1"] is True
     assert clips._set_stop(_FlakyDict(10), "stop-2", tries=3, wait=0) is False
+
+
+def test_a_producer_run_short_holds_one_gpu_warm_for_minutes_not_hours(monkeypatch):
+    assert C.hold_seconds({"holdSeconds": 90}, 1) == 90
+    assert C.hold_seconds({"holdSeconds": 90}, 4) == 0, "parallel batches never hold several GPUs"
+    assert C.hold_seconds({"holdSeconds": 86400}, 1) == C.HOLD_MAX_SECONDS
+    assert C.hold_seconds({}, 1) == 0
+
+    seen = {}
+
+    class FakeCls:
+        def with_options(self, **kw):
+            seen.update(kw)
+            return self
+
+        def __call__(self):
+            return "wan"
+
+    monkeypatch.setattr(C.modal.Cls, "from_name", lambda app, cls: FakeCls())
+    assert C._wan({"holdSeconds": 90}, 1) == "wan"
+    assert seen == {"scaledown_window": 90}
+    seen.clear()
+    C._wan({}, 1)
+    assert seen == {}, "no hold: the deployed 30 s window"

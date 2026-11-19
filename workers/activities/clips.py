@@ -258,6 +258,26 @@ def _omni(req: dict, base: str, video_id: str) -> tuple[list[dict], bool]:
     return clips, stopped
 
 
+HOLD_MAX_SECONDS = 300  # a held GPU stays warm for minutes, never hours (rule 8)
+
+
+def hold_seconds(req: dict, containers: int) -> int:
+    """How long the one GPU should stay warm after this batch: only when the AI Producer may redo clips by itself
+    (holdSeconds > 0) and the batch runs on one container. Every call for that Short uses the same value, so its redo
+    lands on the same warm container (a with_options variant autoscales on its own)."""
+    hold = int(req.get("holdSeconds") or 0)
+    return min(hold, HOLD_MAX_SECONDS) if hold > 0 and containers == 1 else 0
+
+
+def _wan(req: dict, containers: int):
+    cls = modal.Cls.from_name(req.get("modalApp") or "projectv-wan", req.get("modalClass") or "Wan")
+    hold = hold_seconds(req, containers)
+    if hold:
+        log.info("Holding the GPU warm for %d s after this batch (AI Producer may redo)", hold)
+        cls = cls.with_options(scaledown_window=hold)
+    return cls()
+
+
 @activity.defn(name="generate_clips")
 def generate_clips(req: dict) -> dict:
     """req: ClipRequest {videoId, modalApp, modalClass, progressUrl, containers,
@@ -270,9 +290,9 @@ def generate_clips(req: dict) -> dict:
         clips, stopped = _omni(req, base, video_id)
         _post(f"{base}/api/internal/clips/progress", {"videoId": video_id, "clips": [], "finished": True})
         return {"clips": clips, "containers": 0, "stopped": stopped}
-    wan = modal.Cls.from_name(req.get("modalApp") or "projectv-wan", req.get("modalClass") or "Wan")()
     progress = modal.Dict.from_name("projectv-progress", create_if_missing=True)
     containers = max(1, min(4, int(req.get("containers") or 4), len(req["jobs"]) or 1))
+    wan = _wan(req, containers)
     jobs = []
     for j in req["jobs"]:
         key = f"{video_id[:8]}-{j['shotId'][:8]}-{j['kind']}{j['take']}"

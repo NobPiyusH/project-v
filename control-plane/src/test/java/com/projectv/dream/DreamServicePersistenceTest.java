@@ -116,6 +116,10 @@ class DreamServicePersistenceTest {
         assertEquals(57, clips.jobs().getFirst().numFrames()); // 3.5 s at 16 fps
         assertEquals(480, clips.jobs().getFirst().width());
         assertEquals(1, clips.containers());
+        assertEquals(0, clips.holdSeconds(), "the owner reviews: no warm hold");
+        jdbc.sql("UPDATE dream_short SET producer_decides = true WHERE id = :d").param("d", dream).update();
+        assertEquals(90, dreams.holdSeconds(dream), "the AI Producer runs it: the GPU stays warm for its redo");
+        jdbc.sql("UPDATE dream_short SET producer_decides = false WHERE id = :d").param("d", dream).update();
         dreams.saveClips(dream, clips, new ClipResult(List.of(
                 new ClipOutput(shot1.toString(), 1, "dream", "s3://b/c1.mp4", 20, 57, 16, "fast", null, 0),
                 new ClipOutput(shot2.toString(), 1, "dream", "s3://b/c2.mp4", 20, 57, 16, "fast", null, 0)), 1, false));

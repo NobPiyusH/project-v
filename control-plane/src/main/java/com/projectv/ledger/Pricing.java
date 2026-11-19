@@ -168,6 +168,12 @@ public class Pricing {
         return num(map(map(pricing, "modal"), "wanSecondsPer81Frames"), kind);
     }
 
+    /** Seconds the Wan GPU stays warm after a Producer-run Short's clip batch, for its redo (0 = off). */
+    public int wanRedoHoldSeconds() {
+        Object v = map(pricing, "modal").get("wanRedoHoldSeconds");
+        return v instanceof Number x ? x.intValue() : 0;
+    }
+
     /** Container start + model load, billed once per GPU container a batch uses. */
     public double gpuContainerStartSeconds() {
         return num(map(pricing, "modal"), "containerStartSeconds");

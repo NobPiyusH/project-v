@@ -611,9 +611,17 @@ public class DreamService {
         BigDecimal inr = pricing.modalGpuInr("H100", gpu);
         route(id, "DREAM_CLIPS", "video.i2v.dream", WAN, inr);
         budget.requireGpu(inr, jobs.size() + " Dream Short clips");
-        // One GPU, clips in turn: the ~2 min start-up + model load is paid once for the whole Short.
+        // One GPU, clips in turn: the ~2 min start-up + model load is paid once for the whole Short. When the AI
+        // Producer runs this Short by itself, the GPU stays warm a little after each batch so its redo skips a start-up.
         return new ClipRequest(storageId(id), wanApp, wanClass, publicUrl, jobs, 1, gpu, inr.setScale(2, RoundingMode.HALF_UP),
-                "wan", null, null);
+                "wan", null, null, holdSeconds(id));
+    }
+
+    /** Warm-redo hold for this Short's clip batches: only when the AI Producer decides on it by itself (autopilot). */
+    int holdSeconds(UUID id) {
+        boolean producerDecides = jdbc.sql("SELECT producer_decides FROM dream_short WHERE id = :d").param("d", id)
+                .query(Boolean.class).optional().orElse(false);
+        return producerDecides ? pricing.wanRedoHoldSeconds() : 0;
     }
 
     List<ClipJob> clipJobs(UUID id, List<String> only) {
