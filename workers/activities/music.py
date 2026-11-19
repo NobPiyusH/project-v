@@ -103,18 +103,23 @@ def _finish(source: Path, target: float, tmp: Path, video_id: str) -> dict:
 
 # ---------------------------------------------------------------------------------------------------- ACE-Step
 
-CLIP_LEVEL = 0.999   # |sample| at or above this is full scale
-CLIP_RUN = 3         # this many full-scale samples in a row = a flat-topped (clipped) waveform
+CLIP_RUN = 3         # this many samples in a row at the take's own peak = a flat-topped (clipped) waveform
+CLIP_TOLERANCE = 1e-4
 
 
 def clipped(samples: np.ndarray) -> bool:
-    """True when any channel has CLIP_RUN or more consecutive full-scale samples (a flat top, i.e. real clipping)."""
-    full = np.abs(np.atleast_2d(samples.T)) >= CLIP_LEVEL  # [channels, samples]
-    for ch in full:
-        run = 0
-        for hit in np.flatnonzero(np.diff(np.concatenate(([0], ch.astype(np.int8), [0]))) != 0).reshape(-1, 2):
-            run = max(run, hit[1] - hit[0])
-        if run >= CLIP_RUN:
+    """True when any channel has CLIP_RUN or more consecutive samples at the take's peak level: a flat top.
+    Measured against the take's own peak, not 1.0, because ACE-Step rescales every take to -1 dBFS afterwards
+    (19 Nov 2026), which keeps clipped flat tops flat but moves them below full scale."""
+    if samples.size == 0:
+        return False
+    peak = float(np.max(np.abs(samples)))
+    if peak < 0.1:   # near-silence: nothing to clip
+        return False
+    at_peak = np.abs(np.atleast_2d(samples.T)) >= peak - CLIP_TOLERANCE  # [channels, samples]
+    for ch in at_peak:
+        edges = np.flatnonzero(np.diff(np.concatenate(([0], ch.astype(np.int8), [0])))).reshape(-1, 2)
+        if len(edges) and int((edges[:, 1] - edges[:, 0]).max()) >= CLIP_RUN:
             return True
     return False
 
@@ -155,7 +160,17 @@ def _acestep(req: dict) -> dict:
     seeds = [random.randint(1, 2**31 - 1) for _ in range(takes)]
     ace = modal.Cls.from_name(req.get("modalApp") or "projectv-acestep", req.get("modalClass") or "AceStep")()
     t = time.time()
-    out = ace.generate.remote({"caption": req["prompt"], "durationSec": round(target + 2.0, 1), "seeds": seeds})
+    call = ace.generate.spawn({"caption": req["prompt"], "durationSec": round(target + 2.0, 1), "seeds": seeds})
+    try:
+        while True:  # heartbeat while Modal starts a container and renders (a cold start can take minutes)
+            try:
+                out = call.get(timeout=20)
+                break
+            except TimeoutError:
+                activity.heartbeat(f"waiting for ACE-Step ({time.time() - t:.0f} s)")
+    except BaseException:
+        call.cancel()  # a cancelled or failed activity must not leave a GPU call running on Modal
+        raise
     wall = time.time() - t  # container start + model load + takes: what Modal bills for this call
     activity.heartbeat("takes rendered")
     curve = req.get("energyCurve") or []

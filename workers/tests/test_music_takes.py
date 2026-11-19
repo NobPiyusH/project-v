@@ -23,6 +23,13 @@ def test_clipping_is_a_flat_top_not_a_single_peak():
     assert M.clipped(x)
 
 
+def test_clipping_survives_rescaling_below_full_scale():
+    x = np.zeros((1000, 2))
+    x[500:504, 0] = 1.0
+    assert M.clipped(x * 0.8913)        # ACE-Step's -1 dBFS rescale keeps the flat top
+    assert not M.clipped(np.zeros((1000, 2)))
+
+
 def test_energy_match_prefers_music_that_follows_the_plan():
     plan = [0.2] * 5 + [0.9] * 5 + [0.2] * 5
     follows = _tone(np.array([0.2] * 5 + [1.0] * 5 + [0.2] * 5))
