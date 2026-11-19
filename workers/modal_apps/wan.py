@@ -200,7 +200,7 @@ class Wan:
         return self.pipe(
             image=img,
             prompt=job["prompt"],
-            negative_prompt=NEGATIVE,
+            negative_prompt=NEGATIVE + (", " + job["negative"] if job.get("negative") else ""),
             width=w,
             height=h,
             num_frames=int(job.get("numFrames", 81)),   # 81 frames = ~5 s at Wan's native 16 fps

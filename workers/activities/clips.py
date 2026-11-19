@@ -277,7 +277,8 @@ def generate_clips(req: dict) -> dict:
     for j in req["jobs"]:
         key = f"{video_id[:8]}-{j['shotId'][:8]}-{j['kind']}{j['take']}"
         jobs.append((j, key, {"id": key, "image": get_bytes(j["imageUri"]), "prompt": j["prompt"], "width": j["width"],
-                              "height": j["height"], "numFrames": j["numFrames"], "seed": j["seed"], "mode": j["mode"]}))
+                              "height": j["height"], "numFrames": j["numFrames"], "seed": j["seed"], "mode": j["mode"],
+                              "negative": j.get("negative")}))
     log.info("Starting %d clips for video %s on %d GPU container(s)", len(jobs), video_id, containers)
     run = _sequential if containers == 1 else _parallel
     clips, stopped = run(wan, progress, base, video_id, jobs)

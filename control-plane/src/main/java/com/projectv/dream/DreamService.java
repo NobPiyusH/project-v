@@ -1,5 +1,6 @@
 package com.projectv.dream;
 
+import com.projectv.production.RedoStopRule;
 import com.projectv.agents.Llm;
 import com.projectv.assets.AssetStore;
 import com.projectv.assets.AssetStore.NewAsset;
@@ -621,6 +622,15 @@ public class DreamService {
         int frames = frames(secondsOf(look((String) d.get("look"))));
         Set<String> wanted = only == null ? null : new HashSet<>(only);
         List<ClipJob> jobs = new ArrayList<>();
+        // The Producer's stop-rule fixes for this Short's clips (a cause that came back twice): firm prompt + negative.
+        List<RedoStopRule.Cause> fixes = jdbc.sql("""
+                        SELECT DISTINCT stop_cause FROM producer_decision
+                        WHERE dream_short_id = :d AND stage = 'DREAM_CLIPS' AND stop_rule = 'prompt_fix'
+                        """).param("d", id).query(String.class).list().stream().map(RedoStopRule::causeByKey)
+                .filter(java.util.Objects::nonNull).toList();
+        String fixPrompt = fixes.stream().map(c -> " " + c.promptFix()).collect(java.util.stream.Collectors.joining());
+        String negative = fixes.isEmpty() ? null
+                : fixes.stream().map(RedoStopRule.Cause::negative).collect(java.util.stream.Collectors.joining(", "));
         for (Map<String, Object> s : shots(id)) {
             String shotId = s.get("id").toString();
             if (s.get("picture_uri") == null) {
@@ -631,8 +641,8 @@ public class DreamService {
             }
             int take = ((Number) s.get("clip_takes")).intValue() + 1;
             jobs.add(new ClipJob(shotId, ((Number) s.get("ord")).intValue() + 1, take, "dream", "fast",
-                    (String) s.get("picture_uri"), (String) s.get("motion_prompt"), size[0], size[1], frames,
-                    Math.abs((long) shotId.hashCode()) + take));
+                    (String) s.get("picture_uri"), fixPrompt.isEmpty() ? (String) s.get("motion_prompt") : s.get("motion_prompt") + fixPrompt, size[0], size[1], frames,
+                    Math.abs((long) shotId.hashCode()) + take, negative));
         }
         return jobs;
     }

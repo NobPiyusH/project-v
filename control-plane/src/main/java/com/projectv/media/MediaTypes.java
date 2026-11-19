@@ -168,9 +168,14 @@ public final class MediaTypes {
      * @param kind      draft (fast mode, 480p) or final (hybrid mode, 720p)
      * @param mode      Wan quality mode: fast | hybrid | standard
      * @param numFrames 4n+1 frames at 16 fps (81 = ~5 s, Wan's limit)
+     * @param negative  extra Wan negative-prompt terms (the Producer's stop-rule fix for a recurring cause), or null
      */
     public record ClipJob(String shotId, int shotNumber, int take, String kind, String mode, String imageUri, String prompt,
-                          int width, int height, int numFrames, long seed) {
+                          int width, int height, int numFrames, long seed, String negative) {
+        public ClipJob(String shotId, int shotNumber, int take, String kind, String mode, String imageUri, String prompt,
+                       int width, int height, int numFrames, long seed) {
+            this(shotId, shotNumber, take, kind, mode, imageUri, prompt, width, height, numFrames, seed, null);
+        }
     }
 
     /** @param estimateInr GPU estimate for the whole batch incl. container start-up (shown to the owner first) */

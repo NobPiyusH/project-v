@@ -9,6 +9,7 @@ import com.projectv.media.MediaTypes.ProducerReviewRequest;
 import com.projectv.media.MediaTypes.ProducerReviewResult;
 import com.projectv.media.MediaTypes.SpendDecision;
 import com.projectv.production.ProducerService;
+import com.projectv.production.RedoStopRule;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Component;
@@ -161,25 +162,30 @@ public class DreamProducer implements DreamProducerActivities {
         }
         UUID decision = UUID.randomUUID();
         String verdict = r.verdict() == null ? "ask" : r.verdict().toLowerCase(Locale.ROOT);
+        // Stop rule: the same issue twice in a row gets one firm prompt fix, then goes to the owner (not another re-roll).
+        RedoStopRule.Outcome stop = RedoStopRule.check(jdbc, json, "dream_short_id", id, "DREAM_" + step, verdict,
+                r.items(), r.summary(), r.redoNotes());
         jdbc.sql("""
                         INSERT INTO producer_decision (id, dream_short_id, stage, attempt, verdict, confidence, summary, redo_notes,
-                                                       items_json, model, cost_inr)
-                        VALUES (:id, :d, :s, :a, :verdict, :c, :sum, :notes, CAST(:items AS jsonb), :m, :cost)
+                                                       items_json, model, cost_inr, stop_rule, stop_cause)
+                        VALUES (:id, :d, :s, :a, :verdict, :c, :sum, :notes, CAST(:items AS jsonb), :m, :cost, :stop, :cause)
                         """)
                 .param("id", decision).param("d", id).param("s", "DREAM_" + step).param("a", attempt).param("verdict", verdict)
                 .param("c", BigDecimal.valueOf(r.confidence()).setScale(3, RoundingMode.HALF_UP)).param("sum", r.summary())
-                .param("notes", r.redoNotes()).param("items", json.writeValueAsString(r.items() == null ? List.of() : r.items()))
-                .param("m", r.model()).param("cost", cost).update();
+                .param("notes", stop.redoNotes()).param("items", json.writeValueAsString(r.items() == null ? List.of() : r.items()))
+                .param("m", r.model()).param("cost", cost).param("stop", ProducerService.stopRule(stop))
+                .param("cause", stop.cause() == null ? null : stop.cause().key()).update();
         List<String> weak = r.items() == null ? List.of() : r.items().stream().filter(i -> !i.ok()).map(ProducerItemVerdict::id).toList();
         String what = switch (verdict) {
             case "approve" -> "recommends APPROVE";
             case "redo" -> "recommends REDO of " + weak.size() + " item" + (weak.size() == 1 ? "" : "s");
             default -> "recommends you DECIDE (unsure)";
         };
-        String text = "AI Producer %s (%.0f%% sure): %s%s".formatted(what, r.confidence() * 100, Objects.toString(r.summary(), ""),
-                r.redoNotes() == null || r.redoNotes().isBlank() ? "" : " Suggested redo: " + r.redoNotes());
-        dreams.evidence().event(id, step, "producer", null, text, Map.of("verdict", verdict, "weak", weak));
-        return new ProducerAdvice(verdict, r.confidence(), text, r.redoNotes(), decision.toString(), weak);
+        String text = "AI Producer %s (%.0f%% sure): %s%s%s".formatted(what, r.confidence() * 100, Objects.toString(r.summary(), ""),
+                stop.note() == null ? "" : " " + stop.note(),
+                stop.redoNotes() == null || stop.redoNotes().isBlank() ? "" : " Suggested redo: " + stop.redoNotes());
+        dreams.evidence().event(id, step, "producer", null, text, Map.of("verdict", stop.verdict(), "weak", weak));
+        return new ProducerAdvice(stop.verdict(), r.confidence(), text, stop.redoNotes(), decision.toString(), weak);
     }
 
     // ------------------------------------------------------------------------------------------- acting alone
