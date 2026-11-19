@@ -337,24 +337,69 @@ def fetch_comfy() -> Path:
     return comfy
 
 
+VOLUME = os.environ.get("SV_VOLUME", "")   # optional persistent (RunPod global) volume: weights are cached there
+ZIMAGE_PATH = ZIMAGE_REPO                  # becomes a local snapshot folder once downloaded / found on the volume
+
+
+def volume_file(volume: str, name: str, size: int) -> Path | None:
+    """The cached copy of `name` on the volume when it is complete (right size), else None. A global volume is
+    object-backed (no locks, no atomic rename), so completeness is judged by size alone, never by a lock file."""
+    if not volume:
+        return None
+    p = Path(volume) / "wan-fp8" / name
+    try:
+        return p if p.stat().st_size == size else None
+    except OSError:
+        return None
+
+
+def copy_to_volume(volume: str, name: str, local: Path) -> None:
+    dest = Path(volume) / "wan-fp8" / name
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(local, dest)   # a half-copied file has the wrong size, so the next start re-copies it
+
+
 def download(comfy: Path, state: State) -> None:
+    global ZIMAGE_PATH
     from huggingface_hub import hf_hub_download, snapshot_download
 
     weights = ROOT / "weights"
     for i, (name, (repo, path, sub, size)) in enumerate(FILES.items(), 1):
-        state.phase = f"downloading {i}/{len(FILES)} {name}"
         t = time.time()
-        local = Path(hf_hub_download(repo, path, local_dir=str(weights)))
-        if local.stat().st_size != size:
-            raise RuntimeError(f"{name}: size {local.stat().st_size} != expected {size}")
+        cached = volume_file(VOLUME, name, size)
+        if cached is not None:
+            state.phase = f"using volume copy {i}/{len(FILES)} {name}"
+            local, how = cached, "volume"
+        else:
+            state.phase = f"downloading {i}/{len(FILES)} {name}"
+            local = Path(hf_hub_download(repo, path, local_dir=str(weights)))
+            if local.stat().st_size != size:
+                raise RuntimeError(f"{name}: size {local.stat().st_size} != expected {size}")
+            how = "huggingface"
+            if VOLUME:
+                state.phase = f"caching {i}/{len(FILES)} {name} on the volume"
+                copy_to_volume(VOLUME, name, local)
         dest = comfy / "models" / sub / name
         dest.parent.mkdir(parents=True, exist_ok=True)
         if dest.is_symlink() or dest.exists():
             dest.unlink()
         dest.symlink_to(local)
-        log(f"{name} {size / 1e9:.1f} GB in {time.time() - t:.0f} s")
-    state.phase = "downloading Z-Image Turbo"
-    snapshot_download(ZIMAGE_REPO, cache_dir=str(ROOT / "hf"))
+        log(f"{name} {size / 1e9:.1f} GB from {how} in {time.time() - t:.0f} s")
+    t = time.time()
+    marker = Path(VOLUME) / "zimage-turbo" / ".complete" if VOLUME else None
+    if marker is not None and marker.exists():
+        state.phase = "using volume copy of Z-Image Turbo"
+        ZIMAGE_PATH = str(marker.parent)
+    else:
+        state.phase = "downloading Z-Image Turbo"
+        snap = snapshot_download(ZIMAGE_REPO, cache_dir=str(ROOT / "hf"))
+        ZIMAGE_PATH = snap
+        if VOLUME:
+            state.phase = "caching Z-Image Turbo on the volume"
+            target = Path(VOLUME) / "zimage-turbo"
+            shutil.copytree(snap, target, dirs_exist_ok=True, symlinks=False)
+            (target / ".complete").write_text("ok")
+    log(f"Z-Image Turbo ready in {time.time() - t:.0f} s")
 
 
 def http_json(url: str, body: dict | None = None, timeout: float = 30):
@@ -420,7 +465,7 @@ class Gpu:
             from diffusers import ZImagePipeline
 
             self._free_comfy()
-            self.zimage = ZImagePipeline.from_pretrained(ZIMAGE_REPO, torch_dtype=torch.bfloat16,
+            self.zimage = ZImagePipeline.from_pretrained(ZIMAGE_PATH, torch_dtype=torch.bfloat16,
                                                          cache_dir=str(ROOT / "hf")).to("cuda")
         seed = int(p.get("seed") or 0)
         img = self.zimage(prompt=p["prompt"], width=int(p.get("width", 768)), height=int(p.get("height", 1344)),
@@ -494,7 +539,10 @@ def main(argv=None) -> int:
         return 0
     state = State()
     threading.Thread(target=boot, args=(state,), daemon=True, name="boot").start()
-    server = DualStackServer(("::", PORT), make_handler(state))
+    try:
+        server = DualStackServer(("::", PORT), make_handler(state))
+    except OSError:  # no IPv6 in this container (e.g. a RunPod pod): plain IPv4
+        server = ThreadingHTTPServer(("0.0.0.0", PORT), make_handler(state))
     log(f"listening on [::]:{PORT}")
     server.serve_forever()
     return 0

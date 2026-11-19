@@ -139,7 +139,8 @@ public class SaladApi implements PodApi {
         body.put("restart_policy", "on_failure");
         body.put("container", container);
         body.put("networking", net);
-        body.put("readiness_probe", Map.of("http", Map.of("path", "/health", "port", cfg.port(), "scheme", "http"),
+        body.put("readiness_probe", Map.of("http", Map.of("path", "/health", "port", cfg.port(), "scheme", "http",
+                        "headers", List.of(Map.of("name", "x-probe", "value", "projectv"))), // Salad requires at least one header (first live call, 20 Nov)
                 "initial_delay_seconds", 0, "period_seconds", 5, "failure_threshold", 20, "success_threshold", 1,
                 "timeout_seconds", 5));
         Map<String, Object> r = http.post().uri(projectBase()).header("Salad-Api-Key", cfg.apiKey())

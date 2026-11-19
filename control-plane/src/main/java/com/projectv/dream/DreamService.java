@@ -1183,14 +1183,14 @@ public class DreamService {
 
     /**
      * The Short's Salad group is deleted as soon as it cannot be needed soon: the GPU steps are over (music, finish), the
-     * Short ended (completed, cancelled), a step failed (Retry makes a fresh group), or the owner holds a step by hand.
+     * Short ended (completed, cancelled), a step failed (Retry makes a fresh group), (a manual hold keeps it: the watchdog's idle limit deletes a group nobody is using, and the warm start is what overlaps the download).
      * The bounded review window and the cost approval keep it (the watchdog's idle limit bounds those).
      */
     private void releaseSaladIfDone(UUID id, String step, String status) {
         if (!useSalad) {
             return;
         }
-        boolean over = List.of("COMPLETED", "CANCELLED", "FAILED_WAITING", "WAITING").contains(status)
+        boolean over = List.of("COMPLETED", "CANCELLED", "FAILED_WAITING").contains(status)
                 || "MUSIC".equals(step) || "FINISH".equals(step);
         if (over) {
             salad.release(id, step + " " + status);

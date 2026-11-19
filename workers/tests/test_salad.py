@@ -121,3 +121,14 @@ def test_clips_activity_salad_path(monkeypatch):
         out = {"clips": clips, "stopped": stopped}
     assert out["clips"][0]["uri"].endswith("shot001-take1.mp4") and out["clips"][0]["gpuSeconds"] == 70
     assert sent[0][0] == "https://g.example" and sent[0][1] == "clip" and sent[0][2]["frames"] == 81
+
+
+def test_volume_cache_uses_complete_copy_only(tmp_path):
+    vol = str(tmp_path)
+    assert S.volume_file("", "a.safetensors", 3) is None            # no volume configured
+    assert S.volume_file(vol, "a.safetensors", 3) is None           # nothing cached yet
+    src = tmp_path / "src.bin"
+    src.write_bytes(b"abc")
+    S.copy_to_volume(vol, "a.safetensors", src)
+    assert S.volume_file(vol, "a.safetensors", 3) == tmp_path / "wan-fp8" / "a.safetensors"
+    assert S.volume_file(vol, "a.safetensors", 4) is None           # wrong size = incomplete copy: not used
