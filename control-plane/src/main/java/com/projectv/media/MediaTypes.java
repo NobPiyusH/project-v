@@ -192,7 +192,12 @@ public final class MediaTypes {
         }
     }
 
-    /** One finished (or failed / stopped) clip. {@code gpuSeconds} is render time on the GPU. */
+    /**
+     * One finished (or failed / stopped) clip. {@code gpuSeconds} is render time on the GPU. Unknown fields from the
+     * worker (e.g. its per-clip {@code coldStart} flag, summed into {@link ClipResult#coldStarts}) are ignored, so a
+     * newer worker never fails the workflow task.
+     */
+    @com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown = true)
     public record ClipOutput(String shotId, int take, String kind, String uri, double gpuSeconds, int frames, int fps,
                              String mode, String error, long outputTokens) {
     }
