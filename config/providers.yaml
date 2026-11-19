@@ -157,6 +157,15 @@ pricing:
     omni:                                                           # Gemini Omni Flash video (18 Nov 2026; verify)
       outputPerMTokUsd: 12.00     # gemini-omni-1.2-flash video output (pricing page 18 Nov 2026; 1.1 routes to 1.2 on 3 Dec)
       tokensPerSecond: { "360p": 1931, "720p": 5792, "1080p": 8688, "4k": 17376 }   # 720p measured: 28,960 tokens / 5 s
+  aicredits:                     # errors-only text fallback (AICredits.in, INR wallet; 19 Nov 2026). Price = USD list x FX x 1.05 x 1.05 (gateway fee + GST)
+    totalCapInr: 50              # hard stop for ALL fallback spend (the prepaid wallet), enforced from the cost ledger
+    markup: 1.1025
+    # primary model id -> the same model on AICredits (ids checked against GET api.aicredits.in/api/models, 19 Nov 2026) and its USD list price
+    models:
+      gemini-3.6-flash:      { id: google/gemini-3.6-flash,      inputPerMTokUsd: 1.50, outputPerMTokUsd: 7.50 }
+      gemini-3.5-flash:      { id: google/gemini-3.5-flash,      inputPerMTokUsd: 1.50, outputPerMTokUsd: 9.00 }
+      gemini-3.5-flash-lite: { id: google/gemini-3.5-flash-lite, inputPerMTokUsd: 0.30, outputPerMTokUsd: 2.50 }
+      claude-sonnet-5-5:     { id: anthropic/claude-sonnet-5.5,  inputPerMTokUsd: 2.00, outputPerMTokUsd: 10.00 }
   anthropic:
     monthlyCapUsd: 8             # owner-funded (17 Nov 2026: $5 credit; $8 cap once research + concept moved to Claude): hard stop, then Gemini
     sonnet: { inputPerMTokUsd: 2.00, outputPerMTokUsd: 10.00 }   # claude-sonnet-5-5 (verify on claude.com/pricing)

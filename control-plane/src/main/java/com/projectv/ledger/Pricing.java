@@ -126,6 +126,27 @@ public class Pricing {
         return modalGpuInr("L40S", num(map(pricing, "modal"), "zimageSecondsPerImage") * images);
     }
 
+    // ---- AICredits (errors-only text fallback)
+
+    /** Hard cap on all AICredits fallback spend, in rupees. */
+    public BigDecimal aicreditsCapInr() {
+        return BigDecimal.valueOf(num(map(pricing, "aicredits"), "totalCapInr"));
+    }
+
+    /** The AICredits id for a primary model id (e.g. {@code gemini-3.6-flash}); null when none is configured. */
+    public String aicreditsModelId(String primary) {
+        Object m = map(map(pricing, "aicredits"), "models").get(primary);
+        return m instanceof Map<?, ?> mm && mm.get("id") != null ? mm.get("id").toString() : null;
+    }
+
+    /** What an AICredits call costs in rupees: USD list price x live FX x the gateway markup (config). */
+    public BigDecimal aicreditsInr(String primary, long inputTokens, long outputTokens) {
+        Map<String, Object> aic = map(pricing, "aicredits");
+        Map<String, Object> rates = map(map(aic, "models"), primary);
+        return inr((inputTokens / 1e6 * num(rates, "inputPerMTokUsd") + outputTokens / 1e6 * num(rates, "outputPerMTokUsd"))
+                * num(aic, "markup"));
+    }
+
     /** Hard monthly cap on Claude (owner-funded), in rupees. */
     public BigDecimal claudeMonthlyCapInr() {
         return inr(num(map(pricing, "anthropic"), "monthlyCapUsd"));

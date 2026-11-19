@@ -39,10 +39,20 @@ public class OpenAiCompatChat {
                 "nvidia", new Provider(nvidiaUrl, nvidiaKey),
                 "groq", new Provider(groqUrl, groqKey),
                 "openrouter", new Provider(openRouterUrl, openRouterKey));
+        this.http = client();
+    }
+
+    /** A single-provider client for {@code aicredits:<model>} ids (the errors-only fallback; not in {@link #handles}). */
+    OpenAiCompatChat(String aicreditsUrl, String aicreditsKey) {
+        this.providers = java.util.Map.of("aicredits", new Provider(aicreditsUrl, aicreditsKey));
+        this.http = client();
+    }
+
+    private static RestClient client() {
         SimpleClientHttpRequestFactory f = new SimpleClientHttpRequestFactory();
         f.setConnectTimeout(15_000);
         f.setReadTimeout(300_000); // the caller's ModelFallback time limit is the real limit
-        this.http = RestClient.builder().requestFactory(f).build();
+        return RestClient.builder().requestFactory(f).build();
     }
 
     /** True for {@code nvidia:...}, {@code groq:...} and {@code openrouter:...} model ids. */

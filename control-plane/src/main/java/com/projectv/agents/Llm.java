@@ -34,12 +34,13 @@ public class Llm {
     private final String fallbacks;
     private final OpenAiCompatChat nvidia;
     private final ClaudeChat claude;
+    private final AiCreditsFallback aicredits;
 
     private record Out<T>(T entity, com.projectv.media.MediaTypes.Usage usage) {
     }
 
     public Llm(ObjectProvider<ChatModel> chatModel, CostLedger ledger, Pricing pricing, BudgetGuard budget, OpenAiCompatChat nvidia,
-               ClaudeChat claude,
+               ClaudeChat claude, AiCreditsFallback aicredits,
                @Value("${projectv.agents.timeout-seconds:150}") long timeoutSeconds,
                @Value("${projectv.models.text}") String model,
                @Value("${projectv.models.text-fallbacks:}") String fallbacks) {
@@ -52,6 +53,7 @@ public class Llm {
         this.fallbacks = fallbacks;
         this.nvidia = nvidia;
         this.claude = claude;
+        this.aicredits = aicredits;
     }
 
     public String model() {
@@ -72,10 +74,19 @@ public class Llm {
         if (cm == null) {
             throw new IllegalStateException("No LLM configured: set GEMINI_API_KEY in .env");
         }
-        budget.require(BigDecimal.ONE, purpose); // a text call costs well under ₹1; refuse only when the cap is hit
         List<String> models = ModelFallback.models(
                 preferred != null && !preferred.isBlank() && (!ClaudeChat.handles(preferred) || claude.configured())
                         ? preferred + "," + model : model, fallbacks);
+        try {
+            budget.require(BigDecimal.ONE, purpose); // a text call costs well under ₹1; refuse only when the cap is hit
+        } catch (BudgetGuard.BudgetExceededException e) {
+            // Owner (19 Nov 2026): a capped text call may go to the AICredits fallback (its own ₹50 cap), if enabled.
+            T fb = aicredits.retry(videoId, purpose, models, e, system, user, type);
+            if (fb != null) {
+                return fb;
+            }
+            throw e;
+        }
         try {
             ModelFallback.Attempt<Out<T>> a = ModelFallback.run(models,
                     m -> ClaudeChat.handles(m) ? Math.max(timeoutSeconds, 180) : timeoutSeconds, purpose, m -> {
@@ -117,12 +128,21 @@ public class Llm {
             }
             return r.entity();
         } catch (TimeoutException e) {
+            T fb = aicredits.retry(videoId, purpose, models, e, system, user, type);
+            if (fb != null) {
+                return fb;
+            }
             throw new IllegalStateException(purpose + ": no model in " + models + " answered within " + timeoutSeconds + "s");
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException(purpose + " interrupted");
         } catch (ExecutionException e) {
             Throwable c = e.getCause() == null ? e : e.getCause();
+            // Outage only (5xx, 429, timeout, connection): one retry of the same model via AICredits, if enabled.
+            T fb = aicredits.retry(videoId, purpose, models, c, system, user, type);
+            if (fb != null) {
+                return fb;
+            }
             throw new IllegalStateException(purpose + " failed: " + c.getClass().getSimpleName() + ": " + c.getMessage(), c);
         } catch (RuntimeException e) {
             throw e;
