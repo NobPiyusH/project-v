@@ -31,7 +31,8 @@ public final class DreamTypes {
     }
 
     /** The writer's output: one world shared by every shot, so the Short looks like one place. */
-    public record DreamWorld(String title, String world, String palette, String light, List<PlannedDreamShot> shots) {
+    /** {@code hero}: the one recurring object described exactly once, pasted into every picture so it stays the same. */
+    public record DreamWorld(String title, String world, String palette, String light, String hero, List<PlannedDreamShot> shots) {
     }
 
     /** What a step would cost before anything is spent. {@code needsApproval}: over the auto-approve amount. */

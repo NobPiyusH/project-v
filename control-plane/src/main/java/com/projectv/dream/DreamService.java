@@ -82,7 +82,7 @@ public class DreamService {
      * glides like a drone or dolly; these words pull it towards a phone in someone's hand. Every realistic look's
      * camera prompt ends with it.
      */
-    static final String HUMAN_CAMERA = "handheld first-person view at eye level, empty scene, nobody in frame (19 Nov: 'a person' and 'holding "
+    static final String HUMAN_CAMERA = "handheld first-person view at eye level, empty scene, nobody is ever visible (19 Nov: 'a person' and 'holding "
             + "a phone' in the prompt made Wan add a walking woman, then a man filming): small natural sway, nothing gliding; "
             + "no drone, no dolly, no crane, no zoom, no flying camera";
 
@@ -284,6 +284,10 @@ public class DreamService {
                 Look: %s
                 Return JSON: {"title": short title, "world": one paragraph describing the shared feeling and world (materials,
                 objects, scale, mood), "palette": the exact colour palette, "light": the light and atmosphere,
+                "hero": the main object that appears in several shots, described exactly once so it can be drawn the same
+                every time (shape, size, materials, colours, every part and where it sits; e.g. "green-painted steel bus
+                shelter, rusty corrugated tin roof sloping back, three glass side panels, wooden slat bench inside, one
+                round lamp under the roof"; empty if no object recurs), never mention the hero's look differently in a scene,
                 "shots": [{"scene": what this shot shows (one or two sentences, concrete), "motion": the camera move and
                 the small motion inside the scene}]} with exactly %d shots.
                 """.formatted(structure, FEEL, look.brief(), count);
@@ -481,7 +485,9 @@ public class DreamService {
     }
 
     static String picturePrompt(DreamWorld w, PlannedDreamShot s, Look look) {
-        return String.join(" ", s.scene().strip(), "World:", Objects.toString(w.world(), "").strip(),
+        String hero = Objects.toString(w.hero(), "").strip();
+        return String.join(" ", s.scene().strip(), hero.isEmpty() ? "" : "The same " + hero + " in every shot, exactly as described.",
+                "World:", Objects.toString(w.world(), "").strip(),
                 "Palette:", Objects.toString(w.palette(), "").strip(), "Light:", Objects.toString(w.light(), "").strip(),
                 "Style:", look.pictureStyle()).replaceAll("\\s+", " ");
     }
@@ -506,8 +512,9 @@ public class DreamService {
                 prompt = prompt + " Owner's notes: " + notes.strip();
             }
             int attempt = ((Number) s.get("picture_takes")).intValue() + 1;
+            // One seed for the whole Short (owner, 19 Nov: the shelter changed shape every shot); a redo moves it on.
             jobs.add(new KeyframeJob(shotId, attempt, ZIMAGE, prompt, 768, 1344, "9:16", "1K", null,
-                    Math.abs((long) shotId.hashCode()) + attempt));
+                    Math.abs((long) id.hashCode()) + attempt - 1));
         }
         if (!jobs.isEmpty()) {
             BigDecimal inr = pricing.zimageInr(jobs.size());
