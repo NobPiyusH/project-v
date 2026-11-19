@@ -154,6 +154,7 @@ function DreamView({ id }: { id: string }) {
               <select value={modes?.[s] ?? 'AUTO'} disabled={!live}
                 onChange={(e) => void act(() => dreamApi.setMode(id, s, e.target.value as DreamMode))}>
                 <option value="AUTO">Auto</option><option value="REVIEW">Review</option><option value="MANUAL">Manual</option>
+                <option value="PRODUCER">AI Producer</option>
               </select>
             </span>))}
         </div>

@@ -288,4 +288,34 @@ class DreamServicePersistenceTest {
         // measured 19 Nov: ~133 s per 81 frames at 720p, +64 s warm-up for the first clip, +140 s container start
         assertEquals((133.0 * 57 / 81 + 64 + 140) / 60, dreams.clipEstimate(dream, null).minutes(), 0.01);
     }
+
+    @Test
+    void producerReviewsAreKeptWithTheShortAndAutopilotShortsAreHeldToTheDailyCap() throws Exception {
+        var pricing = new Pricing("../config");
+        var producer = new DreamProducer(jdbc, JsonMapper.builder().build(), dreams, null, pricing, "gemini-3.6-flash");
+        jdbc.sql("UPDATE dream_short SET producer_decides = true WHERE id = :d").param("d", dream).update();
+        assertTrue(producer.decides(dream.toString()));
+
+        var advice = producer.saveReview(dream.toString(), "PICTURES", 1, new com.projectv.media.MediaTypes.ProducerReviewResult(
+                "redo", 0.8, "shot 2 melts", "keep the pier straight", List.of(
+                new com.projectv.media.MediaTypes.ProducerItemVerdict("shot-1", 8, true, "", ""),
+                new com.projectv.media.MediaTypes.ProducerItemVerdict("shot-2", 4, false, "melted rail", "straight rail")),
+                "gemini-3.6-flash", new com.projectv.media.MediaTypes.Usage(1000, 200, 0, 1200)));
+        assertEquals(List.of("shot-2"), advice.weakItems());
+        assertEquals(List.of(shot2.toString()), producer.shotIds(dream.toString(), advice.weakItems()));
+        assertEquals(1, count("SELECT count(*) FROM producer_decision WHERE dream_short_id = :d AND stage = 'DREAM_PICTURES' AND video_id IS NULL"));
+        assertEquals(1, count("SELECT count(*) FROM cost_entry WHERE dream_short_id = :d AND note LIKE 'PRODUCER review%'"));
+        producer.recordOwnerDecision(dream, "PICTURES", "reject", "yes, fix the rail");
+        assertEquals(1, count("SELECT count(*) FROM producer_decision WHERE dream_short_id = :d AND agreed"));
+
+        // not an autopilot Short: the Producer's ₹100 per Short; an autopilot Short: also the daily cap (₹30 here)
+        assertEquals(0, new BigDecimal("100").compareTo(producer.limit(dream)));
+        jdbc.sql("UPDATE autopilot_setting SET daily_cap_inr = 30").update();
+        jdbc.sql("INSERT INTO autopilot_run (id, run_date, status, dream_short_id) VALUES (:id, DATE '2026-01-01', 'RUNNING', :d)")
+                .param("id", UUID.randomUUID()).param("d", dream).update();
+        assertEquals(0, new BigDecimal("30").compareTo(producer.limit(dream)));
+        assertTrue(producer.spendDecision(dream.toString(), new BigDecimal("25")).approve());
+        assertTrue(!producer.spendDecision(dream.toString(), new BigDecimal("35")).approve(), "over the daily cap: asks");
+        assertEquals(1, count("SELECT count(*) FROM producer_decision WHERE dream_short_id = :d AND acted = 'approved_spend'"));
+    }
 }

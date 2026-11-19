@@ -90,7 +90,7 @@ public class DreamService {
             + "continuous camera move.";
 
     /** Order shown on the new-Short form; the first is the default. */
-    static final List<String> LOOK_ORDER = List.of("lonely", "drive", "walkthrough", "dreamcore", "impossible");
+    public static final List<String> LOOK_ORDER = List.of("lonely", "drive", "walkthrough", "dreamcore", "impossible");
 
     /**
      * The owner's rule for every Dream Short (19 Nov 2026): it may look different each time, but it must feel good or

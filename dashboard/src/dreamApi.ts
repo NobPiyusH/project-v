@@ -1,6 +1,6 @@
 // Client for the Dream Shorts API (/api/dream). Kept apart from api.ts so the main studio's client is untouched.
 
-export type DreamMode = 'AUTO' | 'REVIEW' | 'MANUAL'
+export type DreamMode = 'AUTO' | 'REVIEW' | 'MANUAL' | 'PRODUCER'
 export type DreamStep = 'SCOUT' | 'WRITE' | 'PICTURES' | 'CLIPS' | 'MUSIC' | 'FINISH'
 export const DREAM_STEPS: DreamStep[] = ['SCOUT', 'WRITE', 'PICTURES', 'CLIPS', 'MUSIC', 'FINISH']
 

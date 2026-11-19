@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api, studio } from './api'
+import { Autopilot, autopilotApi } from './pages/Autopilot'
 import { useHashRoute, usePoll } from './hooks'
 import { Home } from './pages/Home'
 import { Providers } from './pages/Providers'
@@ -84,6 +85,8 @@ export default function App() {
   const videoMatch = route.match(/^#\/video\/([0-9a-f-]{36})/)
   const dreamMatch = route.match(/^#\/dream\/([0-9a-f-]{36})/)
   const needsYou = (videos ?? []).filter((v) => v.status === 'WAITING').length
+  const { data: autoRuns } = usePoll(autopilotApi.runs, 30000)
+  const readyToPost = (autoRuns ?? []).filter((r) => r.status === 'READY').length
 
   return (
     <>
@@ -95,6 +98,9 @@ export default function App() {
           </a>
           <a href="#/providers" className={route.startsWith('#/providers') ? 'active' : ''}>Providers</a>
           <a href="#/dream" className={route.startsWith('#/dream') ? 'active' : ''}>Dream Shorts</a>
+          <a href="#/autopilot" className={route.startsWith('#/autopilot') ? 'active' : ''}>
+            Autopilot{readyToPost > 0 && <span className="needs-dot" title={`${readyToPost} Short(s) ready to post`}>{readyToPost}</span>}
+          </a>
         </nav>
         <span className="spacer" />
         {budget && (
@@ -117,6 +123,7 @@ export default function App() {
         {stages && (videoMatch
           ? <VideoDetail id={videoMatch[1]} stages={stages} />
           : route.startsWith('#/providers') ? <Providers />
+          : route.startsWith('#/autopilot') ? <Autopilot />
           : dreamMatch ? <DreamShorts id={dreamMatch[1]} />
           : route.startsWith('#/dream') ? <DreamShorts /> : <Home stages={stages} videos={videos} />)}
       </main>

@@ -4,6 +4,7 @@ import com.projectv.dream.DreamTypes.DreamEstimate;
 import com.projectv.dream.DreamTypes.DreamRequest;
 import com.projectv.dream.DreamTypes.DreamStep;
 import com.projectv.dream.DreamTypes.DreamView;
+import com.projectv.media.MediaTypes.ProducerAdvice;
 import com.projectv.workflow.MediaActivities;
 import com.projectv.workflow.StageMode;
 import com.projectv.workflow.TaskQueues;
@@ -70,7 +71,26 @@ public class DreamShortWorkflowImpl implements DreamShortWorkflow {
                     .setRetryOptions(RetryOptions.newBuilder().setMaximumAttempts(2).build())
                     .build());
 
+    // AI Producer: what to review + saving it + may it act alone (control queue); the review on the media worker.
+    private final DreamProducerActivities producer = Workflow.newActivityStub(DreamProducerActivities.class,
+            ActivityOptions.newBuilder()
+                    .setStartToCloseTimeout(Duration.ofMinutes(2))
+                    .setRetryOptions(RetryOptions.newBuilder().setMaximumAttempts(3).build())
+                    .build());
+
+    private final com.projectv.workflow.ProducerMediaActivities producerMedia = Workflow.newActivityStub(
+            com.projectv.workflow.ProducerMediaActivities.class,
+            ActivityOptions.newBuilder()
+                    .setTaskQueue(TaskQueues.MEDIA)
+                    .setStartToCloseTimeout(Duration.ofMinutes(20))
+                    .setRetryOptions(RetryOptions.newBuilder().setMaximumAttempts(2).build())
+                    .build());
+
+    private final Map<DreamStep, Integer> reviews = new EnumMap<>(DreamStep.class);
+    private final Map<DreamStep, Integer> producerRounds = new EnumMap<>(DreamStep.class);
+
     private String dreamId;
+    private String spendNote;                  // the Producer's reason for asking about a cost
     private StageMode defaultMode = StageMode.AUTO;
     private final Map<DreamStep, StageMode> modes = new EnumMap<>(DreamStep.class);
     private Duration reviewWindow = Duration.ofMinutes(10);
@@ -167,9 +187,10 @@ public class DreamShortWorkflowImpl implements DreamShortWorkflow {
             }
             case CLIPS -> {
                 DreamEstimate est = activities.clipEstimate(dreamId, only);
-                if (est.needsApproval()) {
+                if (est.needsApproval() && !producerApprovesSpend(step, est)) {
                     approved = null;
-                    show(step, "WAITING_COST", est.summary() + " Approve to start.");
+                    show(step, "WAITING_COST", est.summary() + (spendNote == null ? "" : " " + spendNote) + " Approve to start.");
+                    spendNote = null;
                     Workflow.await(() -> approved == DreamStep.CLIPS || cancelled);
                     approved = null;
                     if (cancelled) {
@@ -218,7 +239,11 @@ public class DreamShortWorkflowImpl implements DreamShortWorkflow {
             Workflow.await(() -> decided(step) || modeOf(step) == StageMode.AUTO);
             return take(step);
         }
-        // REVIEW (and PRODUCER, which has no AI producer for Dream Shorts yet): wait the window, then go on.
+        // Version 1: the AI Producer reviews Dream Shorts. Older runs replay PRODUCER like REVIEW.
+        if (mode == StageMode.PRODUCER && Workflow.getVersion("dream-producer", Workflow.DEFAULT_VERSION, 1) == 1) {
+            return producerGate(step, summary);
+        }
+        // REVIEW: wait the window, then go on.
         deadline = Instant.ofEpochMilli(Workflow.currentTimeMillis()).plus(reviewWindow).toString();
         show(step, "WAITING_REVIEW", summary);
         Workflow.await(reviewWindow, () -> decided(step) || modeOf(step) == StageMode.MANUAL || modeOf(step) == StageMode.AUTO);
@@ -228,6 +253,64 @@ public class DreamShortWorkflowImpl implements DreamShortWorkflow {
         }
         deadline = null;
         return take(step);
+    }
+
+    /**
+     * PRODUCER mode: it reviews the step. When it may act alone (autopilot Short, or the owner trusts it) it approves,
+     * or redoes the weak shots with its precise notes (3 rounds, inside the ₹ limits); anything else waits for the owner
+     * with its advice in front of them. Finished Shorts are never redone by it (a redo of Finish changes nothing).
+     */
+    private Redo producerGate(DreamStep step, String summary) {
+        show(step, "RUNNING", "AI Producer is reviewing…");
+        ProducerAdvice advice = review(step);
+        if (advice == null) {
+            message = summary;
+            return null; // nothing it judges here: passes like AUTO
+        }
+        String text = summary + " " + advice.summary();
+        if (advice.decisionId() != null && producer.decides(dreamId)) {
+            if ("approve".equals(advice.verdict())) {
+                producer.markActed(advice.decisionId(), "approved");
+                message = text;
+                return null;
+            }
+            int round = producerRounds.merge(step, 1, Integer::sum);
+            if ("redo".equals(advice.verdict()) && step != DreamStep.FINISH && producer.mayRedo(dreamId, round)) {
+                producer.markActed(advice.decisionId(), "redo");
+                List<String> shots = producer.shotIds(dreamId, advice.weakItems());
+                return new Redo(step, shots, advice.redoNotes());
+            }
+            producer.markActed(advice.decisionId(), "asked");
+        }
+        show(step, "WAITING", text + " Approve, or Redo with notes.");
+        Workflow.await(() -> decided(step) || modeOf(step) == StageMode.AUTO);
+        return take(step);
+    }
+
+    /** The Producer's review as advice; null when it judges nothing here. A failed review never fails the step. */
+    private ProducerAdvice review(DreamStep step) {
+        int attempt = reviews.merge(step, 1, Integer::sum);
+        try {
+            var request = producer.reviewRequest(dreamId, step.name());
+            return request == null ? null : producer.saveReview(dreamId, step.name(), attempt, producerMedia.review(request));
+        } catch (ActivityFailure failure) {
+            return new ProducerAdvice("ask", 0, "AI Producer could not review this step (" + rootMessage(failure)
+                    + "); please decide.", null, null);
+        }
+    }
+
+    /** In PRODUCER mode a deciding Producer approves the clips' cost by itself within the owner's limits. */
+    private boolean producerApprovesSpend(DreamStep step, DreamEstimate est) {
+        if (modeOf(step) != StageMode.PRODUCER
+                || Workflow.getVersion("dream-producer-spend", Workflow.DEFAULT_VERSION, 1) != 1
+                || !producer.decides(dreamId)) {
+            return false;
+        }
+        var decision = producer.spendDecision(dreamId, est.inr());
+        if (!decision.approve()) {
+            spendNote = decision.text();
+        }
+        return decision.approve();
     }
 
     private boolean decided(DreamStep step) {

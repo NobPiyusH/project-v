@@ -46,6 +46,8 @@ try {
     $envFile = Join-Path $RepoRoot '.env'
     if (Test-Path $envFile) { Copy-Item $envFile (Join-Path $target 'env.backup'); Write-Log '.env copied' }
     else { Write-Log "WARNING: no .env at $envFile" }
+    $sec = Join-Path $RepoRoot '.secrets'   # YouTube sign-in for the autopilot's Post button
+    if (Test-Path $sec) { Copy-Item $sec (Join-Path $target 'secrets') -Recurse; Write-Log '.secrets/ copied' }
     $cfg = Join-Path $RepoRoot 'config'
     if (Test-Path $cfg) { Copy-Item $cfg (Join-Path $target 'config') -Recurse; Write-Log 'config/ copied' }
 

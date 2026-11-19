@@ -46,6 +46,7 @@ class DreamShortWorkflowTest {
         volatile List<String> lastClipShots;
         volatile String musicSource = "bed";
         volatile boolean scout = true;
+        final List<String> pictureNotes = new CopyOnWriteArrayList<>();
 
         @Override
         public String writeShots(String dreamId, String notes) {
@@ -55,6 +56,7 @@ class DreamShortWorkflowTest {
 
         @Override
         public KeyframeRequest pictureRequest(String dreamId, List<String> shotIds, String notes) {
+            pictureNotes.add(shotIds + ":" + notes);
             if (failPicturesTimes > 0) {
                 failPicturesTimes--;
                 throw new IllegalStateException("GPU cap reached");
@@ -188,7 +190,68 @@ class DreamShortWorkflowTest {
         }
     }
 
+    /** The AI Producer stand-in: verdicts in order (then approve), and whether it may act alone. */
+    static class FakeProducer implements DreamProducerActivities {
+        final java.util.Queue<String> verdicts = new java.util.concurrent.ConcurrentLinkedQueue<>();
+        final List<String> acted = new CopyOnWriteArrayList<>();
+        final List<String> reviewed = new CopyOnWriteArrayList<>();
+        volatile boolean decides = true;
+        volatile boolean spendApprove = true;
+        volatile int maxRounds = 3;
+
+        @Override
+        public com.projectv.media.MediaTypes.ProducerReviewRequest reviewRequest(String dreamId, String step) {
+            if (step.equals("SCOUT")) {
+                return null;
+            }
+            return new com.projectv.media.MediaTypes.ProducerReviewRequest(dreamId, "DREAM_" + step, "m", "r", "c", List.of(),
+                    List.of(new com.projectv.media.MediaTypes.ProducerItem("shot-1", "Shot 1", "image", "s3://x", null, "e")));
+        }
+
+        @Override
+        public com.projectv.media.MediaTypes.ProducerAdvice saveReview(String dreamId, String step, int attempt,
+                                                                         com.projectv.media.MediaTypes.ProducerReviewResult result) {
+            reviewed.add(step);
+            String v = step.equals("PICTURES") && !verdicts.isEmpty() ? verdicts.poll() : "approve";
+            return new com.projectv.media.MediaTypes.ProducerAdvice(v, 0.9, "advice " + v, "sharper edges", "d-" + step + attempt,
+                    v.equals("redo") ? List.of("shot-1") : List.of());
+        }
+
+        @Override
+        public boolean decides(String dreamId) {
+            return decides;
+        }
+
+        @Override
+        public boolean mayRedo(String dreamId, int round) {
+            return round <= maxRounds;
+        }
+
+        @Override
+        public List<String> shotIds(String dreamId, List<String> itemIds) {
+            return List.of("s1");
+        }
+
+        @Override
+        public com.projectv.media.MediaTypes.SpendDecision spendDecision(String dreamId, BigDecimal estimateInr) {
+            return new com.projectv.media.MediaTypes.SpendDecision(spendApprove, spendApprove ? "approved" : "Producer asks: over ₹50");
+        }
+
+        @Override
+        public void markActed(String decisionId, String acted) {
+            this.acted.add(decisionId + ":" + acted);
+        }
+    }
+
+    static class FakeProducerMedia implements com.projectv.workflow.ProducerMediaActivities {
+        @Override
+        public com.projectv.media.MediaTypes.ProducerReviewResult review(com.projectv.media.MediaTypes.ProducerReviewRequest request) {
+            return new com.projectv.media.MediaTypes.ProducerReviewResult("x", 0.9, "s", "n", List.of(), "m", null);
+        }
+    }
+
     TestWorkflowEnvironment env;
+    FakeProducer producer;
     FakeDream dream;
     WorkflowClient client;
 
@@ -196,11 +259,12 @@ class DreamShortWorkflowTest {
     void setUp() {
         env = TestWorkflowEnvironment.newInstance();
         dream = new FakeDream();
+        producer = new FakeProducer();
         Worker control = env.newWorker(TaskQueues.CONTROL);
         control.registerWorkflowImplementationTypes(DreamShortWorkflowImpl.class);
-        control.registerActivitiesImplementations(dream);
+        control.registerActivitiesImplementations(dream, producer);
         Worker media = env.newWorker(TaskQueues.MEDIA);
-        media.registerActivitiesImplementations(fakeMedia(), new FakeFinish());
+        media.registerActivitiesImplementations(fakeMedia(), new FakeFinish(), new FakeProducerMedia());
         env.start();
         client = env.getWorkflowClient();
     }
@@ -230,6 +294,59 @@ class DreamShortWorkflowTest {
             env.sleep(Duration.ofMillis(50));
         }
         throw new AssertionError("never reached " + step + " " + status + "; at " + wf.view());
+    }
+
+    @Test
+    void decidingProducerRedoesWeakShotsWithItsNotesThenApproves() {
+        producer.verdicts.add("redo");
+        start(StageMode.PRODUCER, Map.of(DreamStep.SCOUT, StageMode.AUTO));
+        assertEquals("completed", result());
+        assertEquals(List.of("null:null", "[s1]:sharper edges"), dream.pictureNotes);
+        assertTrue(producer.acted.contains("d-PICTURES1:redo"));
+        assertTrue(producer.acted.contains("d-PICTURES2:approved"));
+        assertEquals(List.of("WRITE", "PICTURES", "PICTURES", "CLIPS", "MUSIC", "FINISH"), producer.reviewed);
+    }
+
+    @Test
+    void producerStopsRedoingAfterItsRoundsAndAsksTheOwner() {
+        producer.maxRounds = 1;
+        producer.verdicts.addAll(List.of("redo", "redo"));
+        DreamShortWorkflow wf = start(StageMode.PRODUCER, Map.of(DreamStep.SCOUT, StageMode.AUTO));
+        waitFor(wf, "PICTURES", "WAITING");
+        assertTrue(wf.view().message().contains("advice redo"));
+        assertTrue(producer.acted.contains("d-PICTURES2:asked"));
+        wf.approve(DreamStep.PICTURES);
+        assertEquals("completed", result());
+    }
+
+    @Test
+    void advisingProducerLeavesTheDecisionToTheOwner() {
+        producer.decides = false;
+        DreamShortWorkflow wf = start(StageMode.AUTO, Map.of(DreamStep.WRITE, StageMode.PRODUCER));
+        waitFor(wf, "WRITE", "WAITING");
+        assertTrue(wf.view().message().contains("advice approve"));
+        assertTrue(producer.acted.isEmpty());
+        wf.approve(DreamStep.WRITE);
+        assertEquals("completed", result());
+    }
+
+    @Test
+    void decidingProducerApprovesClipCostInsideTheLimits() {
+        dream.askForCost = true;
+        start(StageMode.AUTO, Map.of(DreamStep.CLIPS, StageMode.PRODUCER));
+        assertEquals("completed", result());
+        assertTrue(dream.events.stream().noneMatch(e -> e.equals("status:CLIPS:WAITING_COST")));
+    }
+
+    @Test
+    void clipCostAboveTheLimitsWaitsForTheOwnerWithTheProducersReason() {
+        dream.askForCost = true;
+        producer.spendApprove = false;
+        DreamShortWorkflow wf = start(StageMode.AUTO, Map.of(DreamStep.CLIPS, StageMode.PRODUCER));
+        waitFor(wf, "CLIPS", "WAITING_COST");
+        assertTrue(wf.view().message().contains("over ₹50"));
+        wf.approve(DreamStep.CLIPS);
+        assertEquals("completed", result());
     }
 
     @Test

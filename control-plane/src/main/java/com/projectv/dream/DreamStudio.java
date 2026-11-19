@@ -22,7 +22,12 @@ public class DreamStudio {
 
     public record NewDream(String idea, String look, Integer shots, String quality, String defaultMode,
                            Map<String, String> modes, Integer reviewMinutes, String music, Boolean scout,
-                           Boolean musicEdit, Boolean ambience, Boolean pacing) {
+                           Boolean musicEdit, Boolean ambience, Boolean pacing, Boolean producerDecides) {
+        /** The dashboard's form (the Producer follows the global trust switch). */
+        public NewDream(String idea, String look, Integer shots, String quality, String defaultMode, Map<String, String> modes,
+                        Integer reviewMinutes, String music, Boolean scout, Boolean musicEdit, Boolean ambience, Boolean pacing) {
+            this(idea, look, shots, quality, defaultMode, modes, reviewMinutes, music, scout, musicEdit, ambience, pacing, null);
+        }
     }
 
     private final JdbcClient jdbc;
@@ -30,9 +35,11 @@ public class DreamStudio {
     private final ObjectMapper json;
     private final DreamService dreams;
     private final com.projectv.video.ClipProgress clipProgress;
+    private final DreamProducer producer;
 
     public DreamStudio(JdbcClient jdbc, WorkflowClient temporal, ObjectMapper json, DreamService dreams,
-                       com.projectv.video.ClipProgress clipProgress) {
+                       com.projectv.video.ClipProgress clipProgress, DreamProducer producer) {
+        this.producer = producer;
         this.jdbc = jdbc;
         this.temporal = temporal;
         this.json = json;
@@ -61,10 +68,11 @@ public class DreamStudio {
         }
         jdbc.sql("""
                         INSERT INTO dream_short (id, idea, look, shot_count, quality, modes_json, review_minutes, status, step, workflow_id,
-                                                 music_source, scout, edit_music, edit_ambience, edit_pacing)
+                                                 music_source, scout, edit_music, edit_ambience, edit_pacing, producer_decides)
                         VALUES (:id, :idea, :look, :n, :q, CAST(:modes AS jsonb), :r, 'RUNNING', 'SCOUT', :wf, :music, :scout,
-                                :em, :ea, :ep)
+                                :em, :ea, :ep, :pd)
                         """)
+                .param("pd", Boolean.TRUE.equals(req.producerDecides()))
                 .param("em", req.musicEdit() == null || req.musicEdit()).param("ea", req.ambience() == null || req.ambience())
                 .param("ep", req.pacing() == null || req.pacing())
                 .param("scout", req.scout() == null || req.scout())
@@ -134,6 +142,7 @@ public class DreamStudio {
                         FROM routing_decision WHERE dream_short_id = :d ORDER BY created_at
                         """).param("d", id).query().listOfRows());
         out.put("events", dreams.evidence().events(id));
+        out.put("producer", producer.decisions(id));
         out.put("metrics", dreams.evidence().metrics(id));
         var progress = clipProgress.get(id);
         out.put("clipProgress", progress == null ? null : progress.clips());
@@ -147,11 +156,13 @@ public class DreamStudio {
 
     public void approve(UUID id, DreamStep step) {
         stub(id).approve(step);
+        producer.recordOwnerDecision(id, step.name(), "approve", null);
         dreams.evidence().event(id, step.name(), "approve", null, null, null);
     }
 
     public void redo(UUID id, DreamStep step, List<String> shotIds, String notes) {
         stub(id).redo(step, shotIds, notes);
+        producer.recordOwnerDecision(id, step.name(), "reject", notes);
         dreams.evidence().event(id, step.name(), "redo", shotIds, notes, null);
     }
 
