@@ -102,6 +102,19 @@ public final class DreamTypes {
     public record SimilarShot(int shot, String like, String why) {
     }
 
+    /** Quality check of a finished Short: Gemini watches a small copy against the owner's checklist. */
+    /** {@code pictureUris} set = check the stills before clips; otherwise {@code videoUri} = the finished Short. */
+    public record DreamCheckRequest(String dreamId, String videoUri, String brief, String model, List<String> pictureUris) {
+    }
+
+    public record CheckIssue(int shot, double atSec, String problem, String fix) {
+    }
+
+    /** {@code overall} 0 and {@code error} set when the check could not run (it never fails the Short). */
+    public record DreamCheckResult(Map<String, Integer> scores, int overall, List<CheckIssue> issues, String summary,
+                                   String model, com.projectv.media.MediaTypes.Usage usage, String error) {
+    }
+
     /** What the workflow shows the dashboard (Temporal query). */
     public record DreamView(String step, String status, String message, Map<String, String> modes, String deadline) {
     }

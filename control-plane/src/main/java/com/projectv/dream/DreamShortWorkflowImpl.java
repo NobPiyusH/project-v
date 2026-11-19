@@ -162,8 +162,20 @@ public class DreamShortWorkflowImpl implements DreamShortWorkflow {
             case WRITE -> activities.writeShots(dreamId, notes);
             case PICTURES -> {
                 var req = activities.pictureRequest(dreamId, only, notes);
-                yield req.jobs().isEmpty() ? "Every shot already has a picture."
+                String made = req.jobs().isEmpty() ? "Every shot already has a picture."
                         : activities.savePictures(dreamId, req, pictures.generateKeyframes(req));
+                // Version 1 added a check of the pictures before clips are paid for; older runs replay without it.
+                if (!req.jobs().isEmpty() && Workflow.getVersion("dream-picture-check", Workflow.DEFAULT_VERSION, 1) == 1) {
+                    try {
+                        var check = activities.pictureCheckRequest(dreamId);
+                        if (check != null) {
+                            made = made + " " + activities.savePictureCheck(dreamId, finish.dreamCheck(check));
+                        }
+                    } catch (ActivityFailure e) {
+                        // a failed check never holds up the pictures
+                    }
+                }
+                yield made;
             }
             case CLIPS -> {
                 DreamEstimate est = activities.clipEstimate(dreamId, only);
@@ -189,7 +201,21 @@ public class DreamShortWorkflowImpl implements DreamShortWorkflow {
                 }
                 yield activities.saveMusic(dreamId, music.generateMusic(activities.musicRequest(dreamId, notes)));
             }
-            case FINISH -> activities.saveFinish(dreamId, finish.dreamFinish(activities.finishRequest(dreamId)));
+            case FINISH -> {
+                String done = activities.saveFinish(dreamId, finish.dreamFinish(activities.finishRequest(dreamId)));
+                // Version 1 added the quality check after the finish; older runs replay without it.
+                if (Workflow.getVersion("dream-check", Workflow.DEFAULT_VERSION, 1) == 1) {
+                    try {
+                        var req = activities.checkRequest(dreamId);
+                        if (req != null) {
+                            done = done + " " + activities.saveCheck(dreamId, finish.dreamCheck(req));
+                        }
+                    } catch (ActivityFailure e) {
+                        // a failed check never holds up a finished Short
+                    }
+                }
+                yield done;
+            }
         };
     }
 

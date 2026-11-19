@@ -59,6 +59,8 @@ public class DreamService {
     static final BigDecimal LISTEN_ESTIMATE_INR = new BigDecimal("0.80"); // measured Rs 0.57-0.79 (19 Nov)
     /** Scout: Shorts watched per idea, and the estimate held before it runs (unmeasured until the first runs). */
     static final int SCOUT_VIDEOS = 6;
+    /** Quality check: a ~360p copy watched by Gemini (estimate until measured). */
+    static final BigDecimal CHECK_ESTIMATE_INR = new BigDecimal("0.50");
     static final BigDecimal SCOUT_ESTIMATE_INR = new BigDecimal("6"); // measured Rs 4.56 and Rs 5.96 (19 Nov)
     static final int FPS = 16;          // Wan's own frame rate; the finish makes it 24
     static final int MIN_FRAMES = 33;
@@ -199,6 +201,7 @@ public class DreamService {
     private final String listenModel;
     private final DreamEvidence evidence;
     private final String briefModel;
+    private final boolean qualityCheck;
 
     public DreamService(JdbcClient jdbc, ObjectMapper json, Llm llm, AssetStore assets, Pricing pricing, BudgetGuard budget,
                         Router router, com.projectv.video.ClipProgress clipProgress,
@@ -213,7 +216,8 @@ public class DreamService {
                         @Value("${projectv.models.music:lyria-3.5}") String musicModel,
                         @Value("${projectv.dream.music-bed:}") String musicBed,
                         @Value("${projectv.models.vision:gemini-3.6-flash}") String listenModel,
-                        @Value("${projectv.models.story:claude:claude-sonnet-5-5}") String briefModel) {
+                        @Value("${projectv.models.story:claude:claude-sonnet-5-5}") String briefModel,
+                        @Value("${projectv.dream.quality-check:true}") boolean qualityCheck) {
         this.jdbc = jdbc;
         this.json = json;
         this.llm = llm;
@@ -235,6 +239,7 @@ public class DreamService {
         this.listenModel = listenModel;
         this.evidence = new DreamEvidence(jdbc, json);
         this.briefModel = briefModel;
+        this.qualityCheck = qualityCheck;
     }
 
     public DreamEvidence evidence() {
@@ -859,6 +864,79 @@ public class DreamService {
         return "Finished: %.1f s, %dx%d at %d fps (%s)%s.".formatted(r.durationSec(), r.width(), r.height(), r.fps(),
                 "rife-laptop".equals(r.smoothing()) ? "smoothed with RIFE on the laptop" : "smoothed with FFmpeg",
                 r.music() == null ? ", no music" : ", music: " + r.music());
+    }
+
+    // ------------------------------------------------------------------------------------------- QUALITY CHECK
+
+    public DreamTypes.DreamCheckRequest checkRequest(UUID id) {
+        Map<String, Object> d = dream(id);
+        if (!qualityCheck || d.get("final_asset_id") == null) {
+            return null;
+        }
+        try {
+            budget.require(CHECK_ESTIMATE_INR, "Dream Short quality check");
+        } catch (BudgetGuard.BudgetExceededException e) {
+            return null; // over the Gemini cap: the Short is finished anyway
+        }
+        return new DreamTypes.DreamCheckRequest(storageId(id), assets.uriOf((UUID) d.get("final_asset_id")), checkBrief(id, d),
+                listenModel, null);
+    }
+
+    /** The same check on the pictures (a few paise), so most redos happen before any GPU clip is paid for. */
+    public DreamTypes.DreamCheckRequest pictureCheckRequest(UUID id) {
+        Map<String, Object> d = dream(id);
+        List<String> pictures = shots(id).stream().map(s -> (String) s.get("picture_uri")).filter(Objects::nonNull).toList();
+        if (!qualityCheck || pictures.isEmpty()) {
+            return null;
+        }
+        try {
+            budget.require(CHECK_ESTIMATE_INR, "Dream Short picture check");
+        } catch (BudgetGuard.BudgetExceededException e) {
+            return null;
+        }
+        return new DreamTypes.DreamCheckRequest(storageId(id), null, checkBrief(id, d), listenModel, pictures);
+    }
+
+    private String checkBrief(UUID id, Map<String, Object> d) {
+        StringBuilder brief = new StringBuilder("Look: " + look((String) d.get("look")).brief());
+        brief.append("\nTitle: ").append(Objects.toString(d.get("title"), "")).append("\nIdea: ").append(d.get("idea"));
+        Scouted s = scouted(d);
+        if (s != null && s.chosen() != null) {
+            brief.append("\nThe owner's chosen angle (one story, shots in this order): ").append(s.chosen().title())
+                    .append(" - ").append(s.chosen().idea());
+        }
+        int n = 1;
+        for (Map<String, Object> shot : shots(id)) {
+            brief.append("\nShot ").append(n++).append(": ").append(shot.get("scene"));
+        }
+        return brief.toString();
+    }
+
+    @Transactional
+    public String saveCheck(UUID id, DreamTypes.DreamCheckResult r, String stage) {
+        boolean pictures = "PICTURES".equals(stage);
+        if (r.usage() != null) {
+            BigDecimal inr = pricing.textInr(r.usage());
+            cost(id, BudgetGuard.GEMINI, inr, r.usage().totalTokens(), "token", false,
+                    "Dream Short " + (pictures ? "picture" : "quality") + " check (" + r.model() + ")");
+            evidence.costCheck(id, pictures ? "PICTURE_CHECK" : "CHECK", CHECK_ESTIMATE_INR.doubleValue(), inr.doubleValue());
+            UUID decision = router.recordExternal(null, "DREAM_CHECK", "video.watch", BudgetGuard.GEMINI,
+                    "quality check: Gemini watches the finished Short (only model that takes video)",
+                    List.of(Map.of("provider", BudgetGuard.GEMINI)));
+            tag("routing_decision", decision, id);
+        }
+        if (r.error() != null || r.overall() <= 0) {
+            evidence.event(id, stage, "check", null, "check unavailable: " + r.error(), null);
+            return (pictures ? "Picture" : "Quality") + " check unavailable this time.";
+        }
+        jdbc.sql("UPDATE dream_short SET " + (pictures ? "picture_check_json" : "check_json")
+                        + " = CAST(:j AS jsonb), updated_at = now() WHERE id = :d")
+                .param("j", json.writeValueAsString(r)).param("d", id).update();
+        evidence.event(id, stage, "check", null, r.summary(), Map.of("overall", r.overall(), "issues",
+                r.issues() == null ? 0 : r.issues().size()));
+        int issues = r.issues() == null ? 0 : r.issues().size();
+        return (pictures ? "Picture" : "Quality") + " check: %d/10%s.".formatted(r.overall(), issues == 0 ? ", no issues"
+                : ", %d issue%s - %s".formatted(issues, issues > 1 ? "s" : "", r.issues().getFirst().problem()));
     }
 
     // ------------------------------------------------------------------------------------------- shared helpers

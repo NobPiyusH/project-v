@@ -63,6 +63,26 @@ public class DreamActivitiesImpl implements DreamActivities {
     }
 
     @Override
+    public DreamTypes.DreamCheckRequest checkRequest(String dreamId) {
+        return dreams.checkRequest(UUID.fromString(dreamId));
+    }
+
+    @Override
+    public String saveCheck(String dreamId, DreamTypes.DreamCheckResult result) {
+        return dreams.saveCheck(UUID.fromString(dreamId), result, "FINISH");
+    }
+
+    @Override
+    public DreamTypes.DreamCheckRequest pictureCheckRequest(String dreamId) {
+        return dreams.pictureCheckRequest(UUID.fromString(dreamId));
+    }
+
+    @Override
+    public String savePictureCheck(String dreamId, DreamTypes.DreamCheckResult result) {
+        return dreams.saveCheck(UUID.fromString(dreamId), result, "PICTURES");
+    }
+
+    @Override
     public boolean scoutWanted(String dreamId) {
         return dreams.scoutWanted(UUID.fromString(dreamId));
     }

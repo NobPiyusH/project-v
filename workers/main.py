@@ -26,6 +26,7 @@ from workers.activities.voice import synthesize_narration
 from workers.dream.finish import dream_finish
 from workers.dream.music_bed import dream_music_bed
 from workers.dream.scout import dream_scout
+from workers.dream.check import dream_check
 from workers import modal_billing
 from workers.common import ensure_bucket
 
@@ -50,7 +51,7 @@ async def main() -> None:
             activities=[tool_versions, research_topic, synthesize_narration, generate_music,
                         generate_keyframes, render_animatic, inspect_media, review_images,
                         generate_clips, search_footage, fetch_footage, assemble_video,
-                        smooth_clips, upscale_clips, check_sources, producer_review, dream_finish, dream_music_bed, dream_scout],
+                        smooth_clips, upscale_clips, check_sources, producer_review, dream_finish, dream_music_bed, dream_scout, dream_check],
             activity_executor=pool,
             max_concurrent_activities=8,
         )

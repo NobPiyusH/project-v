@@ -101,6 +101,28 @@ class DreamShortWorkflowTest {
         }
 
         @Override
+        public DreamTypes.DreamCheckRequest checkRequest(String dreamId) {
+            return new DreamTypes.DreamCheckRequest(dreamId, "s3://final", "brief", "gemini", null);
+        }
+
+        @Override
+        public DreamTypes.DreamCheckRequest pictureCheckRequest(String dreamId) {
+            return new DreamTypes.DreamCheckRequest(dreamId, null, "brief", "gemini", List.of("s3://img"));
+        }
+
+        @Override
+        public String savePictureCheck(String dreamId, DreamTypes.DreamCheckResult result) {
+            events.add("picture-check:" + result.overall());
+            return "pictures checked";
+        }
+
+        @Override
+        public String saveCheck(String dreamId, DreamTypes.DreamCheckResult result) {
+            events.add("check:" + result.overall());
+            return "checked";
+        }
+
+        @Override
         public boolean scoutWanted(String dreamId) {
             return scout;
         }
@@ -177,6 +199,11 @@ class DreamShortWorkflowTest {
         }
 
         @Override
+        public DreamTypes.DreamCheckResult dreamCheck(DreamTypes.DreamCheckRequest request) {
+            return new DreamTypes.DreamCheckResult(java.util.Map.of("noPeople", 10), 9, List.of(), "fine", "gemini", null, null);
+        }
+
+        @Override
         public DreamTypes.DreamScoutResult dreamScout(DreamTypes.DreamScoutRequest request) {
             return new DreamTypes.DreamScoutResult(List.of(new DreamTypes.ScoutVideo("u", "t", "c", 1000L, 20.0, "a kiosk",
                     null, null, 4, 4.0, null, null, null, null, null)), List.of(), "youtube", 1, null);
@@ -236,10 +263,12 @@ class DreamShortWorkflowTest {
     void autoRunsAllFourStepsInOrder() {
         start(StageMode.AUTO, Map.of());
         assertEquals("completed", result());
-        List<String> work = dream.events.stream().filter(e -> !e.startsWith("status") && !e.startsWith("music:")).toList();
+        List<String> work = dream.events.stream().filter(e -> !e.startsWith("status") && !e.startsWith("music:") && !e.contains("check:")).toList();
         assertEquals(List.of("scout:idea:1", "write", "pictures", "clips", "music", "finish"), work);
         assertTrue(dream.events.contains("status:FINISH:COMPLETED"));
         assertTrue(dream.events.contains("music:bed:754.2"), "the owner's track is the default music");
+        assertTrue(dream.events.contains("check:9"), "every finished Short gets a quality check");
+        assertTrue(dream.events.contains("picture-check:9"), "the pictures are checked before clips");
     }
 
     @Test
@@ -305,7 +334,7 @@ class DreamShortWorkflowTest {
         WorkflowClient.start(wf::run, new DreamRequest("00000000-0000-0000-0000-000000000001", StageMode.AUTO, Map.of(), 10,
                 DreamStep.MUSIC));
         assertEquals("completed", result());
-        assertEquals(List.of("music", "finish"), dream.events.stream().filter(e -> !e.startsWith("status") && !e.startsWith("music:")).toList());
+        assertEquals(List.of("music", "finish"), dream.events.stream().filter(e -> !e.startsWith("status") && !e.startsWith("music:") && !e.contains("check:")).toList());
     }
 
     @Test
