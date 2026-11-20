@@ -94,11 +94,11 @@ class DreamChoosePathTest {
     /** The writer's prompts (system, user). */
     static String[] write(UUID id, List<String> paths) {
         clearInvocations(llm);
-        when(llm.call(any(), eq("dream.write"), any(), any(), eq(DreamWorld.class))).thenReturn(world(paths));
+        when(llm.call(any(), eq("dream.write"), any(), any(), eq(DreamWorld.class), any())).thenReturn(world(paths));
         dreams.writeShots(id, null);
         ArgumentCaptor<String> sys = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<String> user = ArgumentCaptor.forClass(String.class);
-        verify(llm).call(any(), eq("dream.write"), sys.capture(), user.capture(), eq(DreamWorld.class));
+        verify(llm).call(any(), eq("dream.write"), sys.capture(), user.capture(), eq(DreamWorld.class), any());
         return new String[]{sys.getValue(), user.getValue()};
     }
 
