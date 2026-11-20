@@ -132,8 +132,8 @@ class DreamHookChainIdeasTest {
     }
 
     DreamWorld world(String hook) {
-        return new DreamWorld("T", "w", "p", "l", "", List.of(new PlannedDreamShot("s1", "m1"), new PlannedDreamShot("s2", "m2"),
-                new PlannedDreamShot("s3", "m3")), hook);
+        return new DreamWorld("T", "a city of twisted glass", "p", "l", "", List.of(new PlannedDreamShot("s1", "m1"),
+                new PlannedDreamShot("s2", "m2"), new PlannedDreamShot("s3", "m3")), hook, "forward down the avenue, rising, then turning left");
     }
 
     /** The writer's prompts (system, user) for this Short, with a fake writer that answers {@code hook}. */
@@ -254,6 +254,23 @@ class DreamHookChainIdeasTest {
         assertNull(jobs.get(1).chainFromUri(), "shot 3 starts a new pair, from its own picture");
         assertEquals("s3://b/p3.png", jobs.get(1).imageUri());
         assertNull(jobs.get(2).chainFromUri(), "shot 4 continues from shot 3, made in this batch");
+    }
+
+    @Test
+    void aLockedSceneHasOneCameraPathOneWorldAndOneSeed() {
+        jdbc.sql("UPDATE dream_short SET chain_shots = true, chain_locked = true WHERE id = :d").param("d", dream).update();
+        assertTrue(dreams.locked(dream));
+        String sys = write(dream, null)[0];
+        assertTrue(sys.contains("ONE locked scene") && sys.contains("\"cameraPath\""));
+        var mp = jdbc.sql("SELECT motion_prompt FROM dream_shot WHERE dream_short_id = :d ORDER BY ord").param("d", dream).query(String.class).list();
+        assertTrue(mp.stream().allMatch(m -> m.contains("forward down the avenue, rising, then turning left") && m.contains("a city of twisted glass")), mp.toString());
+        for (UUID s : List.of(shot1, shot2, shot3)) {
+            media(s, "s3://b/p-" + s + ".png", null);
+        }
+        var seeds = dreams.clipJobs(dream, null).stream().map(j -> j.seed() - j.take()).distinct().toList();
+        assertEquals(1, seeds.size(), "every clip of the scene shares one seed");
+        jdbc.sql("UPDATE dream_short SET chain_group = 2 WHERE id = :d").param("d", dream).update();
+        assertFalse(dreams.locked(dream), "pairs are separate scenes: not locked");
     }
 
     @Test

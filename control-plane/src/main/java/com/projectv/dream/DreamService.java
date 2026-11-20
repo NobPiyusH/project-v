@@ -141,6 +141,16 @@ public class DreamService {
             + "of the same world: another angle, place or moment, with a cut from the scene before. In each shot's scene "
             + "describe what the camera sees at the END of that shot; in its motion the same continuous movement carrying on.";
 
+    /** Locked scene: one camera path for the whole Short, planned first, and the shots are consecutive segments of it. */
+    static final String LOCKED_STRUCTURE = "Invent ONE locked scene, like a single camera move through one 3D set: first plan ONE "
+            + "camera path for the whole Short (a single flowing route, e.g. forward down the avenue, rising, then turning left), then "
+            + "cut it into %d consecutive segments of equal length. Every shot is the next segment of that same path in the SAME "
+            + "world: it starts exactly where the previous shot ended (its first frame IS the previous shot's last frame) and the "
+            + "camera keeps the same direction and speed. Never cut to another place, time of day or style. In each shot's scene "
+            + "describe what the camera sees at the END of that segment; in its motion only that segment of the one path.";
+
+    static final String CAMERA_PATH_FIELD = ", \"cameraPath\": the one camera path of the whole Short in a single sentence";
+
     /** Asked of the writer only when the Short has a hook title (setting off = the prompt is unchanged). */
     static final String HOOK_FIELD = ", \"hook\": a 3 to 6 word hook title for the first two seconds, upper case, written to make "
             + "a viewer curious about THIS Short (a surprising claim about the place, not a description), with exactly ONE key "
@@ -379,6 +389,7 @@ public class DreamService {
         Scouted scouted = scouted(d);
         boolean chain = Boolean.TRUE.equals(d.get("chain_shots"));
         int group = ((Number) d.get("chain_group")).intValue();
+        boolean locked = chain && group == 0 && Boolean.TRUE.equals(d.get("chain_locked"));
         boolean hook = Boolean.TRUE.equals(d.get("hook_title"));
         var seed = DreamIdeaPacks.resolve((String) d.get("idea_ref"));
         // The owner's chosen Scout angle replaces the look's shot structure (19 Nov: as a user-message note it lost
@@ -387,6 +398,7 @@ public class DreamService {
         String structure = scouted != null && scouted.chosen() != null
                 ? ("Invent %d shots that are consecutive moments of ONE idea the owner chose, in the same place, flowing "
                 + "into each other: %s - %s").formatted(count, scouted.chosen().title(), scouted.chosen().idea())
+                : locked ? LOCKED_STRUCTURE.formatted(count)
                 : chain ? (group > 0 ? CHAIN_GROUP_STRUCTURE.formatted(count, group, group) : CHAIN_STRUCTURE.formatted(count))
                 : look.structure().formatted(count);
         String system = """
@@ -403,7 +415,7 @@ public class DreamService {
                 "shots": [{"scene": what this shot shows (one or two sentences, concrete), "motion": the camera move and
                 the small motion inside the scene}]%s} with exactly %d shots.
                 """.formatted(structure, "architecture".equals(d.get("look")) ? FEEL_ARCHITECTURE : FEEL, look.brief(),
-                hook ? HOOK_FIELD : "", count) + lessons("WRITER");
+                (hook ? HOOK_FIELD : "") + (locked ? CAMERA_PATH_FIELD : ""), count) + lessons("WRITER");
         String user = "Idea: " + d.get("idea") + (notes == null || notes.isBlank() ? "" : "\nOwner's notes for this rewrite: " + notes)
                 + (seed.isPresent() ? DreamIdeaPacks.forWriter(seed.get()) : "")
                 + (scouted == null ? "" : scouted.forWriter());
@@ -429,7 +441,7 @@ public class DreamService {
                             VALUES (:id, :d, :o, :scene, :pp, :mp)
                             """)
                     .param("id", UUID.randomUUID()).param("d", id).param("o", ord++).param("scene", s.scene())
-                    .param("pp", picturePrompt(w, s, look)).param("mp", motionPrompt(s, look)).update();
+                    .param("pp", picturePrompt(w, s, look)).param("mp", locked ? lockedMotionPrompt(w, s, look) : motionPrompt(s, look)).update();
         }
         jdbc.sql("""
                         UPDATE dream_short SET title = :t, world_json = CAST(:w AS jsonb), final_asset_id = NULL,
@@ -653,6 +665,15 @@ public class DreamService {
                 "Style:", look.pictureStyle()).replaceAll("\\s+", " ");
     }
 
+    /** Locked scene: every clip restates the one world and the one camera path, so the shots stay the same scene. */
+    static String lockedMotionPrompt(DreamWorld w, PlannedDreamShot s, Look look) {
+        String path = Objects.toString(w.cameraPath(), "").strip();
+        return (motionPrompt(s, look) + (path.isEmpty() ? "" : " One continuous camera path for the whole video: " + path + ".")
+                + " The same world throughout: " + Objects.toString(w.world(), "").strip() + " Palette: "
+                + Objects.toString(w.palette(), "").strip() + " Light: " + Objects.toString(w.light(), "").strip())
+                .replaceAll("\\s+", " ");
+    }
+
     static String motionPrompt(PlannedDreamShot s, Look look) {
         return (Objects.toString(s.motion(), "").strip() + ". " + s.scene().strip() + ". " + look.motionStyle()).replaceAll("\\s+", " ");
     }
@@ -773,7 +794,7 @@ public class DreamService {
             route(id, "DREAM_CLIPS", "video.i2v.dream", POD, inr);
             var session = this.gpu.session(id);
             return new ClipRequest(storageId(id), wanApp, wanClass, publicUrl, jobs, 1, sec, inr, "pod", null, null, 0,
-                    session.url(), session.readyTimeoutSeconds(), chained(id), chainGroup(id));
+                    session.url(), session.readyTimeoutSeconds(), chained(id), chainGroup(id), locked(id));
         }
         double gpu = gpuSeconds(jobs, (String) dream(id).get("quality"));
         BigDecimal inr = pricing.modalGpuInr("H100", gpu);
@@ -782,12 +803,19 @@ public class DreamService {
         // One GPU, clips in turn: the ~2 min start-up + model load is paid once for the whole Short. When the AI
         // Producer runs this Short by itself, the GPU stays warm a little after each batch so its redo skips a start-up.
         return new ClipRequest(storageId(id), wanApp, wanClass, publicUrl, jobs, 1, gpu, inr.setScale(2, RoundingMode.HALF_UP),
-                "wan", null, null, holdSeconds(id), null, 0, chained(id), chainGroup(id));
+                "wan", null, null, holdSeconds(id), null, 0, chained(id), chainGroup(id), locked(id));
     }
 
     /** Whether this Short chains its shots (each clip starts from the last frame of the one before). Off by default. */
     boolean chained(UUID id) {
         return Boolean.TRUE.equals(dream(id).get("chain_shots"));
+    }
+
+    /** Locked scene: one chain through the whole Short with one camera path, one world and one seed (needs chaining, no groups). */
+    boolean locked(UUID id) {
+        var d = dream(id);
+        return Boolean.TRUE.equals(d.get("chain_shots")) && ((Number) d.get("chain_group")).intValue() == 0
+                && Boolean.TRUE.equals(d.get("chain_locked"));
     }
 
     /** Chain length: 0 = one chain through the whole Short, N = chains of N shots (2: shots 1+2 and 3+4 chained). */
@@ -824,6 +852,8 @@ public class DreamService {
                 : fixes.stream().map(RedoStopRule.Cause::negative).collect(java.util.stream.Collectors.joining(", "));
         boolean chain = Boolean.TRUE.equals(d.get("chain_shots"));
         int group = chain ? ((Number) d.get("chain_group")).intValue() : 0;
+        boolean locked = chain && group == 0 && Boolean.TRUE.equals(d.get("chain_locked"));
+        long sceneSeed = Math.abs((long) id.hashCode());
         String before = null; // the clip of the shot before this one, when it already exists (chained shots)
         for (Map<String, Object> s : shots(id)) {
             String shotId = s.get("id").toString();
@@ -840,7 +870,7 @@ public class DreamService {
             int take = ((Number) s.get("clip_takes")).intValue() + 1;
             jobs.add(new ClipJob(shotId, ((Number) s.get("ord")).intValue() + 1, take, "dream", "fast",
                     (String) s.get("picture_uri"), fixPrompt.isEmpty() ? (String) s.get("motion_prompt") : s.get("motion_prompt") + fixPrompt, size[0], size[1], frames,
-                    Math.abs((long) shotId.hashCode()) + take, negative, continues ? clipBefore : null));
+                    (locked ? sceneSeed : Math.abs((long) shotId.hashCode())) + take, negative, continues ? clipBefore : null));
         }
         return jobs;
     }

@@ -9,6 +9,8 @@ from workers.activities import clips as C
 from workers.common import ffmpeg_bin, run_ffmpeg
 from workers.pod import client
 
+PNG = bytes([0x89]) + b"PNG"
+
 
 def _two_colour_mp4(path: Path, first: str, last: str) -> bytes:
     """1 s of `first` then 1 s of `last`: the first frame and the last frame differ."""
@@ -41,7 +43,7 @@ def test_start_image_chains_from_the_previous_clip_and_falls_back_to_the_picture
     assert C.start_image(_job(1), True, {}, set()) == b"s3://b/pic1.png"                    # first shot: its own picture
     assert C.start_image(_job(2), False, {1: clip}, set()) == b"s3://b/pic2.png"            # chaining off: unchanged
     assert C.start_image(_job(2), True, {1: clip}, set())[:4] == b"\x89PNG"                 # chained: previous last frame
-    monkeypatch.setattr(C, "last_frame_png", lambda mp4: (_ for _ in ()).throw(RuntimeError("bad file")))
+    monkeypatch.setattr(C, "last_frame_png", lambda mp4, clean=False: (_ for _ in ()).throw(RuntimeError("bad file")))
     with pytest.raises(C.ChainBroken, match="could not be read"):                          # extraction failed: no silent
         C.start_image(_job(2), True, {1: clip}, set())                                      # fallback to another picture
     with pytest.raises(C.ChainBroken, match="no clip yet"):
@@ -53,7 +55,7 @@ def test_start_image_chains_from_the_previous_clip_and_falls_back_to_the_picture
 def test_start_image_uses_the_clip_before_this_batch(monkeypatch):
     seen = []
     monkeypatch.setattr(C, "get_bytes", lambda uri: seen.append(uri) or b"mp4-before")
-    monkeypatch.setattr(C, "last_frame_png", lambda mp4: b"PNG:" + mp4)
+    monkeypatch.setattr(C, "last_frame_png", lambda mp4, clean=False: b"PNG:" + mp4)
     out = C.start_image(_job(3, chainFromUri="s3://b/shot002.mp4"), True, {}, set())   # shot 2 was made in an earlier batch
     assert out == b"PNG:mp4-before" and seen == ["s3://b/shot002.mp4"]
 
@@ -64,7 +66,7 @@ def _pod_setup(monkeypatch, fail_shot=None):
     monkeypatch.setattr(C, "put_bytes", lambda key, data, ct: f"s3://b/{key}")
     monkeypatch.setattr(C, "_stop_requested", lambda *a: False)
     monkeypatch.setattr(C, "_post", lambda *a: None)
-    monkeypatch.setattr(C, "last_frame_png", lambda mp4: b"last:" + mp4)
+    monkeypatch.setattr(C, "last_frame_png", lambda mp4, clean=False: b"last:" + mp4)
 
     def run(url, kind, payload, ready, beat=None):
         import base64
@@ -103,7 +105,7 @@ def test_modal_chain_calls_one_clip_at_a_time_in_order(monkeypatch):
     monkeypatch.setattr(C, "put_bytes", lambda key, data, ct: f"s3://b/{key}")
     monkeypatch.setattr(C, "_stop_requested", lambda *a: False)
     monkeypatch.setattr(C, "_post", lambda *a: None)
-    monkeypatch.setattr(C, "last_frame_png", lambda mp4: b"last:" + mp4)
+    monkeypatch.setattr(C, "last_frame_png", lambda mp4, clean=False: b"last:" + mp4)
     images = []
 
     class Fn:
@@ -138,3 +140,13 @@ def test_a_failed_group_start_does_not_break_the_next_group(monkeypatch):
     clips, _ = C._pod({"gpuUrl": "https://g.example/", "chain": True, "chainGroup": 2, "jobs": jobs}, "http://x", "v")
     assert clips[0]["uri"] is None and clips[1]["uri"] is None and "shot 1 has no clip" in clips[1]["error"]
     assert clips[2]["uri"] and clips[3]["uri"], "shots 3+4 are a separate chain with their own picture"
+
+
+def test_locked_scene_cleans_the_last_frame_but_plain_chaining_does_not(tmp_path, monkeypatch):
+    mp4 = _two_colour_mp4(tmp_path / "c.mp4", "red", "blue")
+    seen = []
+    real = C.run_ffmpeg
+    monkeypatch.setattr(C, "run_ffmpeg", lambda args, **kw: (seen.append(args), real(args, **kw))[1])
+    assert C.last_frame_png(mp4)[:4] == PNG
+    assert C.last_frame_png(mp4, clean=True)[:4] == PNG
+    assert "-vf" not in seen[0] and seen[1][seen[1].index("-vf") + 1] == C.CLEAN_FILTER

@@ -11,4 +11,7 @@ ALTER TABLE dream_short ADD COLUMN hook_locked boolean NOT NULL DEFAULT false;
 ALTER TABLE dream_short ADD COLUMN chain_shots boolean NOT NULL DEFAULT false;
 --  chain_group: 0 = one chain through the whole Short; N = chains of N shots (2 = shots 1+2 chained, 3+4 chained, ...).
 ALTER TABLE dream_short ADD COLUMN chain_group int NOT NULL DEFAULT 0;
+--  chain_locked: a locked scene (needs chain_shots, chain_group 0): one camera path planned for the whole Short, one world
+--  and seed for every shot, and each last frame lightly cleaned before the next clip starts from it.
+ALTER TABLE dream_short ADD COLUMN chain_locked boolean NOT NULL DEFAULT false;
 ALTER TABLE dream_short ADD COLUMN idea_ref text;

@@ -199,17 +199,26 @@ public final class MediaTypes {
     public record ClipRequest(String videoId, String modalApp, String modalClass, String progressUrl, List<ClipJob> jobs,
                               int containers, double estimateGpuSeconds, java.math.BigDecimal estimateInr,
                               String provider, String resolution, String omniModel, int holdSeconds,
-                              String gpuUrl, int readyTimeoutSeconds, boolean chain, int chainGroup) {
+                              String gpuUrl, int readyTimeoutSeconds, boolean chain, int chainGroup, boolean locked) {
         /**
          * {@code chain}: clips run one at a time, each starting from the last frame of the shot before it (Dream Shorts).
          * {@code chainGroup}: 0 = one chain through the whole Short; N = chains of N shots (2: shots 1+2, then 3+4, ...).
+         * {@code locked}: locked scene, the worker lightly cleans each last frame before the next clip starts from it.
          */
+        public ClipRequest(String videoId, String modalApp, String modalClass, String progressUrl, List<ClipJob> jobs,
+                           int containers, double estimateGpuSeconds, java.math.BigDecimal estimateInr,
+                           String provider, String resolution, String omniModel, int holdSeconds,
+                           String gpuUrl, int readyTimeoutSeconds, boolean chain, int chainGroup) {
+            this(videoId, modalApp, modalClass, progressUrl, jobs, containers, estimateGpuSeconds, estimateInr, provider,
+                    resolution, omniModel, holdSeconds, gpuUrl, readyTimeoutSeconds, chain, chainGroup, false);
+        }
+
         public ClipRequest(String videoId, String modalApp, String modalClass, String progressUrl, List<ClipJob> jobs,
                            int containers, double estimateGpuSeconds, java.math.BigDecimal estimateInr,
                            String provider, String resolution, String omniModel, int holdSeconds,
                            String gpuUrl, int readyTimeoutSeconds, boolean chain) {
             this(videoId, modalApp, modalClass, progressUrl, jobs, containers, estimateGpuSeconds, estimateInr, provider,
-                    resolution, omniModel, holdSeconds, gpuUrl, readyTimeoutSeconds, chain, 0);
+                    resolution, omniModel, holdSeconds, gpuUrl, readyTimeoutSeconds, chain, 0, false);
         }
 
         public ClipRequest(String videoId, String modalApp, String modalClass, String progressUrl, List<ClipJob> jobs,

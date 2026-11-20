@@ -124,6 +124,11 @@ The `architecture` look (clean photo-real city, 2.5 s shots, hard cuts, its own 
 selectable but not in `LOOK_ORDER`, so the Autopilot's daily rotation does not pick it.
 Chain length (`chainGroup`, the "Chain" menu): 0 = one chain through the whole Short; 2 = pairs (shots 1+2 chained, a cut,
 then 3+4, ...); 3 = threes. Each chain's first shot has its own picture; a failed shot only breaks its own chain.
+**Locked scene** (`chainLocked`, only with one chain through the whole Short): like a single camera move through one 3D set.
+The writer plans ONE camera path first and cuts it into the shots (`cameraPath`); every clip's prompt restates that path and
+the one world; all clips share one seed; and the worker lightly denoises and sharpens each last frame before the next clip
+starts from it (`CLEAN_FILTER` in `clips.py`), so quality sags less with every link. Not built: re-anchoring from a fresh
+picture when a quality check says a frame has degraded; judge drift on the first real trial (pairs are the safe fallback).
 Chaining makes pictures only for the first shot of each chain; the other shots start from the clip before them, so they
 have no picture of their own and no silent fallback: if a last frame can't be read the clip fails and waits for the owner
 (Retry / redo the shot before it). Not built: two candidate pictures for shot 1 (redo shot 1's picture meanwhile).

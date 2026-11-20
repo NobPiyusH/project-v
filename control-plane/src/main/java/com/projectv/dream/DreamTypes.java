@@ -32,11 +32,17 @@ public final class DreamTypes {
 
     /** The writer's output: one world shared by every shot, so the Short looks like one place. */
     /** {@code hero}: the one recurring object described exactly once, pasted into every picture so it stays the same. */
+    /** {@code cameraPath}: locked scene only, the one camera path of the whole Short that the shots are segments of. */
     /** {@code hook}: the 3-6 word hook title (the starred word is the big coloured one); only written when the Short asks for it. */
     public record DreamWorld(String title, String world, String palette, String light, String hero, List<PlannedDreamShot> shots,
-                             String hook) {
+                             String hook, String cameraPath) {
         public DreamWorld(String title, String world, String palette, String light, String hero, List<PlannedDreamShot> shots) {
-            this(title, world, palette, light, hero, shots, null);
+            this(title, world, palette, light, hero, shots, null, null);
+        }
+
+        public DreamWorld(String title, String world, String palette, String light, String hero, List<PlannedDreamShot> shots,
+                          String hook) {
+            this(title, world, palette, light, hero, shots, hook, null);
         }
     }
 
