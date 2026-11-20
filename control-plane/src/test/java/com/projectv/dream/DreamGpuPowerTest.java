@@ -146,19 +146,27 @@ class DreamGpuPowerTest {
     }
 
     @Test
-    void theOwnersButtonTurnsItOffNowAndAnAutoShortIsNeverTouchedByTheIdleSweep() {
+    void shortsShareOnePodAndTheButtonTurnsItOffForAllOfThem() {
+        int createdBefore = created.size();
         UUID manual = rentedShort("manual");
         UUID auto = rentedShort("auto");
-        gpu.releaseIdleManual(Instant.now().plusSeconds(3600));
-        assertTrue(gpu.isOpen(auto), "Auto pods are left to the broker, the pod's own guard and the watchdog");
-        assertFalse(gpu.isOpen(manual));
+        assertEquals(createdBefore + 1, created.size(), "the second Short uses the pod that is already on: one pod only");
+        assertEquals(2, gpu.usersOnPod());
 
-        UUID again = rentedShort("manual");
-        gpu.turnOff(again);
-        assertFalse(gpu.isOpen(again));
-        assertEquals(1, rentalCostRows(again));
-        assertThrows(IllegalStateException.class, () -> gpu.turnOff(again), "nothing left to turn off");
-        gpu.turnOff(auto); // the button works on Auto Shorts too
+        gpu.releaseIdleManual(Instant.now().plusSeconds(3600)); // idle: the Manual Short lets go, the Auto one is left alone
+        assertFalse(gpu.isOpen(manual));
+        assertTrue(gpu.isOpen(auto), "Auto Shorts are left to the broker, the pod's own guard and the watchdog");
+        assertEquals(1, gpu.usersOnPod());
+
+        UUID third = rentedShort("manual"); // joins the same pod
+        assertEquals(createdBefore + 1, created.size());
+        gpu.turnOff(third); // the button ends the ONE pod for everyone
+        assertFalse(gpu.isOpen(third));
+        assertFalse(gpu.isOpen(auto));
+        assertEquals(0, gpu.usersOnPod());
+        assertEquals(1, rentalCostRows(auto), "every Short that used the pod gets its share booked");
+        assertEquals(1, rentalCostRows(third));
+        assertThrows(IllegalStateException.class, () -> gpu.turnOff(third), "nothing left to turn off");
     }
 
     @Test

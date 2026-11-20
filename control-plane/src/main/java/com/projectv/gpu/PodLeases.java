@@ -36,6 +36,19 @@ public interface PodLeases {
         return List.of();
     }
 
+    /** A Short starts using the shared pod (remembered so a restart can rebuild who was using it). Default: nothing (fakes). */
+    default void attach(String podId, UUID dreamShortId) {
+    }
+
+    /** A Short stops using the shared pod. */
+    default void detach(String podId, UUID dreamShortId) {
+    }
+
+    /** The Shorts recorded as using the pod. */
+    default List<UUID> attached(String podId) {
+        return List.of();
+    }
+
     void heartbeat(String podId);
 
     void release(String podId);
@@ -77,6 +90,24 @@ public interface PodLeases {
                     .query((rs, i) -> new OpenLease(rs.getString(1), rs.getString(2), rs.getString(3), rs.getObject(4, UUID.class),
                             rs.getDouble(5), rs.getString(6), ts(rs.getTimestamp(7))))
                     .list();
+        }
+
+        @Override
+        public void attach(String podId, UUID dreamShortId) {
+            jdbc.sql("""
+                            INSERT INTO gpu_pod_user (pod_id, dream_short_id) VALUES (:p, :d) ON CONFLICT DO NOTHING
+                            """).param("p", podId).param("d", dreamShortId).update();
+        }
+
+        @Override
+        public void detach(String podId, UUID dreamShortId) {
+            jdbc.sql("DELETE FROM gpu_pod_user WHERE pod_id = :p AND dream_short_id = :d").param("p", podId).param("d", dreamShortId).update();
+        }
+
+        @Override
+        public List<UUID> attached(String podId) {
+            return jdbc.sql("SELECT dream_short_id FROM gpu_pod_user WHERE pod_id = :p ORDER BY attached_at")
+                    .param("p", podId).query((rs, i) -> rs.getObject(1, UUID.class)).list();
         }
 
         @Override

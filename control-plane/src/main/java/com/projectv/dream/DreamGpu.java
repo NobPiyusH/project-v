@@ -85,8 +85,14 @@ public class DreamGpu {
         return enabled;
     }
 
+    /** Whether this Short is using the shared pod. */
     public boolean isOpen(UUID dreamId) {
         return broker.open(dreamId).isPresent();
+    }
+
+    /** How many Shorts are using the one shared pod right now (0 = it is off). */
+    public int usersOnPod() {
+        return broker.openShortIds().size();
     }
 
     /** Best effort at the writing step: start the pod so the download overlaps the writing. A failure is retried by the first GPU step. */
@@ -204,12 +210,15 @@ public class DreamGpu {
                 .param("d", dreamId).update();
     }
 
-    /** The owner's "Turn off GPU": ends the rental now (a running GPU step then fails fast and waits for Retry). */
+    /**
+     * The owner's "Turn off GPU": ends the ONE shared pod now, for every Short that uses it (a running GPU step then fails
+     * fast and waits for Retry).
+     */
     public void turnOff(UUID dreamId) {
         if (!enabled || !isOpen(dreamId)) {
-            throw new IllegalStateException("This Short has no rented GPU to turn off");
+            throw new IllegalStateException("This Short is not using a rented GPU, so there is nothing to turn off");
         }
-        broker.release(dreamId, "turned off by the owner");
+        broker.releaseAll("turned off by the owner");
     }
 
     /** Seconds until a Manual-hold pod turns itself off for being idle; null when this Short holds no pod or is on Auto. */
@@ -247,11 +256,11 @@ public class DreamGpu {
 
     /** Estimated GPU seconds for the jobs (config time estimates), including the start-up unless the pod is already open. */
     public double pictureSeconds(UUID dreamId, int pictures) {
-        return pictures * secondsPerPicture + (isOpen(dreamId) ? 0 : startSeconds);
+        return pictures * secondsPerPicture + (broker.hasOpenPod() ? 0 : startSeconds);
     }
 
     public double clipSeconds(UUID dreamId, int totalFrames) {
-        return secondsPer81Frames * totalFrames / 81.0 + (isOpen(dreamId) ? 0 : startSeconds);
+        return secondsPer81Frames * totalFrames / 81.0 + (broker.hasOpenPod() ? 0 : startSeconds);
     }
 
     /** Estimate in rupees at the cheapest live price right now (worst-case watchdog rate if nothing is quotable). */

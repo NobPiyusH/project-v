@@ -13,7 +13,7 @@ The pod worker (`workers/pod/`, ported from the Salad branch) and the Dream Shor
 | `pricing.gpuBroker.order` | same | runpod, jarvislabs, cloudrift, vast, shadeform, modal | tie-break only; the cheapest live price wins |
 | `RUNPOD_API_KEY` | `.env` | empty | without it the RunPod adapter is skipped |
 | `GPU_WATCHDOG_DRY_RUN` | `.env` | `true` | the sweep only logs until you set `false` |
-| `GPU_MAX_PODS`, `GPU_MAX_HOURLY_USD`, `GPU_MAX_RUNTIME_MINUTES`, `GPU_IDLE_MINUTES` | `.env` | 2, 2.0, 120, 15 | start-side refusal and self-stop limits |
+| `GPU_MAX_PODS`, `GPU_MAX_HOURLY_USD`, `GPU_MAX_RUNTIME_MINUTES`, `GPU_IDLE_MINUTES` | `.env` | 1, 2.0, 120, 15 | start-side refusal and self-stop limits |
 
 `modal.monthlyCapUsd` is not touched by this work.
 

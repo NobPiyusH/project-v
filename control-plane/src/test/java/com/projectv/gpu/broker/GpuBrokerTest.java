@@ -103,8 +103,10 @@ class GpuBrokerTest {
             decisions.add(chosen + "|" + reason);
             consideredLog.add(considered);
         }
+        final Map<UUID, Double> hoursByShort = new java.util.LinkedHashMap<>();
         public void cost(UUID d, String provider, double hours, double hourlyUsd, String note) {
             costs.add(provider + "|" + hours + "|" + hourlyUsd);
+            hoursByShort.merge(d, hours, Double::sum);
         }
     }
 
@@ -231,6 +233,91 @@ class GpuBrokerTest {
         assertEquals(1, runpod.created.size(), "asking never rents");
         b.release(shortId, "test");
         assertEquals(GpuBroker.PodState.NONE, b.podState(shortId), "released by the studio: the worker must stop");
+    }
+
+    GpuBroker.Rental acquireFor(GpuBroker b, UUID short_) {
+        return b.acquire(short_, "video.i2v.dream", "img", List.of("python", "worker.py"), Map.of(), null);
+    }
+
+    @Test
+    void twoShortsShareOnePodAndItEndsOnlyWhenTheLastOneLetsGo() {
+        Tick clock = new Tick();
+        GpuBroker b = broker(clock);
+        UUID a = UUID.randomUUID();
+        UUID c = UUID.randomUUID();
+        GpuBroker.Rental ra = acquireFor(b, a);
+        GpuBroker.Rental rc = acquireFor(b, c);
+        assertEquals(ra.instance().id(), rc.instance().id(), "the second Short uses the pod that is already on");
+        assertEquals(1, runpod.created.size(), "one pod only");
+        assertEquals(2, b.openShortIds().size());
+        assertTrue(b.hasOpenPod());
+
+        clock.now = NOW.plusSeconds(30 * 60);
+        b.release(a, "A done");
+        assertTrue(runpod.terminated.isEmpty(), "B still uses it");
+        assertTrue(records.costs.isEmpty(), "nothing is booked until the pod ends");
+        assertEquals(GpuBroker.PodState.NONE, b.podState(a));
+        assertEquals(GpuBroker.PodState.OPEN, b.podState(c));
+        assertTrue(b.hasOpenPod());
+
+        clock.now = NOW.plusSeconds(60 * 60);
+        b.release(c, "C done");
+        assertEquals(List.of(ra.instance().id()), runpod.terminated);
+        assertFalse(b.hasOpenPod());
+        assertEquals(2, records.costs.size(), "one cost row per Short that used the pod");
+        double ha = records.hoursByShort.get(a);
+        double hc = records.hoursByShort.get(c);
+        assertEquals(1.0, ha + hc, 1e-9, "the whole hour is booked, none lost, none doubled");
+        assertEquals(1.0 / 3, ha, 1e-9, "A used the pod 30 of the 90 Short-minutes");
+        assertEquals(2.0 / 3, hc, 1e-9);
+    }
+
+    @Test
+    void turningTheSharedPodOffEndsItForEveryShort() {
+        Tick clock = new Tick();
+        GpuBroker b = broker(clock);
+        UUID a = UUID.randomUUID();
+        UUID c = UUID.randomUUID();
+        GpuBroker.Rental r = acquireFor(b, a);
+        acquireFor(b, c);
+        clock.now = NOW.plusSeconds(10 * 60);
+        b.releaseAll("turned off by the owner");
+        assertEquals(List.of(r.instance().id()), runpod.terminated);
+        assertEquals(GpuBroker.PodState.NONE, b.podState(a));
+        assertEquals(GpuBroker.PodState.NONE, b.podState(c));
+        assertEquals(2, records.costs.size());
+        b.releaseAll("again"); // safe with no pod
+        assertEquals(1, runpod.terminated.size());
+    }
+
+    @Test
+    void whenTheSharedPodIsGoneEveryShortMovesToTheReplacement() {
+        GpuBroker b = broker(Clock.fixed(NOW, ZoneOffset.UTC));
+        UUID a = UUID.randomUUID();
+        UUID c = UUID.randomUUID();
+        GpuBroker.Rental first = acquireFor(b, a);
+        acquireFor(b, c);
+        runpod.state = GpuProvider.State.GONE; // deleted from outside
+        GpuBroker.Rental second = acquireFor(b, a); // A's worker asks for a replacement
+        assertNotEquals(first.instance().id(), second.instance().id());
+        assertEquals(2, runpod.created.size());
+        assertEquals(2, b.openShortIds().size(), "C did not lose its place: it uses the new pod too");
+        assertTrue(b.open(c).isPresent());
+        assertEquals(List.of(first.instance().id()), leases.released, "the dead pod is closed and booked");
+        assertEquals(2, records.costs.size(), "its time is split between the two Shorts");
+    }
+
+    @Test
+    void onlyOneSharedPodIsKeptAfterARestartAndExtraOnesAreEndedAndBooked() {
+        UUID other = UUID.randomUUID();
+        leases.shorts.add(new PodLeases.OpenLease("runpod-pod-1", "runpod", "projectv-runpod-a", shortId, 0.5, "4090", NOW));
+        leases.shorts.add(new PodLeases.OpenLease("runpod-pod-2", "runpod", "projectv-runpod-b", other, 0.5, "4090", NOW));
+        GpuBroker b = broker(Clock.fixed(NOW.plusSeconds(3600), ZoneOffset.UTC));
+        b.recover();
+        assertTrue(b.open(shortId).isPresent(), "the oldest pod is the shared one");
+        assertFalse(b.open(other).isPresent());
+        assertEquals(List.of("runpod-pod-2"), runpod.terminated, "the extra pod (from the one-pod-per-Short days) is ended");
+        assertEquals(1.0, records.hoursByShort.get(other), 1e-9, "and booked to the Short that rented it");
     }
 
     @Test

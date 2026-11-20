@@ -73,7 +73,7 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
 
 export interface GpuOption { provider: string; gpu: string | null; key: string | null; stock: string; hourlyUsd: number; available: boolean; why: string | null }
 export interface GpuPick {
-  mode: 'auto' | 'manual'; choice: string; rented: boolean
+  mode: 'auto' | 'manual'; choice: string; rented: boolean; usersOnPod: number
   // GPU power: auto = the studio turns the pod off when done; manual = stays on until turned off or idle
   hold: 'auto' | 'manual'; idleMinutes: number; offInSeconds: number | null
 }

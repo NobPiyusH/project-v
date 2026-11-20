@@ -559,7 +559,7 @@ function GpuCard({ id }: { id: string }) {
     void refresh()
   }
   const turnOff = async () => {
-    if (!window.confirm('Turn the GPU off now? A step that is using it will stop and wait for Retry.')) return
+    if (!window.confirm('Turn the shared GPU off now? It is one pod for all Shorts: any step using it, in any Short, will stop and wait for Retry.')) return
     setErr(null)
     try { await dreamApi.gpuOff(id) } catch (e) { setErr(e instanceof Error ? e.message : String(e)) }
     void refresh()
@@ -575,6 +575,7 @@ function GpuCard({ id }: { id: string }) {
         {pick.hold === 'manual' && <label className="small">idle auto-off <select value={pick.idleMinutes}
           onChange={(e) => void power('manual', Number(e.target.value))}>{[5, 10, 15, 30].map((n) => <option key={n} value={n}>{n} min</option>)}</select></label>}
         {pick.rented && <button className="danger" onClick={() => void turnOff()}>Turn off GPU now</button>}
+        {pick.rented && <span className="muted small">one shared pod · {pick.usersOnPod} Short{pick.usersOnPod === 1 ? '' : 's'} using it</span>}
         {pick.rented && pick.hold === 'manual' && pick.offInSeconds != null && <span className="muted small">turns off by itself in {Math.floor(pick.offInSeconds / 60)}:{String(pick.offInSeconds % 60).padStart(2, '0')} if unused</span>}
         {!pick.rented && <span className="muted small">GPU is off</span>}
       </div>

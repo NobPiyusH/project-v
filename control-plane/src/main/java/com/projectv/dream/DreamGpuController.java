@@ -48,6 +48,7 @@ public class DreamGpuController {
         out.put("mode", p.mode());
         out.put("choice", p.choice() == null ? "" : p.choice());
         out.put("rented", gpu.isOpen(dreamId));
+        out.put("usersOnPod", gpu.usersOnPod()); // the ONE shared pod: how many Shorts are using it
         out.put("hold", gpu.holdManual(dreamId) ? "manual" : "auto");
         out.put("idleMinutes", gpu.idleMinutes(dreamId));
         out.put("offInSeconds", gpu.offInSeconds(dreamId, java.time.Instant.now())); // null unless Manual and a pod is on

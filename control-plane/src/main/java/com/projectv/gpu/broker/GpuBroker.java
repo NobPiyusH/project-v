@@ -38,7 +38,10 @@ public class GpuBroker {
 
     private static final Logger log = LoggerFactory.getLogger(GpuBroker.class);
 
-    /** An open rental for one Short. */
+    /**
+     * The studio's ONE shared pod (owner, 20 Nov 2026: "1 pod only to run as many Shorts as I want"). {@code shortId} is the
+     * Short that rented it first; any number of Shorts may use it, see {@link #users}.
+     */
     public record Rental(UUID shortId, GpuProvider.Instance instance, Instant createdAt) {
     }
 
@@ -51,7 +54,12 @@ public class GpuBroker {
     private final GpuPodLimits limits;
     private final Clock clock;
     private final PreferenceStore prefs;
-    private final Map<UUID, Rental> open = new ConcurrentHashMap<>();
+    /** The one shared pod (null = none); changed only inside the synchronized methods, read lock-free. */
+    private volatile Rental shared;
+    /** The Shorts using the shared pod, and since when. A Short that detached keeps its used seconds in {@link #usedSeconds}. */
+    private final Map<UUID, Instant> users = new ConcurrentHashMap<>();
+    /** Seconds already used by Shorts that detached from the current pod: with the attached ones, the cost split. */
+    private final Map<UUID, Long> usedSeconds = new ConcurrentHashMap<>();
 
     @Autowired
     public GpuBroker(List<GpuProvider> providers, BrokerConfig config, GpuWallet wallet, BrokerRecords records,
@@ -98,23 +106,47 @@ public class GpuBroker {
             }
             GpuProvider.Instance inst = new GpuProvider.Instance(l.provider(), l.podId(), l.name(), l.hourlyUsd(), l.gpu(),
                     p.endpointFor(l.podId(), config.port()));
-            open.put(l.dreamShortId(), new Rental(l.dreamShortId(), inst, l.createdAt()));
+            Rental r = new Rental(l.dreamShortId(), inst, l.createdAt());
+            if (shared != null) {
+                // Older builds rented one pod per Short; only ONE shared pod is kept. The others end now and are booked to their Short.
+                log.warn("GPU broker: second open pod {} at startup; ending it (one shared pod only)", l.podId());
+                endPod(r, Map.of(l.dreamShortId(), 1L), "extra pod ended at startup: only one shared pod is kept");
+                continue;
+            }
+            shared = r;
+            List<UUID> attached = safeAttached(l.podId());
+            (attached.isEmpty() ? List.of(l.dreamShortId()) : attached).forEach(u -> users.put(u, clock.instant()));
             try {
                 leases.heartbeat(l.podId());
             } catch (RuntimeException e) {
                 log.warn("GPU broker: heartbeat of recovered lease {} failed: {}", l.podId(), e.getMessage());
             }
-            log.info("GPU broker: recovered open rental {} {} for Short {} after restart", l.provider(), l.podId(), l.dreamShortId());
+            log.info("GPU broker: recovered the shared pod {} {} for {} Short(s) after restart", l.provider(), l.podId(), users.size());
         }
     }
 
-    public Optional<Rental> open(UUID shortId) {
-        return Optional.ofNullable(open.get(shortId));
+    private List<UUID> safeAttached(String podId) {
+        try {
+            return leases.attached(podId);
+        } catch (RuntimeException e) {
+            return List.of();
+        }
     }
 
-    /** The Shorts that hold a rented pod right now. */
+    /** The shared pod, when this Short is using it. */
+    public Optional<Rental> open(UUID shortId) {
+        Rental r = shared;
+        return r != null && users.containsKey(shortId) ? Optional.of(r) : Optional.empty();
+    }
+
+    /** Whether the shared pod is on (rented by any Short): a new Short then starts without a boot. */
+    public boolean hasOpenPod() {
+        return shared != null;
+    }
+
+    /** The Shorts using the shared pod right now. */
     public List<UUID> openShortIds() {
-        return List.copyOf(open.keySet());
+        return shared == null ? List.of() : List.copyOf(users.keySet());
     }
 
     /**
@@ -122,7 +154,7 @@ public class GpuBroker {
      * renting or reusing the pod also counts). Falls back to the time it was rented.
      */
     public Optional<Instant> lastActivity(UUID shortId) {
-        Rental r = open.get(shortId);
+        Rental r = open(shortId).orElse(null);
         if (r == null) {
             return Optional.empty();
         }
@@ -235,15 +267,18 @@ public class GpuBroker {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public synchronized Rental acquire(UUID shortId, String capability, String image, List<String> workerArgv,
                                        Map<String, String> env, String volumeId, Pick pick) {
-        Rental existing = open.get(shortId);
+        // ONE shared pod: when it is on, every Short uses it (a manual GPU pick applies only when no pod is on).
+        Rental existing = shared;
+        List<UUID> carried = List.of();
         if (existing != null) {
             if (!gone(existing)) {
+                attach(shortId);
                 leases.heartbeat(existing.instance().id());
                 return existing;
             }
-            log.warn("GPU broker: pod {} of Short {} is gone (self-stopped or killed); releasing and renting again",
-                    existing.instance().id(), shortId);
-            release(shortId, "pod gone before reuse (self-stopped or killed)");
+            log.warn("GPU broker: the shared pod {} is gone (self-stopped or killed); ending it and renting again", existing.instance().id());
+            carried = new ArrayList<>(users.keySet()); // the Shorts that were using it move to the new pod
+            endShared("pod gone before reuse (self-stopped or killed)");
         }
         GpuProvider.GpuSpec spec = new GpuProvider.GpuSpec(config.gpuPreference(), config.minVramGb(), config.minRamGb(), config.diskGb());
         List<Cand> all = candidates(spec);
@@ -330,7 +365,9 @@ public class GpuBroker {
                 log.warn("GPU broker: rented pod {} but its RoutingDecision failed: {}", inst.id(), ex.getMessage());
             }
             Rental r = new Rental(shortId, inst, now);
-            open.put(shortId, r);
+            shared = r;
+            attach(shortId);
+            carried.forEach(this::attach);
             log.info("GPU broker: rented {} {} ({}, ${}/h live) for Short {}", id, inst.id(), inst.gpu(), inst.hourlyUsd(), shortId);
             return r;
         }
@@ -365,7 +402,7 @@ public class GpuBroker {
 
     /** Keeps the lease warm without any provider call (the worker pings this while it waits or runs jobs). */
     public void heartbeat(UUID shortId) {
-        Rental r = open.get(shortId);
+        Rental r = open(shortId).orElse(null);
         if (r != null) {
             leases.heartbeat(r.instance().id());
         }
@@ -386,7 +423,7 @@ public class GpuBroker {
      * polling a dead address until its 30-minute ready limit.
      */
     public PodState podState(UUID shortId) {
-        Rental r = open.get(shortId);
+        Rental r = open(shortId).orElse(null);
         if (r == null) {
             return PodState.NONE;
         }
@@ -395,7 +432,7 @@ public class GpuBroker {
 
     /** Readiness of the Short's pod (the worker's own /health is the final truth); also keeps the lease warm. */
     public GpuProvider.InstanceStatus status(UUID shortId) {
-        Rental r = open.get(shortId);
+        Rental r = open(shortId).orElse(null);
         if (r == null) {
             return new GpuProvider.InstanceStatus(GpuProvider.State.GONE, null, "no open rental");
         }
@@ -432,13 +469,70 @@ public class GpuBroker {
         return null;
     }
 
-    /** Ends the rental: terminate, book the time, release the lease. Safe to call twice. */
+    /**
+     * This Short stops using the shared pod. The pod itself ends (terminated, booked, lease released) when the last Short
+     * lets go; while others still use it, it stays on. Safe to call twice.
+     */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public synchronized void release(UUID shortId, String why) {
-        Rental r = open.remove(shortId);
+        Rental r = shared;
+        Instant since = users.remove(shortId);
+        if (r == null || since == null) {
+            return;
+        }
+        usedSeconds.merge(shortId, Math.max(1, Duration.between(since, clock.instant()).toSeconds()), Long::sum);
+        persistDetach(r.instance().id(), shortId);
+        if (users.isEmpty()) {
+            endShared(why);
+        } else {
+            log.info("GPU broker: Short {} let go of the shared pod {} ({}); it stays on for {} other Short(s)",
+                    shortId, r.instance().id(), why, users.size());
+        }
+    }
+
+    /** The owner's "Turn off GPU": ends the shared pod now, for every Short that uses it. Safe to call with no pod. */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public synchronized void releaseAll(String why) {
+        endShared(why);
+    }
+
+    private void attach(UUID shortId) {
+        Rental r = shared;
+        if (r != null && users.putIfAbsent(shortId, clock.instant()) == null) {
+            try {
+                leases.attach(r.instance().id(), shortId);
+            } catch (RuntimeException e) {
+                log.warn("GPU broker: could not record Short {} on pod {}: {}", shortId, r.instance().id(), e.getMessage());
+            }
+        }
+    }
+
+    private void persistDetach(String podId, UUID shortId) {
+        try {
+            leases.detach(podId, shortId);
+        } catch (RuntimeException e) {
+            log.warn("GPU broker: could not record Short {} leaving pod {}: {}", shortId, podId, e.getMessage());
+        }
+    }
+
+    /** Ends the shared pod for everyone: the cost is split by how long each Short used it. */
+    private void endShared(String why) {
+        Rental r = shared;
         if (r == null) {
             return;
         }
+        Instant now = clock.instant();
+        Map<UUID, Long> weights = new LinkedHashMap<>(usedSeconds);
+        users.forEach((u, since) -> weights.merge(u, Math.max(1, Duration.between(since, now).toSeconds()), Long::sum));
+        users.keySet().forEach(u -> persistDetach(r.instance().id(), u));
+        shared = null;
+        users.clear();
+        usedSeconds.clear();
+        endPod(r, weights, why);
+    }
+
+    /** Terminates a pod, books its time (split by {@code weights}) and releases its lease. */
+    private void endPod(Rental r, Map<UUID, Long> weights, String why) {
         GpuProvider p = providers.get(r.instance().provider());
         Instant end = clock.instant();
         if (gone(r)) { // deleted or self-stopped earlier: it stopped billing at about its last heartbeat, not now
@@ -450,14 +544,28 @@ public class GpuBroker {
         boolean gone = safeTerminate(p, r.instance().id());
         double hours = Math.max(0, Duration.between(r.createdAt(), end).toSeconds() / 3600.0);
         try {
-            records.cost(shortId, r.instance().provider(), hours, r.instance().hourlyUsd(),
-                    "GPU rental %s (%s) ended: %s".formatted(r.instance().id(), r.instance().gpu(), why));
+            bookRental(r, hours, weights, why);
             leases.release(r.instance().id());
         } catch (RuntimeException e) {
             log.warn("GPU broker: rental {} ended but its ledger row failed: {}", r.instance().id(), e.getMessage());
         }
         if (!gone) {
             log.warn("GPU broker: could not terminate {}; lease released, the watchdog will", r.instance().id());
+        }
+    }
+
+    private void bookRental(Rental r, double hours, Map<UUID, Long> weights, String why) {
+        String note = "GPU rental %s (%s) ended: %s".formatted(r.instance().id(), r.instance().gpu(), why);
+        Map<UUID, Long> w = weights.isEmpty() ? Map.of(r.shortId(), 1L) : weights;
+        if (w.size() == 1) {
+            records.cost(w.keySet().iterator().next(), r.instance().provider(), hours, r.instance().hourlyUsd(), note);
+            return;
+        }
+        long total = w.values().stream().mapToLong(Long::longValue).sum();
+        for (Map.Entry<UUID, Long> e : w.entrySet()) {
+            double share = total > 0 ? (double) e.getValue() / total : 1.0 / w.size();
+            records.cost(e.getKey(), r.instance().provider(), hours * share, r.instance().hourlyUsd(),
+                    note + " (%d%% of the shared pod)".formatted(Math.round(share * 100)));
         }
     }
 
