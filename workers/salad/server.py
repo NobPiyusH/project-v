@@ -359,6 +359,16 @@ def copy_to_volume(volume: str, name: str, local: Path) -> None:
     shutil.copyfile(local, dest)   # a half-copied file has the wrong size, so the next start re-copies it
 
 
+def copy_tree_plain(src: Path, dst: Path) -> None:
+    """Copy file contents only. shutil.copytree also copies permissions and times, which RunPod's global
+    volume rejects (Errno 1 Operation not permitted); the Hugging Face snapshot's links are followed."""
+    for root, _dirs, files in os.walk(src):
+        out = dst / Path(root).relative_to(src)
+        out.mkdir(parents=True, exist_ok=True)
+        for f in files:
+            shutil.copyfile(Path(root) / f, out / f)
+
+
 def download(comfy: Path, state: State) -> None:
     global ZIMAGE_PATH
     from huggingface_hub import hf_hub_download, snapshot_download
@@ -397,7 +407,7 @@ def download(comfy: Path, state: State) -> None:
         if VOLUME:
             state.phase = "caching Z-Image Turbo on the volume"
             target = Path(VOLUME) / "zimage-turbo"
-            shutil.copytree(snap, target, dirs_exist_ok=True, symlinks=False)
+            copy_tree_plain(Path(snap), target)
             (target / ".complete").write_text("ok")
     log(f"Z-Image Turbo ready in {time.time() - t:.0f} s")
 

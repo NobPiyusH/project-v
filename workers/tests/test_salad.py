@@ -132,3 +132,17 @@ def test_volume_cache_uses_complete_copy_only(tmp_path):
     S.copy_to_volume(vol, "a.safetensors", src)
     assert S.volume_file(vol, "a.safetensors", 3) == tmp_path / "wan-fp8" / "a.safetensors"
     assert S.volume_file(vol, "a.safetensors", 4) is None           # wrong size = incomplete copy: not used
+
+
+def test_copy_tree_plain_copies_contents_and_follows_links(tmp_path):
+    src = tmp_path / "snap"
+    (src / "sub").mkdir(parents=True)
+    (src / "a.txt").write_text("a")
+    (tmp_path / "blob").write_text("blob")
+    try:
+        (src / "sub" / "link.txt").symlink_to(tmp_path / "blob")
+    except OSError:
+        pytest.skip("symlinks need a privilege on this Windows account")
+    S.copy_tree_plain(src, tmp_path / "out")
+    assert (tmp_path / "out" / "a.txt").read_text() == "a"
+    assert (tmp_path / "out" / "sub" / "link.txt").read_text() == "blob"
