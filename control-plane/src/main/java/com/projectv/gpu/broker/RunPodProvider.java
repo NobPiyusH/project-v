@@ -74,9 +74,18 @@ public class RunPodProvider implements GpuProvider {
     }
 
     @Override
-    @SuppressWarnings("unchecked")
     public Quote quote(GpuSpec spec) {
-        Quote best = null;
+        List<Quote> all = quotes(spec);
+        return all.isEmpty() ? Quote.unavailable("runpod", lastWhy) : all.getFirst();
+    }
+
+    private volatile String lastWhy = "no GPU type in stock";
+
+    /** Every GPU in stock, Community and Secure, cheapest first. */
+    @Override
+    @SuppressWarnings("unchecked")
+    public List<Quote> quotes(GpuSpec spec) {
+        List<Quote> out = new java.util.ArrayList<>();
         StringBuilder why = new StringBuilder();
         for (String cloud : List.of("COMMUNITY", "SECURE")) {
             for (String gpu : spec.gpuPreference()) {
@@ -93,8 +102,7 @@ public class RunPodProvider implements GpuProvider {
                     continue;
                 }
                 String stock = String.valueOf(r.getOrDefault("availability", "NONE")).toUpperCase();
-                Object memory = r.get("memory");
-                if (memory instanceof Number m && m.intValue() < spec.minVramGb()) {
+                if (r.get("memory") instanceof Number m && m.intValue() < spec.minVramGb()) {
                     continue;
                 }
                 Map<String, Object> price = r.get("price") instanceof Map<?, ?> m ? (Map<String, Object>) m : Map.of();
@@ -103,16 +111,12 @@ public class RunPodProvider implements GpuProvider {
                     why.append(gpu).append('/').append(cloud).append(": ").append(stock).append("; ");
                     continue;
                 }
-                Quote q = new Quote("runpod", true, stock, gpu + "|" + cloud, n.doubleValue(), "");
-                if (best == null || q.hourlyUsd() < best.hourlyUsd()) {
-                    best = q;
-                }
-            }
-            if (best != null) {
-                return best; // Community first; Secure only when Community has nothing in stock
+                out.add(new Quote("runpod", true, stock, gpu + "|" + cloud, n.doubleValue(), ""));
             }
         }
-        return Quote.unavailable("runpod", why.isEmpty() ? "no GPU type in stock" : why.toString());
+        out.sort(java.util.Comparator.comparingDouble(Quote::hourlyUsd));
+        lastWhy = why.isEmpty() ? "no GPU type in stock" : why.toString();
+        return out;
     }
 
     /** The create body (also what the tests check). {@code quote.gpu} is {@code "<gpu id>|<COMMUNITY|SECURE>"}. */

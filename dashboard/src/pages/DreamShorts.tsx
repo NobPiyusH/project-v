@@ -189,6 +189,8 @@ function DreamView({ id }: { id: string }) {
         </div>
       </section>
 
+      <GpuCard id={id} />
+
       <Timeline d={d} />
 
       {d.final_asset_id && (
@@ -404,6 +406,42 @@ function Lessons() {
               <button onClick={() => set(l, { status: 'RETIRED' })}>Retire</button></td>
           </tr>))}
       </tbody></table>
+    </section>
+  )
+}
+
+/** Auto (the studio picks the cheapest, learning from your picks) or Manual (you pick from the live, price-sorted list). */
+function GpuCard({ id }: { id: string }) {
+  const { data: on } = usePoll(() => dreamApi.gpuEnabled(), 60000)
+  const { data: pick, refresh } = usePoll(() => dreamApi.gpuPick(id), 5000, [id])
+  const { data: opts, refresh: refreshOpts } = usePoll(() => dreamApi.gpuOptions(), 60000)
+  const [err, setErr] = useState<string | null>(null)
+  if (!on?.enabled || !pick) return null
+  const set = async (mode: 'auto' | 'manual', choice?: string) => {
+    setErr(null)
+    try { await dreamApi.setGpuPick(id, mode, choice) } catch (e) { setErr(e instanceof Error ? e.message : String(e)) }
+    void refresh()
+  }
+  return (
+    <section className="card">
+      <div className="card-head"><h2>GPU</h2>
+        <span className="muted small">{pick.rented ? 'A GPU is rented for this Short; a change applies to the next rental' : 'Chosen when the Short needs a GPU'}</span></div>
+      <div className="row">
+        <label><input type="radio" checked={pick.mode === 'auto'} onChange={() => void set('auto')} /> Auto (cheapest; learns from your picks)</label>
+        <label><input type="radio" checked={pick.mode === 'manual'} onChange={() => void set('manual', pick.choice || opts?.find((o) => o.available)?.key || undefined)} /> Manual (I pick)</label>
+        <button onClick={() => void refreshOpts()}>Refresh prices</button>
+      </div>
+      {pick.mode === 'manual' && (
+        <table className="small" style={{ width: '100%' }}><tbody>
+          {(opts ?? []).map((o, i) => (
+            <tr key={`${o.provider}-${o.key ?? i}`} style={o.available ? undefined : { opacity: 0.55 }}>
+              <td><input type="radio" disabled={!o.available} checked={!!o.key && pick.choice === o.key} aria-label={`Pick ${o.provider} ${o.gpu ?? ''}`}
+                onChange={() => o.key && void set('manual', o.key)} /></td>
+              <td>{o.provider}</td><td>{o.gpu ? o.gpu.replace('|', ' ') : '–'}</td>
+              <td>{o.available ? `$${o.hourlyUsd.toFixed(2)}/h` : '–'}</td><td>{o.available ? o.stock : (o.why ?? 'unavailable')}</td>
+            </tr>))}
+        </tbody></table>)}
+      {err && <p className="error small">{err}</p>}
     </section>
   )
 }

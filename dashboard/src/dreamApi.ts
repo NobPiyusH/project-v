@@ -57,7 +57,24 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
   return (text ? JSON.parse(text) : undefined) as T
 }
 
+export interface GpuOption { provider: string; gpu: string | null; key: string | null; stock: string; hourlyUsd: number; available: boolean; why: string | null }
+export interface GpuPick { mode: 'auto' | 'manual'; choice: string; rented: boolean }
+
+async function gpuCall<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const res = await fetch(path, {
+    method,
+    headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  })
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}: ${await res.text()}`)
+  return (await res.json()) as T
+}
+
 export const dreamApi = {
+  gpuEnabled: () => gpuCall<{ enabled: boolean }>('GET', '/api/gpu/broker'),
+  gpuOptions: () => gpuCall<GpuOption[]>('GET', '/api/gpu/broker/options'),
+  gpuPick: (id: string) => gpuCall<GpuPick>('GET', `/api/dream/${id}/gpu`),
+  setGpuPick: (id: string, mode: 'auto' | 'manual', choice?: string) => gpuCall<GpuPick>('POST', `/api/dream/${id}/gpu`, { mode, choice }),
   list: () => call<DreamSummary[]>('GET', ''),
   get: (id: string) => call<DreamDetail>('GET', `/${id}`),
   create: (d: NewDream) => call<{ id: string }>('POST', '', d),

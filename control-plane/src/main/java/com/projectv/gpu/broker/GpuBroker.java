@@ -46,16 +46,23 @@ public class GpuBroker {
     private final PodEvents events;
     private final GpuPodLimits limits;
     private final Clock clock;
+    private final PreferenceStore prefs;
     private final Map<UUID, Rental> open = new ConcurrentHashMap<>();
 
     @Autowired
     public GpuBroker(List<GpuProvider> providers, BrokerConfig config, GpuWallet wallet, BrokerRecords records,
-                     PodLeases leases, PodEvents events, GpuPodLimits.FromConfig limits) {
-        this(providers, config, wallet, records, leases, events, limits.limits, Clock.systemUTC());
+                     PodLeases leases, PodEvents events, GpuPodLimits.FromConfig limits, PreferenceStore prefs) {
+        this(providers, config, wallet, records, leases, events, limits.limits, Clock.systemUTC(), prefs);
     }
 
     public GpuBroker(List<GpuProvider> providers, BrokerConfig config, GpuWallet wallet, BrokerRecords records,
                      PodLeases leases, PodEvents events, GpuPodLimits limits, Clock clock) {
+        this(providers, config, wallet, records, leases, events, limits, clock, PreferenceStore.NONE);
+    }
+
+    public GpuBroker(List<GpuProvider> providers, BrokerConfig config, GpuWallet wallet, BrokerRecords records,
+                     PodLeases leases, PodEvents events, GpuPodLimits limits, Clock clock, PreferenceStore prefs) {
+        this.prefs = prefs;
         providers.forEach(p -> this.providers.put(p.provider(), p));
         this.config = config;
         this.wallet = wallet;
@@ -78,60 +85,136 @@ public class GpuBroker {
      */
     public synchronized Rental acquire(UUID shortId, String capability, String image, List<String> workerArgv,
                                        Map<String, String> env, String volumeId) {
+        return acquire(shortId, capability, image, workerArgv, env, volumeId, Pick.AUTO);
+    }
+
+    /** How the owner wants the GPU chosen for a Short: Auto (the studio picks) or Manual (the owner's "provider|gpu" key). */
+    public record Pick(String mode, String choice) {
+        public static final Pick AUTO = new Pick("auto", null);
+
+        public boolean manual() {
+            return "manual".equalsIgnoreCase(mode);
+        }
+    }
+
+    /** One rentable (or not) option, for the owner's list. {@code key} is what a manual pick sends back. */
+    public record Option(String provider, String gpu, String key, String stock, double hourlyUsd, boolean available, String why) {
+    }
+
+    private record Cand(String id, GpuProvider p, GpuProvider.Quote q, String why, Map<String, Object> row) {
+        boolean ok() {
+            return why == null;
+        }
+
+        String key() {
+            return id + "|" + q.gpu();
+        }
+    }
+
+    /** Every provider's every option with the reason it can or cannot be rented now. Read-only. */
+    private List<Cand> candidates(GpuProvider.GpuSpec spec) {
+        List<Cand> out = new ArrayList<>();
+        for (String id : config.order()) {
+            GpuProvider p = providers.get(id);
+            if (p == null) {
+                out.add(cand(id, null, GpuProvider.Quote.unavailable(id, ""), "no adapter"));
+                continue;
+            }
+            if (!p.configured()) {
+                out.add(cand(id, p, GpuProvider.Quote.unavailable(id, ""), "not configured (no key in .env, or adapter not built)"));
+                continue;
+            }
+            List<GpuProvider.Quote> quotes;
+            try {
+                quotes = p.quotes(spec);
+                if (quotes.isEmpty()) {
+                    out.add(cand(id, p, GpuProvider.Quote.unavailable(id, ""), "no stock: " + p.quote(spec).detail()));
+                    continue;
+                }
+            } catch (RuntimeException e) {
+                out.add(cand(id, p, GpuProvider.Quote.unavailable(id, ""), "quote failed: " + e.getMessage()));
+                continue;
+            }
+            for (GpuProvider.Quote q : quotes) {
+                String why = wallet.refusal(id, q.hourlyUsd() * config.expectedHours());
+                if (why == null) {
+                    try {
+                        new PodWatchdog(p, leases, events, limits, clock).checkCanStart(q.hourlyUsd());
+                    } catch (RuntimeException e) {
+                        why = e.getMessage();
+                    }
+                }
+                out.add(cand(id, p, q, why));
+            }
+        }
+        return out;
+    }
+
+    private static Cand cand(String id, GpuProvider p, GpuProvider.Quote q, String why) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("provider", id);
+        if (q.available()) {
+            row.put("stock", q.stock());
+            row.put("gpu", q.gpu());
+            row.put("hourlyUsd", q.hourlyUsd());
+        }
+        if (why != null) {
+            row.put("skipped", why);
+        }
+        return new Cand(id, p, q, why, row);
+    }
+
+    /** What the owner can choose from, rentable options first, cheapest first. */
+    public List<Option> options() {
+        GpuProvider.GpuSpec spec = new GpuProvider.GpuSpec(config.gpuPreference(), config.minVramGb(), config.minRamGb(), config.diskGb());
+        return candidates(spec).stream()
+                .map(c -> new Option(c.id(), c.q().available() ? c.q().gpu() : null, c.q().available() ? c.key() : null,
+                        c.q().stock(), c.q().hourlyUsd(), c.ok(), c.why()))
+                .sorted(java.util.Comparator.comparing((Option o) -> !o.available()).thenComparingDouble(Option::hourlyUsd))
+                .toList();
+    }
+
+    public synchronized Rental acquire(UUID shortId, String capability, String image, List<String> workerArgv,
+                                       Map<String, String> env, String volumeId, Pick pick) {
         Rental existing = open.get(shortId);
         if (existing != null) {
             leases.heartbeat(existing.instance().id());
             return existing;
         }
         GpuProvider.GpuSpec spec = new GpuProvider.GpuSpec(config.gpuPreference(), config.minVramGb(), config.minRamGb(), config.diskGb());
-        List<Map<String, Object>> considered = new ArrayList<>();
-        // Phase 1 (read-only): quote every provider, drop the ones that cannot serve. Phase 2: cheapest live price first
-        // (owner, 20 Nov 2026: "lesser price the better, any provider"); config order only breaks ties.
-        record Eligible(String id, GpuProvider p, GpuProvider.Quote q, Map<String, Object> row) {
+        List<Cand> all = candidates(spec);
+        List<Map<String, Object>> considered = new ArrayList<>(all.stream().map(Cand::row).toList());
+        // Cheapest live price first (owner, 20 Nov 2026); config order only breaks ties (the sort is stable).
+        List<Cand> eligible = new ArrayList<>(all.stream().filter(Cand::ok)
+                .sorted(java.util.Comparator.comparingDouble(c -> c.q().hourlyUsd())).toList());
+        String how = "cheapest eligible live price";
+        if (pick.manual()) {
+            String key = pick.choice();
+            if (key == null || key.isBlank()) {
+                eligible.clear();
+                considered.add(Map.of("provider", "-", "skipped", "Manual mode: no GPU picked yet (GET /api/gpu/broker/options, then choose one)"));
+            } else {
+                Cand wanted = all.stream().filter(c -> key.equals(c.key())).findFirst().orElse(null);
+                if (wanted == null || !wanted.ok()) {
+                    considered.add(Map.of("provider", "-", "skipped", "your pick " + key + " is not available now"
+                            + (wanted == null ? "" : ": " + wanted.why())));
+                    eligible.clear();
+                } else {
+                    eligible = new ArrayList<>(List.of(wanted));
+                    how = "your manual pick";
+                }
+            }
+        } else if (!eligible.isEmpty()) {
+            double cheapest = eligible.getFirst().q().hourlyUsd();
+            String learned = prefs.learnedKey().orElse(null);
+            Cand fav = learned == null ? null : eligible.stream().filter(c -> learned.equals(c.key())).findFirst().orElse(null);
+            if (fav != null && fav.q().hourlyUsd() <= cheapest * PreferenceStore.MAX_PREMIUM) {
+                eligible.remove(fav);
+                eligible.addFirst(fav);
+                how = "learned from your last picks (you keep choosing it over the cheapest)";
+            }
         }
-        List<Eligible> eligible = new ArrayList<>();
-        for (String id : config.order()) {
-            Map<String, Object> row = new LinkedHashMap<>();
-            row.put("provider", id);
-            considered.add(row);
-            GpuProvider p = providers.get(id);
-            if (p == null) {
-                row.put("skipped", "no adapter");
-                continue;
-            }
-            if (!p.configured()) {
-                row.put("skipped", "not configured (no key in .env, or adapter not built)");
-                continue;
-            }
-            GpuProvider.Quote q;
-            try {
-                q = p.quote(spec);
-            } catch (RuntimeException e) {
-                row.put("skipped", "quote failed: " + e.getMessage());
-                continue;
-            }
-            row.put("stock", q.stock());
-            row.put("gpu", q.gpu());
-            row.put("hourlyUsd", q.hourlyUsd());
-            if (!q.available()) {
-                row.put("skipped", "no stock: " + q.detail());
-                continue;
-            }
-            String refusal = wallet.refusal(id, q.hourlyUsd() * config.expectedHours());
-            if (refusal != null) {
-                row.put("skipped", refusal);
-                continue;
-            }
-            try {
-                new PodWatchdog(p, leases, events, limits, clock).checkCanStart(q.hourlyUsd());
-            } catch (RuntimeException e) {
-                row.put("skipped", e.getMessage());
-                continue;
-            }
-            eligible.add(new Eligible(id, p, q, row));
-        }
-        eligible.sort(java.util.Comparator.comparingDouble(e -> e.q().hourlyUsd())); // stable: ties keep config order
-        for (Eligible e : eligible) {
+        for (Cand e : eligible) {
             String id = e.id();
             GpuProvider p = e.p();
             GpuProvider.Quote q = e.q();
@@ -156,15 +239,16 @@ public class GpuBroker {
                 continue;
             }
             row.put("chosen", true);
-            String reason = id + ": cheapest eligible live price, $%.2f/h (%d eligible)".formatted(inst.hourlyUsd(), eligible.size());
+            String reason = id + ": " + how + ", $%.2f/h (%d eligible)".formatted(inst.hourlyUsd(), all.stream().filter(Cand::ok).count());
             records.decision(shortId, capability, considered, id, reason);
             Rental r = new Rental(shortId, inst, now);
             open.put(shortId, r);
             log.info("GPU broker: rented {} {} ({}, ${}/h live) for Short {}", id, inst.id(), inst.gpu(), inst.hourlyUsd(), shortId);
             return r;
         }
-        String reason = "No GPU provider can run " + capability + " now: " + considered.stream()
-                .map(r -> r.get("provider") + " (" + r.get("skipped") + ")").toList();
+        String reason = "No GPU can run " + capability + " now: " + considered.stream()
+                .filter(r -> r.get("skipped") != null)
+                .map(r -> r.get("provider") + (r.get("gpu") == null ? "" : " " + r.get("gpu")) + " (" + r.get("skipped") + ")").toList();
         records.decision(shortId, capability, considered, null, reason);
         throw new NoGpuAvailableException(reason);
     }
