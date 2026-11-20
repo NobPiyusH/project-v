@@ -138,12 +138,12 @@ class DreamHookChainIdeasTest {
 
     /** The writer's prompts (system, user) for this Short, with a fake writer that answers {@code hook}. */
     String[] write(UUID id, String hook) {
-        when(llm.call(any(), eq("dream.write"), any(), any(), eq(DreamWorld.class))).thenReturn(world(hook));
+        when(llm.call(any(), eq("dream.write"), any(), any(), eq(DreamWorld.class), any())).thenReturn(world(hook));
         ArgumentCaptor<String> sys = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<String> user = ArgumentCaptor.forClass(String.class);
         jdbc.sql("UPDATE dream_short SET shot_count = 3 WHERE id = :d").param("d", id).update();
         dreams.writeShots(id, null);
-        verify(llm, atLeastOnce()).call(any(), eq("dream.write"), sys.capture(), user.capture(), eq(DreamWorld.class));
+        verify(llm, atLeastOnce()).call(any(), eq("dream.write"), sys.capture(), user.capture(), eq(DreamWorld.class), any());
         if (id.equals(dream)) { // the writer replaces the shots: follow the new rows
             var ids = jdbc.sql("SELECT id FROM dream_shot WHERE dream_short_id = :d ORDER BY ord").param("d", id).query(UUID.class).list();
             shot1 = ids.get(0);
