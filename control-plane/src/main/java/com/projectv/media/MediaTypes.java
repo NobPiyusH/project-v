@@ -181,7 +181,14 @@ public final class MediaTypes {
      * @param negative  extra Wan negative-prompt terms (the Producer's stop-rule fix for a recurring cause), or null
      */
     public record ClipJob(String shotId, int shotNumber, int take, String kind, String mode, String imageUri, String prompt,
-                          int width, int height, int numFrames, long seed, String negative, String chainFromUri) {
+                          int width, int height, int numFrames, long seed, String negative, String chainFromUri,
+                          String endImageUri) {
+        /** {@code endImageUri}: first-last frame chaining, the picture the clip must end on (the next shot's); null = ends freely. */
+        public ClipJob(String shotId, int shotNumber, int take, String kind, String mode, String imageUri, String prompt,
+                       int width, int height, int numFrames, long seed, String negative, String chainFromUri) {
+            this(shotId, shotNumber, take, kind, mode, imageUri, prompt, width, height, numFrames, seed, negative, chainFromUri, null);
+        }
+
         public ClipJob(String shotId, int shotNumber, int take, String kind, String mode, String imageUri, String prompt,
                        int width, int height, int numFrames, long seed, String negative) {
             this(shotId, shotNumber, take, kind, mode, imageUri, prompt, width, height, numFrames, seed, negative, null);

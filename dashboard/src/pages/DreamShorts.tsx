@@ -124,7 +124,8 @@ function DreamHome() {
   const [hook, setHook] = useState(false)
   const [hookText, setHookText] = useState('')
   const [hookColor, setHookColor] = useState('red')
-  const [chain, setChain] = useState(false)
+  const [chainStyle, setChainStyle] = useState<'off' | 'last' | 'bridge'>('off')
+  const chain = chainStyle === 'last'
   const [chainGroup, setChainGroup] = useState(0)
   const [locked, setLocked] = useState(false)
   const [pathChoice, setPathChoice] = useState(false)
@@ -142,6 +143,7 @@ function DreamHome() {
     try {
       const r = await dreamApi.create({ idea, look, shots, quality, defaultMode: mode, reviewMinutes: review, music, scout, ...ed,
         ...(hook ? { hookTitle: true, hookText, hookColor } : {}), ...(chain ? { chainShots: true, chainGroup, chainLocked: locked && chainGroup === 0 } : {}),
+        ...(chainStyle === 'bridge' ? { chainBridge: true } : {}),
         ...(ideaRef ? { ideaPack: ideaRef.pack, ideaId: ideaRef.id } : {}), ...(pathChoice ? { pathChoice: true } : {}) })
       window.location.hash = `#/dream/${r.id}`
     } catch (e) {
@@ -178,8 +180,9 @@ function DreamHome() {
             onChange={(e) => setHookText(e.target.value)} />}
           {hook && <label className="small">Big word <select value={hookColor} onChange={(e) => setHookColor(e.target.value)}>
             {HOOK_COLOURS.map((c) => <option key={c} value={c}>{c}</option>)}</select></label>}
-          <label className="small" title="Each clip starts from the last frame of the one before: one continuous camera move. Clips then run one at a time (off by default)">
-            <input type="checkbox" checked={chain} onChange={(e) => setChain(e.target.checked)} /> Chain shots</label>
+          <label className="small" title="Last frame: each clip starts from the last frame of the one before (one continuous move, clips run one at a time). First-last: every shot keeps its picture and each clip travels from its picture to the next one, so joins land on approved pictures (rented GPU pod only). Off by default">
+            Chain shots <select value={chainStyle} onChange={(e) => setChainStyle(e.target.value as 'off' | 'last' | 'bridge')}>
+              <option value="off">off</option><option value="last">last frame</option><option value="bridge">first-last frame</option></select></label>
           {chain && <label className="small">Chain <select value={chainGroup} onChange={(e) => setChainGroup(Number(e.target.value))}>
             <option value={0}>all shots in one scene</option><option value={2}>pairs (1+2, 3+4...)</option><option value={3}>threes (1+2+3, 4+5+6...)</option></select></label>}
           {chain && chainGroup === 0 && <label className="small" title="One camera path for the whole Short, one world and seed, cleaned last frames">

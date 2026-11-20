@@ -138,11 +138,21 @@ def validate_picture(p: dict) -> list[str]:
     return errors
 
 
-def clip_graph(c: dict, image_name: str, prefix: str) -> dict:
-    """ComfyUI API graph for one clip: the fp8 benchmark's proven graph (4 steps, CFG 1, 2+2 expert split)."""
+def clip_graph(c: dict, image_name: str, prefix: str, end_name: str | None = None) -> dict:
+    """ComfyUI API graph for one clip: the fp8 benchmark's proven graph (4 steps, CFG 1, 2+2 expert split).
+    With end_name (first-last frame chaining) node 12 is WanFirstLastFrameToVideo on the same I2V experts and LoRAs
+    (no extra weights): the clip starts on image_name and ends on end_name. Same outputs, so nodes 13-16 are unchanged."""
     split = expert_split(STEPS)
     seed = int(c["seed"]) & 0xFFFFFFFFFFFFFFFF
     neg = NEGATIVE + (", " + c["negative"] if c.get("negative") else "")
+    g = _clip_graph(c, image_name, prefix, split, seed, neg)
+    if end_name:
+        g["17"] = {"class_type": "LoadImage", "inputs": {"image": end_name}}
+        g["12"] = {"class_type": "WanFirstLastFrameToVideo", "inputs": {**g["12"]["inputs"], "end_image": ["17", 0]}}
+    return g
+
+
+def _clip_graph(c: dict, image_name: str, prefix: str, split: int, seed: int, neg: str) -> dict:
     return {
         "1": {"class_type": "UNETLoader", "inputs": {"unet_name": UNET_HIGH, "weight_dtype": "default"}},
         "2": {"class_type": "UNETLoader", "inputs": {"unet_name": UNET_LOW, "weight_dtype": "default"}},
@@ -508,7 +518,13 @@ class Gpu:
         name = f"{jid}.png"
         Image.open(io.BytesIO(base64.b64decode(c["image"]))).convert("RGB") \
             .resize((c["width"], c["height"]), Image.LANCZOS).save(ROOT / "comfy" / "in" / name)
-        pid = http_json(f"http://127.0.0.1:{COMFY_PORT}/prompt", {"prompt": clip_graph(c, name, f"clip/{jid}")})["prompt_id"]
+        end_name = None
+        if c.get("endImage"):  # first-last frame: the clip must land on this picture
+            end_name = f"{jid}-end.png"
+            Image.open(io.BytesIO(base64.b64decode(c["endImage"]))).convert("RGB") \
+                .resize((c["width"], c["height"]), Image.LANCZOS).save(ROOT / "comfy" / "in" / end_name)
+        pid = http_json(f"http://127.0.0.1:{COMFY_PORT}/prompt",
+                        {"prompt": clip_graph(c, name, f"clip/{jid}", end_name)})["prompt_id"]
         while True:
             hist = http_json(f"http://127.0.0.1:{COMFY_PORT}/history/{pid}").get(pid)
             status = (hist or {}).get("status", {})

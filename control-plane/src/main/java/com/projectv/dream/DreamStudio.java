@@ -29,12 +29,24 @@ public class DreamStudio {
      * @param ideaPack   with {@code ideaId}: start from a curated concept seed (idea pack) instead of researching; the Scout is skipped
      * @param pathChoice "Choose the path": the Short ends on an end card with two path options, and a finished Short can be
      *                   continued down the chosen path as the next episode (default off)
+     * @param chainBridge first-last frame chaining: every shot keeps its picture and clip N runs from picture N to
+     *                   picture N+1 (default off; wins over {@code chainShots}, the two never run together)
      */
     public record NewDream(String idea, String look, Integer shots, String quality, String defaultMode,
                            Map<String, String> modes, Integer reviewMinutes, String music, Boolean scout,
                            Boolean musicEdit, Boolean ambience, Boolean pacing, Boolean producerDecides,
                            Boolean hookTitle, String hookText, String hookColor, Boolean chainShots, String ideaPack,
-                           String ideaId, Integer chainGroup, Boolean chainLocked, Boolean pathChoice) {
+                           String ideaId, Integer chainGroup, Boolean chainLocked, Boolean pathChoice, Boolean chainBridge) {
+        public NewDream(String idea, String look, Integer shots, String quality, String defaultMode,
+                        Map<String, String> modes, Integer reviewMinutes, String music, Boolean scout,
+                        Boolean musicEdit, Boolean ambience, Boolean pacing, Boolean producerDecides,
+                        Boolean hookTitle, String hookText, String hookColor, Boolean chainShots, String ideaPack,
+                        String ideaId, Integer chainGroup, Boolean chainLocked, Boolean pathChoice) {
+            this(idea, look, shots, quality, defaultMode, modes, reviewMinutes, music, scout, musicEdit, ambience, pacing,
+                    producerDecides, hookTitle, hookText, hookColor, chainShots, ideaPack, ideaId, chainGroup, chainLocked,
+                    pathChoice, null);
+        }
+
         public NewDream(String idea, String look, Integer shots, String quality, String defaultMode,
                         Map<String, String> modes, Integer reviewMinutes, String music, Boolean scout,
                         Boolean musicEdit, Boolean ambience, Boolean pacing, Boolean producerDecides,
@@ -122,6 +134,9 @@ public class DreamStudio {
         int shots = req.shots() == null ? 5 : Math.max(2, Math.min(8, req.shots()));
         String quality = "720p".equals(req.quality()) ? "720p" : "480p";
         int review = req.reviewMinutes() == null ? 10 : Math.max(1, Math.min(240, req.reviewMinutes()));
+        // One chain style per Short: first-last frame wins over last-frame chaining (the two need different pictures).
+        boolean bridge = Boolean.TRUE.equals(req.chainBridge());
+        boolean lastFrame = !bridge && Boolean.TRUE.equals(req.chainShots());
         StageMode defaultMode = StageMode.parse(req.defaultMode() == null ? "REVIEW" : req.defaultMode());
         Map<DreamStep, StageMode> modes = new EnumMap<>(DreamStep.class);
         if (req.modes() != null) {
@@ -138,21 +153,22 @@ public class DreamStudio {
                                                  music_source, scout, edit_music, edit_ambience, edit_pacing, producer_decides,
                                                  hook_title, hook_text, hook_color, hook_locked, chain_shots, idea_ref,
                                                  chain_group, chain_locked, path_choice, parent_id, episode, chosen_path,
-                                                 pick_source, start_clip_asset_id, scene_seed)
+                                                 pick_source, start_clip_asset_id, scene_seed, chain_bridge)
                         VALUES (:id, :idea, :look, :n, :q, CAST(:modes AS jsonb), :r, 'RUNNING', 'SCOUT', :wf, :music, :scout,
                                 :em, :ea, :ep, :pd, :ht, :htext, :hcol, :hlock, :chain, :iref, :cgroup, :clocked, :pc, :parent,
-                                :episode, :cpath, :psrc, :sclip, :seed)
+                                :episode, :cpath, :psrc, :sclip, :seed, :bridge)
                         """)
+                .param("bridge", bridge)
                 .param("pc", Boolean.TRUE.equals(req.pathChoice()))
                 .param("parent", cont == null ? null : cont.parentId()).param("episode", cont == null ? 1 : cont.episode())
                 .param("cpath", cont == null ? null : cont.chosenPath()).param("psrc", cont == null ? null : cont.pickSource())
                 .param("sclip", cont == null ? null : cont.startClipAssetId()).param("seed", cont == null ? null : cont.seed())
-                .param("clocked", Boolean.TRUE.equals(req.chainLocked()) && Boolean.TRUE.equals(req.chainShots())
+                .param("clocked", lastFrame && Boolean.TRUE.equals(req.chainLocked())
                         && (req.chainGroup() == null || req.chainGroup() == 0))
-                .param("cgroup", req.chainGroup() == null ? 0 : Math.max(0, Math.min(8, req.chainGroup())))
+                .param("cgroup", !lastFrame || req.chainGroup() == null ? 0 : Math.max(0, Math.min(8, req.chainGroup())))
                 .param("ht", hookTitle).param("htext", hookText)
                 .param("hcol", req.hookColor() == null || req.hookColor().isBlank() ? null : req.hookColor().strip())
-                .param("hlock", hookText != null).param("chain", Boolean.TRUE.equals(req.chainShots()))
+                .param("hlock", hookText != null).param("chain", lastFrame)
                 .param("iref", seeded ? DreamIdeaPacks.ref(req.ideaPack(), req.ideaId()) : null)
                 .param("pd", Boolean.TRUE.equals(req.producerDecides()))
                 .param("em", req.musicEdit() == null || req.musicEdit()).param("ea", req.ambience() == null || req.ambience())
@@ -167,7 +183,8 @@ public class DreamStudio {
         var created = new java.util.LinkedHashMap<String, Object>(Map.of("look", look, "shots", shots, "quality", quality,
                 "music", "lyria".equalsIgnoreCase(req.music()) ? "lyria" : "bed", "mode", defaultMode.name()));
         if (hookTitle) created.put("hookTitle", true);
-        if (Boolean.TRUE.equals(req.chainShots())) created.put("chainShots", true);
+        if (lastFrame) created.put("chainShots", true);
+        if (bridge) created.put("chainBridge", true);
         if (seeded) created.put("idea", DreamIdeaPacks.ref(req.ideaPack(), req.ideaId()));
         if (Boolean.TRUE.equals(req.pathChoice())) created.put("pathChoice", true);
         if (cont != null) created.putAll(Map.of("parent", cont.parentId().toString(), "episode", cont.episode(),
@@ -351,7 +368,7 @@ public class DreamStudio {
                 (Boolean) p.get("edit_music"), (Boolean) p.get("edit_ambience"), (Boolean) p.get("edit_pacing"),
                 (Boolean) p.get("producer_decides"), (Boolean) p.get("hook_title"), null, (String) p.get("hook_color"),
                 (Boolean) p.get("chain_shots"), null, null, ((Number) p.get("chain_group")).intValue(),
-                (Boolean) p.get("chain_locked"), true);
+                (Boolean) p.get("chain_locked"), true, (Boolean) p.get("chain_bridge"));
         UUID child = create(req, new Continuation(parentId, episode, path, pick.source(), UUID.fromString(lastClip.toString()),
                 ((Number) branch.get("seed")).longValue()));
         dreams.evidence().event(parentId, null, "continue", null, path,

@@ -291,6 +291,59 @@ class DreamHookChainIdeasTest {
                 .param("d", dream).query(Integer.class).single(), "one cost entry per clip that used the GPU");
     }
 
+    // ---------------------------------------------------------------------------------------------------- first-last frame
+
+    @Test
+    void firstLastFrameClipsTravelFromTheirPictureToTheNextAndTheLastEndsFreely() {
+        jdbc.sql("UPDATE dream_short SET chain_bridge = true WHERE id = :d").param("d", dream).update();
+        assertTrue(dreams.bridged(dream));
+        assertFalse(dreams.chained(dream), "first-last is not last-frame chaining");
+        assertTrue(write(dream, null)[0].contains("the exact view at the END of the shot before it"));
+        media(shot1, "s3://b/p1.png", null);
+        media(shot2, "s3://b/p2.png", null);
+        media(shot3, "s3://b/p3.png", null);
+        var jobs = dreams.clipJobs(dream, null);
+        assertEquals(List.of("s3://b/p1.png", "s3://b/p2.png", "s3://b/p3.png"), jobs.stream().map(j -> j.imageUri()).toList(),
+                "every shot starts from its own picture");
+        assertEquals("s3://b/p2.png", jobs.get(0).endImageUri());
+        assertEquals("s3://b/p3.png", jobs.get(1).endImageUri());
+        assertNull(jobs.get(2).endImageUri(), "the last clip ends freely");
+        assertTrue(jobs.stream().allMatch(j -> j.chainFromUri() == null));
+
+        jdbc.sql("UPDATE dream_short SET chain_bridge = false WHERE id = :d").param("d", dream).update();
+        assertTrue(dreams.clipJobs(dream, null).stream().allMatch(j -> j.endImageUri() == null), "off: as before");
+    }
+
+    @Test
+    void aNewPictureMakesTheClipThatEndsOnItStaleToo() {
+        jdbc.sql("UPDATE dream_short SET chain_bridge = true WHERE id = :d").param("d", dream).update();
+        media(shot1, "s3://b/p1.png", "s3://b/c1.mp4");
+        media(shot2, "s3://b/p2.png", "s3://b/c2.mp4");
+        media(shot3, "s3://b/p3.png", "s3://b/c3.mp4");
+        var job = new com.projectv.media.MediaTypes.KeyframeJob(shot2.toString(), 2, "zimage", "p", 768, 1344, "9:16", "1K", null, 1L);
+        dreams.savePictures(dream, new com.projectv.media.MediaTypes.KeyframeRequest(dream.toString(), null, "a", "b", List.of(job)),
+                new com.projectv.media.MediaTypes.KeyframeResult(List.of(new com.projectv.media.MediaTypes.KeyframeOutput(
+                        shot2.toString(), "s3://b/p2-new.png", "zimage", "m", 1L, 1.0, null, null, null)), 0));
+        assertFalse(hasClip(shot2), "its own clip");
+        assertFalse(hasClip(shot1), "shot 1 ended on the old picture");
+        assertTrue(hasClip(shot3), "shot 3 does not touch picture 2's end");
+    }
+
+    static boolean hasClip(UUID shot) {
+        return jdbc.sql("SELECT clip_asset_id IS NOT NULL FROM dream_shot WHERE id = :s").param("s", shot).query(Boolean.class).single();
+    }
+
+    @Test
+    void firstLastWinsOverLastFrameWhenBothAreAsked() {
+        UUID id = studio.create(new NewDream("a pink pier", "lonely", 4, "480p", "AUTO", null, 10, "bed", false, true, true, true,
+                null, null, null, null, true, null, null, 2, true, null, true));
+        var row = jdbc.sql("SELECT * FROM dream_short WHERE id = :d").param("d", id).query().singleRow();
+        assertEquals(true, row.get("chain_bridge"));
+        assertEquals(false, row.get("chain_shots"));
+        assertEquals(0, ((Number) row.get("chain_group")).intValue());
+        assertEquals(false, row.get("chain_locked"));
+    }
+
     // ---------------------------------------------------------------------------------------------------- idea pack
 
     @Test

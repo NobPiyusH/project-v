@@ -27,6 +27,33 @@ def test_clip_graph_matches_proven_settings():
     assert "no dogs" in g["9"]["inputs"]["text"] and g["11"]["inputs"]["image"] == "a.png"
 
 
+def test_first_last_graph_swaps_only_the_conditioning_node():
+    c = {"prompt": "p", "seed": 7, "width": 480, "height": 832, "frames": 81}
+    plain, flf = S.clip_graph(c, "a.png", "clip/a"), S.clip_graph(c, "a.png", "clip/a", "a-end.png")
+    assert "17" not in plain and plain["12"]["class_type"] == "WanImageToVideo"
+    assert flf["12"]["class_type"] == "WanFirstLastFrameToVideo"
+    assert flf["12"]["inputs"]["start_image"] == ["11", 0] and flf["12"]["inputs"]["end_image"] == ["17", 0]
+    assert flf["17"] == {"class_type": "LoadImage", "inputs": {"image": "a-end.png"}}
+    assert {k: v for k, v in flf.items() if k not in ("12", "17")} == {k: v for k, v in plain.items() if k != "12"}, \
+        "same experts, LoRAs, steps and sampler: no new weights"
+
+
+def test_clips_pod_path_sends_the_end_picture(monkeypatch):
+    monkeypatch.setattr(C, "get_bytes", lambda uri: b"END" if uri.endswith("p2.png") else b"png")
+    monkeypatch.setattr(C, "put_bytes", lambda key, data, ct: f"s3://b/{key}")
+    monkeypatch.setattr(C, "_stop_requested", lambda *a: False)
+    monkeypatch.setattr(C, "_post", lambda *a: None)
+    sent = []
+    monkeypatch.setattr(client, "run", lambda url, kind, payload, ready, beat=None: (sent.append(payload) or (b"mp4", {"seconds": 70})))
+    base = {"kind": "dream", "mode": "fast", "prompt": "walk", "width": 480, "height": 832, "numFrames": 81, "seed": 5, "take": 1}
+    jobs = [{**base, "shotId": "aaaaaaaa-1", "shotNumber": 1, "imageUri": "s3://b/p1.png", "endImageUri": "s3://b/p2.png"},
+            {**base, "shotId": "bbbbbbbb-2", "shotNumber": 2, "imageUri": "s3://b/p2.png"}]
+    clips, _ = C._pod({"gpuUrl": "https://g.example/", "jobs": jobs}, "http://127.0.0.1:8080", "v")
+    import base64
+    assert base64.b64decode(sent[0]["endImage"]) == b"END" and "endImage" not in sent[1]
+    assert all(c["uri"] for c in clips)
+
+
 def test_validation():
     ok = {"prompt": "x", "image": "b64", "seed": 1, "width": 480, "height": 832, "frames": 81, "fps": 16}
     assert S.validate_clip(ok) == []

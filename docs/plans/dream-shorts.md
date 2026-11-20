@@ -132,3 +132,15 @@ picture when a quality check says a frame has degraded; judge drift on the first
 Chaining makes pictures only for the first shot of each chain; the other shots start from the clip before them, so they
 have no picture of their own and no silent fallback: if a last frame can't be read the clip fails and waits for the owner
 (Retry / redo the shot before it). Not built: two candidate pictures for shot 1 (redo shot 1's picture meanwhile).
+
+**First-last frame chaining** (owner, 20 Nov 2026; `chainBridge`, the "Chain shots" menu's "first-last frame"; migration
+V36 `chain_bridge`, default off). Every shot keeps its own picture; clip N runs from picture N to picture N+1 (node 12 of
+the pod graph becomes `WanFirstLastFrameToVideo` on the same I2V experts and LightX2V LoRAs: no new weights), so each join
+lands on an approved picture and nothing drifts along the chain. The last clip ends freely. Never together with last-frame
+chaining (`chainBridge` wins; chain length and locked scene are last-frame only). The writer uses `BRIDGE_STRUCTURE`
+(neighbouring pictures are close views along one path). A new picture also makes the clip of the shot before it stale (it
+ended on the old picture). Clips need not run in order and a failed clip breaks nothing else. Rented pod only: on Modal
+the end pictures are ignored (logged) and clips end freely. **Tried on a real RunPod pod 20 Nov 2026** (4 shots, 480p, same pictures and prompts, about ₹24 for both runs): the owner
+judged last-frame chaining (B) better than first-last (A) by eye. First-last stays OFF and is kept as an option only; do
+not enable it by default. Its risk: the picture check scored the staircase 5/10 for details differing between shots, and
+first-last needs neighbouring pictures to be very close. Clips are in `C:\dev\bench\bridge_test\`.

@@ -364,6 +364,13 @@ def _pod(req: dict, base: str, video_id: str) -> tuple[list[dict], bool]:
         payload = {"image": base64.b64encode(image).decode(), "prompt": j["prompt"],
                    "negative": j.get("negative"), "seed": int(j["seed"]), "frames": int(j["numFrames"]), "fps": fps,
                    "width": int(j["width"]), "height": int(j["height"])}
+        if j.get("endImageUri"):  # first-last frame chaining: land on the next shot's picture
+            try:
+                payload["endImage"] = base64.b64encode(get_bytes(j["endImageUri"])).decode()
+            except Exception as e:  # noqa: BLE001 - an unreadable end picture fails this clip only
+                clips.append(_clip(video_id, j, {"mp4": None, "seconds": 0,
+                                                 "error": f"end picture unreadable ({type(e).__name__}: {e})"[:600]}))
+                continue
         try:
             mp4, info = pod.run("clip", payload)
             r = {"mp4": mp4, "seconds": info.get("seconds") or 0, "frames": info.get("frames"), "fps": info.get("fps"),
@@ -415,6 +422,9 @@ def generate_clips(req: dict) -> dict:
         clips, stopped = _pod(req, base, video_id)
         _post(f"{base}/api/internal/clips/progress", {"videoId": video_id, "clips": [], "finished": True})
         return {"clips": clips, "containers": 1, "stopped": stopped, "coldStarts": 0}
+    if any(j.get("endImageUri") for j in req["jobs"]):
+        log.warning("First-last frame chaining runs on the rented pod only; on Modal these %d clips end freely",
+                    len(req["jobs"]))
     progress = modal.Dict.from_name("projectv-progress", create_if_missing=True)
     chain = bool(req.get("chain"))
     containers = 1 if chain else max(1, min(4, int(req.get("containers") or 4), len(req["jobs"]) or 1))

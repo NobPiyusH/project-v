@@ -49,7 +49,7 @@ export interface NewDream {
   scout: boolean
   musicEdit: boolean; ambience: boolean; pacing: boolean
   // optional, all off by default: hook title card, chained shots, and a concept seed from an idea pack (skips the Scout)
-  hookTitle?: boolean; hookText?: string; hookColor?: string; chainShots?: boolean; chainGroup?: number; chainLocked?: boolean; ideaPack?: string; ideaId?: string
+  hookTitle?: boolean; hookText?: string; hookColor?: string; chainShots?: boolean; chainGroup?: number; chainLocked?: boolean; chainBridge?: boolean; ideaPack?: string; ideaId?: string
   pathChoice?: boolean // "Choose the path": end card with two options; a finished Short can be continued (off by default)
 }
 

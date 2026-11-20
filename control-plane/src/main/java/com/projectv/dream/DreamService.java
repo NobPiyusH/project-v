@@ -134,6 +134,14 @@ public class DreamService {
             + "to another place or time of day. In each shot's scene describe what the camera sees at the END of that "
             + "shot; in its motion describe the same continuous movement (direction and speed) carrying on.";
 
+    /** Writer structure for first-last frame chaining: each picture is both the start of its shot and the end of the one before. */
+    static final String BRIDGE_STRUCTURE = "Invent %d shots that are consecutive moments of ONE continuous camera move through ONE "
+            + "world. Each shot's picture is the view at the START of that shot and, at the same time, the exact view at the "
+            + "END of the shot before it (the video travels from one picture to the next), so neighbouring pictures must be "
+            + "close: the same place seen a little further along the same path, with the same light and time of day. Never "
+            + "cut to another place. In each shot's scene describe what the camera sees at the START of that shot; in its "
+            + "motion describe the movement (direction and speed) that carries the camera on to the next shot's view.";
+
     /** Writer structure for chains of N shots: inside a group one unbroken take, between groups a new view of the same world. */
     static final String CHAIN_GROUP_STRUCTURE = "Invent %d shots in the same world, in scenes of %d shots each. The %d shots of a scene "
             + "are ONE continuous camera move: each starts exactly where the previous one ended (its first frame IS the previous "
@@ -380,7 +388,8 @@ public class DreamService {
                 ? ("Invent %d shots that are consecutive moments of ONE idea the owner chose, in the same place, flowing "
                 + "into each other: %s - %s").formatted(count, scouted.chosen().title(), scouted.chosen().idea())
                 : locked ? LOCKED_STRUCTURE.formatted(count)
-                : chain ? (group > 0 ? CHAIN_GROUP_STRUCTURE.formatted(count, group, group) : CHAIN_STRUCTURE.formatted(count))
+                : Boolean.TRUE.equals(d.get("chain_bridge")) ? BRIDGE_STRUCTURE.formatted(count)
+                : chain ?(group > 0 ? CHAIN_GROUP_STRUCTURE.formatted(count, group, group) : CHAIN_STRUCTURE.formatted(count))
                 : look.structure().formatted(count);
         String system = """
                 You are the writer of a short, wordless, music-led vertical video (YouTube Shorts / Reels) for a channel
@@ -738,6 +747,12 @@ public class DreamService {
                             UPDATE dream_shot SET picture_asset_id = :a, picture_takes = picture_takes + 1, clip_asset_id = NULL,
                                    error = NULL, updated_at = now() WHERE id = :s
                             """).param("a", asset).param("s", shotId).update();
+            if (bridged(id)) { // first-last frame: the shot before ends on this picture, so its clip is stale too
+                jdbc.sql("""
+                                UPDATE dream_shot b SET clip_asset_id = NULL, updated_at = now()
+                                FROM dream_shot s WHERE s.id = :s AND b.dream_short_id = s.dream_short_id AND b.ord = s.ord - 1
+                                """).param("s", shotId).update();
+            }
             ok++;
         }
         if (r.modalGpuSeconds() > 0) {
@@ -803,6 +818,11 @@ public class DreamService {
         return Boolean.TRUE.equals(dream(id).get("chain_shots"));
     }
 
+    /** First-last frame chaining: clip N runs from picture N to picture N+1. Off by default; never with {@link #chained}. */
+    boolean bridged(UUID id) {
+        return Boolean.TRUE.equals(dream(id).get("chain_bridge"));
+    }
+
     /** Locked scene: one chain through the whole Short with one camera path, one world and one seed (needs chaining, no groups). */
     boolean locked(UUID id) {
         var d = dream(id);
@@ -849,7 +869,12 @@ public class DreamService {
         // A continued episode: shot 1 starts from the last frame of the previous episode's last clip (no picture of its own).
         String parentClip = d.get("start_clip_asset_id") == null ? null : assets.uriOf((UUID) d.get("start_clip_asset_id"));
         String before = null; // the clip of the shot before this one, when it already exists (chained shots)
-        for (Map<String, Object> s : shots(id)) {
+        boolean bridge = Boolean.TRUE.equals(d.get("chain_bridge"));
+        List<Map<String, Object>> all = shots(id);
+        for (int i = 0; i < all.size(); i++) {
+            Map<String, Object> s = all.get(i);
+            // First-last frame: this clip ends on the next shot's picture (the last clip, or a missing picture: ends freely).
+            String endImage = bridge && i + 1 < all.size() ? (String) all.get(i + 1).get("picture_uri") : null;
             String shotId = s.get("id").toString();
             String clipBefore = before;
             before = (String) s.get("clip_uri");
@@ -868,7 +893,8 @@ public class DreamService {
             int take = ((Number) s.get("clip_takes")).intValue() + 1;
             jobs.add(new ClipJob(shotId, ((Number) s.get("ord")).intValue() + 1, take, "dream", "fast",
                     (String) s.get("picture_uri"), fixPrompt.isEmpty() ? (String) s.get("motion_prompt") : s.get("motion_prompt") + fixPrompt, size[0], size[1], frames,
-                    (locked ? sceneSeed : Math.abs((long) shotId.hashCode())) + take, negative, continues || fromParent ? clipBefore : null));
+                    (locked ? sceneSeed : Math.abs((long) shotId.hashCode())) + take, negative, continues || fromParent ? clipBefore : null,
+                    endImage));
         }
         return jobs;
     }
@@ -958,7 +984,7 @@ public class DreamService {
         }
         staleFinal(id);
         return "%d/%d clips made (Wan %s, %s%s)%s%s%s.".formatted(ok, req.jobs().size(), onPod ? "fp8 on a rented pod" : "fast", dream(id).get("quality"),
-                req.chain() ? ", chained" : "",
+                req.chain() ? ", chained" : req.jobs().stream().anyMatch(j -> j.endImageUri() != null) ? ", first-last frame" : "",
                 gpu > 0 ? " in %.0f s of GPU time".formatted(gpu) : "",
                 stopped > 0 ? "; stopped before " + stopped + " finished" : "",
                 errors.isEmpty() ? "" : "; " + errors.size() + " failed: " + errors.getFirst()
@@ -1101,6 +1127,7 @@ public class DreamService {
         b.put("chainShots", d.get("chain_shots"));
         b.put("chainGroup", d.get("chain_group"));
         b.put("chainLocked", d.get("chain_locked"));
+        b.put("chainBridge", d.get("chain_bridge"));
         b.put("pathA", d.get("path_a"));
         b.put("pathB", d.get("path_b"));
         b.put("episode", d.get("episode"));
