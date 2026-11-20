@@ -359,8 +359,11 @@ public class GpuBroker {
         if (r == null) {
             return new GpuProvider.InstanceStatus(GpuProvider.State.GONE, null, "no open rental");
         }
-        leases.heartbeat(r.instance().id());
-        return providers.get(r.instance().provider()).status(r.instance().id());
+        GpuProvider.InstanceStatus st = providers.get(r.instance().provider()).status(r.instance().id());
+        if (st.state() != GpuProvider.State.GONE) { // a gone pod must not look alive: release books up to the last real beat
+            leases.heartbeat(r.instance().id());
+        }
+        return st;
     }
 
     /** True when the provider says the pod no longer exists. An unreadable status is not "gone". */
@@ -397,8 +400,15 @@ public class GpuBroker {
             return;
         }
         GpuProvider p = providers.get(r.instance().provider());
+        Instant end = clock.instant();
+        if (gone(r)) { // deleted or self-stopped earlier: it stopped billing at about its last heartbeat, not now
+            Instant beat = leases.find(r.instance().id()).map(PodLeases.Lease::heartbeatAt).orElse(null);
+            if (beat != null && beat.isAfter(r.createdAt()) && beat.isBefore(end)) {
+                end = beat;
+            }
+        }
         boolean gone = safeTerminate(p, r.instance().id());
-        double hours = Math.max(0, Duration.between(r.createdAt(), clock.instant()).toSeconds() / 3600.0);
+        double hours = Math.max(0, Duration.between(r.createdAt(), end).toSeconds() / 3600.0);
         try {
             records.cost(shortId, r.instance().provider(), hours, r.instance().hourlyUsd(),
                     "GPU rental %s (%s) ended: %s".formatted(r.instance().id(), r.instance().gpu(), why));

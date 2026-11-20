@@ -112,7 +112,7 @@ public class DreamStudio {
             throw new IllegalArgumentException("Type an idea first");
         }
         String ideaText = req.idea() == null || req.idea().isBlank() ? seed.get().concept() : req.idea().strip();
-        String look = DreamService.LOOKS.containsKey(req.look()) ? req.look() : DreamService.LOOK_ORDER.getFirst();
+        String look = req.look() != null && DreamService.LOOKS.containsKey(req.look()) ? req.look() : DreamService.LOOK_ORDER.getFirst();
         if (seeded) { // the pack decides the look; the idea comes from the pack, so there is nothing for the Scout to research
             look = DreamIdeaPacks.pack(req.ideaPack()).map(DreamIdeaPacks.Pack::look).filter(DreamService.LOOKS::containsKey).orElse(look);
         }
