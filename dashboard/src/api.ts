@@ -188,7 +188,19 @@ export interface RoutingDecision {
   candidates: string; overridden_by_owner: boolean; created_at: string
 }
 
+/** GPU side panel: the RunPod account's pods and one bounded read of a pod's log. */
+export interface GpuPod {
+  id: string; name: string; status: string; costPerHrUsd: number; createdAt: string | null
+  runningMinutes: number; spentUsdEstimate: number
+}
+export interface GpuPods { configured: boolean; pods: GpuPod[]; error?: string }
+export interface GpuLogLine { ts: string; source: string; line: string }
+export interface GpuLogPage { lines: GpuLogLine[]; next: string | null; error: string | null }
+
 export const api = {
+  gpuPods: () => call<GpuPods>('GET', '/gpu/pods'),
+  gpuLogs: (id: string, since: string | null) =>
+    call<GpuLogPage>('GET', `/gpu/pods/${encodeURIComponent(id)}/logs${since ? `?since=${encodeURIComponent(since)}` : '?tail=150'}`),
   system: () => call<{ planner: string }>('GET', '/system'),
   stages: () => call<StageInfo[]>('GET', '/stages'),
   styles: () => call<StylePreset[]>('GET', '/styles'),

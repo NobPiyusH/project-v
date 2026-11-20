@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api, studio } from './api'
+import { GpuPanel } from './GpuPanel'
 import { Autopilot, autopilotApi } from './pages/Autopilot'
 import { useHashRoute, usePoll } from './hooks'
 import { Home } from './pages/Home'
@@ -79,6 +80,7 @@ function BackendPower() {
 export default function App() {
   const route = useHashRoute()
   const [theme, toggleTheme] = useTheme()
+  const [gpuOpen, setGpuOpen] = useState(false)
   const { data: stages, error } = usePoll(api.stages, 60000)
   const { data: budget } = usePoll(api.budget, 10000)
   const { data: videos } = usePoll(api.videos, 5000)
@@ -118,6 +120,8 @@ export default function App() {
           </div>
         )}
         <BackendPower />
+        <button className={`icon-btn ${gpuOpen ? 'primary' : ''}`} onClick={() => setGpuOpen((o) => !o)}
+          title="Live log of the GPU pods on RunPod (only fetched while open)" aria-expanded={gpuOpen}>GPU logs</button>
         <button className="icon-btn" onClick={toggleTheme} title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
           aria-label="Toggle theme">{theme === 'dark' ? '☀' : '☾'}</button>
       </header>
@@ -130,6 +134,7 @@ export default function App() {
           : dreamMatch ? <DreamShorts id={dreamMatch[1]} />
           : route.startsWith('#/dream') ? <DreamShorts /> : <Home stages={stages} videos={videos} />)}
       </main>
+      {gpuOpen && <GpuPanel onClose={() => setGpuOpen(false)} />}
     </>
   )
 }

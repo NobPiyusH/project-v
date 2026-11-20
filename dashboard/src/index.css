@@ -282,3 +282,17 @@ input[type=text] { min-width: 0; }
   .inbox-item > :last-child { grid-column: 1 / -1; }
   main { padding: 16px 12px 64px; }
 }
+
+/* GPU logs side panel (opened from the top bar) */
+.gpu-panel { position: fixed; top: 0; right: 0; bottom: 0; width: min(440px, 100vw); z-index: 40; display: grid;
+  grid-template-rows: auto auto auto auto 1fr auto; gap: 8px; padding: 12px 14px; background: var(--surface);
+  border-left: 1px solid var(--border); box-shadow: var(--shadow); overflow: hidden; }
+.gpu-head { display: flex; align-items: center; gap: 8px; }
+.gpu-head .spacer { flex: 1; }
+.gpu-stats { display: flex; gap: 12px; flex-wrap: wrap; color: var(--muted); }
+.gpu-log { margin: 0; overflow: auto; min-height: 0; padding: 8px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--surface-2); font-size: 0.78rem; line-height: 1.4; white-space: pre-wrap; word-break: break-word; }
+.gpu-log .t { color: var(--muted); }
+.gpu-log .sys { color: var(--muted); }
+.gpu-panel select { width: 100%; font: inherit; color: var(--text); background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: 8px; padding: 6px 8px; }
