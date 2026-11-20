@@ -17,6 +17,7 @@ import java.util.Map;
  * {@code DELETE /v2/pods/{id}} (terminate, 204). The key is sent as a bearer token and never logged.
  */
 @Component
+@org.springframework.context.annotation.Primary // the watchdog's PodApi; broker adapters (GpuProvider) are PodApi beans too
 public class RunPodApi implements PodApi {
 
     private final String baseUrl;

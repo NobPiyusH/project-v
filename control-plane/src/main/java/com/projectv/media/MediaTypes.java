@@ -91,8 +91,13 @@ public final class MediaTypes {
                               String aspectRatio, String imageSize, String referenceQuery, long seed) {
     }
 
+    /** @param gpuUrl rented-pod route only: the Short's pod endpoint (null on the Modal route) */
     public record KeyframeRequest(String videoId, String geminiImageModel, String modalApp, String modalClass,
-                                  List<KeyframeJob> jobs) {
+                                  List<KeyframeJob> jobs, String gpuUrl, int readyTimeoutSeconds) {
+        public KeyframeRequest(String videoId, String geminiImageModel, String modalApp, String modalClass,
+                               List<KeyframeJob> jobs) {
+            this(videoId, geminiImageModel, modalApp, modalClass, jobs, null, 0);
+        }
     }
 
     /** @param references credit lines of the real reference photos the image model was given (rule 6) */
@@ -100,7 +105,12 @@ public final class MediaTypes {
                                  Usage usage, String error, List<String> references) {
     }
 
-    public record KeyframeResult(List<KeyframeOutput> results, double modalGpuSeconds) {
+    /** @param podGpuSeconds job seconds on a rented pod (the rental itself is booked when the broker releases it) */
+    @com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown = true)
+    public record KeyframeResult(List<KeyframeOutput> results, double modalGpuSeconds, double podGpuSeconds) {
+        public KeyframeResult(List<KeyframeOutput> results, double modalGpuSeconds) {
+            this(results, modalGpuSeconds, 0);
+        }
     }
 
     // ---- animatic
@@ -183,7 +193,15 @@ public final class MediaTypes {
     /** @param holdSeconds keep the one GPU warm this long after the batch (the AI Producer may redo by itself), 0 = no */
     public record ClipRequest(String videoId, String modalApp, String modalClass, String progressUrl, List<ClipJob> jobs,
                               int containers, double estimateGpuSeconds, java.math.BigDecimal estimateInr,
-                              String provider, String resolution, String omniModel, int holdSeconds) {
+                              String provider, String resolution, String omniModel, int holdSeconds,
+                              String gpuUrl, int readyTimeoutSeconds) {
+        public ClipRequest(String videoId, String modalApp, String modalClass, String progressUrl, List<ClipJob> jobs,
+                           int containers, double estimateGpuSeconds, java.math.BigDecimal estimateInr,
+                           String provider, String resolution, String omniModel, int holdSeconds) {
+            this(videoId, modalApp, modalClass, progressUrl, jobs, containers, estimateGpuSeconds, estimateInr, provider,
+                    resolution, omniModel, holdSeconds, null, 0);
+        }
+
         public ClipRequest(String videoId, String modalApp, String modalClass, String progressUrl, List<ClipJob> jobs,
                            int containers, double estimateGpuSeconds, java.math.BigDecimal estimateInr,
                            String provider, String resolution, String omniModel) {

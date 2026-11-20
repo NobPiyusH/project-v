@@ -19,6 +19,17 @@ providers:
     budget: gpu
     enabled: true
 
+  # M3 GPU broker (docs/plans/m3-gpu-router.md): Dream Short pictures + clips on a rented pod (RunPod, Jarvislabs, ...).
+  # The broker picks the cheapest provider and enforces pricing.gpuBroker caps itself, so no router budget bucket here.
+  # Only used when projectv.dream.gpu-provider=broker.
+  - id: gpu_pod
+    name: Rented GPU pod (Wan 2.2 fp8 + Z-Image Turbo, via the GPU broker)
+    kind: gpu_pod
+    capabilities: [image.dream, video.i2v.dream]
+    quality: 6                     # fp8 Wan accepted by the owner as equal to Modal (20 Nov 2026)
+    budget: none
+    enabled: true
+
   - id: gemini_image
     name: Gemini image (Nano Banana, keyframes)
     kind: api
@@ -174,6 +185,23 @@ pricing:
     plan: free                   # owner's account (17 Nov 2026): 10,000 credits a month, non-commercial, attribution
     monthlyCredits: 10000
     usdPer1000Credits: 0.00      # set to the paid plan's rate when upgrading (verify on elevenlabs.io/pricing)
+  # M3 GPU broker (docs/plans/m3-gpu-router.md): rented GPUs for Dream Shorts. Caps only, never prices (rule 7: hourly
+  # rates are read live from each provider). 0 = blocked: the owner raises one when he says yes. Modal keeps its own cap below.
+  gpuBroker:
+    order: [runpod, jarvislabs, cloudrift, vast, shadeform, modal]   # tie-break only: the cheapest live price in stock and inside its cap wins
+    totalCapUsd: 8               # all rented GPUs together per month (owner, 20 Nov 2026: 8)
+    providers:
+      runpod:     { monthlyCapUsd: 8 }   # owner: 8 (20 Nov 2026); other providers stay 0 until they have an adapter and a key
+      jarvislabs: { monthlyCapUsd: 0 }
+      cloudrift:  { monthlyCapUsd: 0 }
+      vast:       { monthlyCapUsd: 0 }
+      shadeform:  { monthlyCapUsd: 0 }
+    gpuPreference: ["NVIDIA GeForce RTX 4090", "NVIDIA GeForce RTX 5090", "NVIDIA RTX A6000", "NVIDIA L40S"]   # >= 24 GB, fp8 Wan
+    minVramGb: 24
+    minRamGb: 48                 # both idle fp8 experts + the fp16 text encoder stay in host RAM
+    diskGb: 80                   # 41.6 GB weights + ComfyUI + clips
+    expectedHours: 0.75          # boot + a Short's pictures and clips, used to check the wallet before renting
+    port: 8000                   # the pod worker's HTTP port
   modal:
     monthlyFreeUsd: 30
     gpuPerSecondUsd: { L40S: 0.000542, H100: 0.001097, L4: 0.000222 }             # ~$1.95/h, ~$3.95/h (verify on modal.com/pricing)

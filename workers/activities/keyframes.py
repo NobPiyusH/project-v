@@ -107,8 +107,44 @@ def generate_keyframes(req: dict) -> dict:
                                     "seconds": round(r["seconds"], 2), "usage": {}, "error": None})
                 activity.heartbeat(len(results))
 
+        pod_seconds = _pod_pictures(req, [j for j in jobs if j["provider"] == "pod"], results)
+
         for f in concurrent.futures.as_completed(gem_futures):
             results.append(f.result())
             activity.heartbeat(len(results))
 
-    return {"results": results, "modalGpuSeconds": round(modal_seconds, 2)}
+    return {"results": results, "modalGpuSeconds": round(modal_seconds, 2), "podGpuSeconds": round(pod_seconds, 2)}
+
+
+def _pod_pictures(req: dict, jobs: list[dict], results: list[dict]) -> float:
+    """Z-Image pictures on the Short's rented GPU pod (gpuUrl). Each picture is its own job, so a lost
+    instance only costs that picture a resubmit. Returns the GPU seconds the worker reported."""
+    if not jobs:
+        return 0.0
+    from workers.pod import client as podc
+
+    url = (req.get("gpuUrl") or "").rstrip("/")
+    seconds = 0.0
+    beat = podc.lease_beat(req.get("progressUrl") or "http://127.0.0.1:8080", req["videoId"], activity_beat)
+    for j in jobs:
+        try:
+            if not url:
+                raise RuntimeError("GPU pod route: the control plane sent no container group URL")
+            png, info = podc.run(url, "picture", {"prompt": j["prompt"], "seed": int(j.get("seed") or 0),
+                                                    "width": int(j.get("width", 768)), "height": int(j.get("height", 1344))},
+                                  float(req.get("readyTimeoutSeconds") or 1800), beat=beat)
+            uri = put_bytes(f"videos/{req['videoId']}/keyframes/{j['shotId']}-{j['attempt']}.png", png, "image/png")
+            s = float(info.get("seconds") or 0)
+            seconds += s
+            results.append({"shotId": j["shotId"], "uri": uri, "provider": "pod", "model": "Tongyi-MAI/Z-Image-Turbo",
+                            "seed": int(j.get("seed") or 0), "seconds": round(s, 2), "usage": {}, "error": None})
+        except Exception as e:  # noqa: BLE001 - one bad shot must not lose the batch
+            results.append({"shotId": j["shotId"], "uri": None, "provider": "pod", "error": f"{type(e).__name__}: {e}"[:500]})
+        activity_beat(len(results))
+    return seconds
+
+
+def activity_beat(detail) -> None:
+    from workers.common import beat
+
+    beat(detail)
