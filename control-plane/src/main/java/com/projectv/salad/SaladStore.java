@@ -7,7 +7,7 @@ import java.math.BigDecimal;
 import java.util.Optional;
 import java.util.UUID;
 
-/** Persistence for the Salad route (table {@code salad_session}, V32, plus the cost ledger). Faked in tests. */
+/** Persistence for the Salad route (table {@code salad_session}, V33, plus the cost ledger). Faked in tests. */
 public interface SaladStore {
 
     void insert(String name, UUID dreamId, String url, String gpuClass, String priority, double hourlyUsd);
