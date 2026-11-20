@@ -203,7 +203,7 @@ public class VideoActivitiesImpl implements VideoActivities {
 
     @Override
     public StageResult plan(String videoId, String prompt, String ownerNotes, int attempt) {
-        Planner.Outcome outcome = planner.plan(prompt, ownerNotes);
+        Planner.Outcome outcome = planner.plan(UUID.fromString(videoId), prompt, ownerNotes);
         Map<String, Object> artifact = new LinkedHashMap<>();
         artifact.put("plan", outcome.plan());
         artifact.put("stages", outcome.stages());
@@ -217,12 +217,7 @@ public class VideoActivitiesImpl implements VideoActivities {
                 .param("title", outcome.plan().title())
                 .param("id", UUID.fromString(videoId))
                 .update();
-        if (outcome.source().startsWith("gemini")) {
-            // Planner only reports the total; price it all as output tokens (an upper bound).
-            long tokens = outcome.totalTokens() == null ? 0 : outcome.totalTokens();
-            ledger.record(UUID.fromString(videoId), BudgetGuard.GEMINI, pricing.textInr(new Usage(0, tokens, 0, tokens)),
-                    BigDecimal.valueOf(tokens), "tokens", true, "PLAN attempt " + attempt);
-        }
+        // The PLAN cost is booked once, by Llm, when the model answers.
         var p = outcome.plan();
         String summary = "%s: %s, %ds, %s, preset %s, narration %s, music %s, research %s (planned by %s)".formatted(
                 p.title(), p.format(), p.durationSec(), p.aspectRatio(), p.stylePreset(), p.narration(), p.music(),
