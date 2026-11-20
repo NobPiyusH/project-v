@@ -29,8 +29,8 @@ public record GpuPodLimits(String prefix, int maxRuntimeMinutes, int idleMinutes
 
     /** Spring bean built from application.properties / .env. */
     @Component
-    static class FromConfig {
-        final GpuPodLimits limits;
+    public static class FromConfig {
+        public final GpuPodLimits limits;
 
         FromConfig(@Value("${projectv.gpu.pod-prefix:projectv-}") String prefix,
                    @Value("${projectv.gpu.max-runtime-minutes:120}") int maxRuntime,
