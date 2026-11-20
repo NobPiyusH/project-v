@@ -292,6 +292,20 @@ class GpuBrokerTest {
     }
 
     @Test
+    void releaseOfAPodThatIsAlreadyGoneBooksOnlyUpToItsLastHeartbeat() {
+        Tick clock = new Tick();
+        GpuBroker b = broker(clock);
+        GpuBroker.Rental r = acquire(b);
+        runpod.state = GpuProvider.State.GONE; // deleted from outside 10 min in; the step only failed at 30 min
+        leases.map.put(r.instance().id(), new PodLeases.Lease(r.instance().id(), "p", NOW.plusSeconds(600), null));
+        clock.now = NOW.plusSeconds(1800);
+        b.release(shortId, "step failed");
+        assertEquals(1, records.costs.size());
+        double hours = Double.parseDouble(records.costs.getFirst().split("[|]")[1]);
+        assertEquals(600 / 3600.0, hours, 1e-9);
+    }
+
+    @Test
     void terminateFailureStillReleasesLeaseSoWatchdogFinishesTheJob() {
         runpod = new Fake("runpod") {
             @Override

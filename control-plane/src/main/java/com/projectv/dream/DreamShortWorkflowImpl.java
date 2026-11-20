@@ -44,6 +44,7 @@ public class DreamShortWorkflowImpl implements DreamShortWorkflow {
             ActivityOptions.newBuilder()
                     .setTaskQueue(TaskQueues.MEDIA)
                     .setStartToCloseTimeout(Duration.ofMinutes(30))
+                    .setHeartbeatTimeout(Duration.ofMinutes(8)) // a restarted media worker must not leave Pictures hanging for 30 min
                     .setRetryOptions(RetryOptions.newBuilder().setMaximumAttempts(1).build())
                     .build());
 
