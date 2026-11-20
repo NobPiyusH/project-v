@@ -138,7 +138,9 @@ public class RunPodProvider implements GpuProvider {
         }
         body.put("ports", List.of(req.port() + "/http"));
         if (req.volumeId() != null && !req.volumeId().isBlank()) {
-            body.put("volumeId", req.volumeId());
+            // REST v2 rejects unknown top-level fields; a global volume goes in mounts.global (one entry, optional path).
+            String path = req.env() != null && req.env().get("SV_VOLUME") != null ? req.env().get("SV_VOLUME") : "/workspace";
+            body.put("mounts", Map.of("global", List.of(Map.of("volumeId", req.volumeId(), "path", path))));
         }
         return body;
     }
