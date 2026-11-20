@@ -14,7 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 class PricingTest {
 
     static Pricing at(String day) throws Exception {
-        Pricing p = new Pricing("../config");
+        Pricing p = new Pricing("src/test/resources/config");
         p.clock = Clock.fixed(Instant.parse(day + "T00:00:00Z"), ZoneOffset.UTC);
         return p;
     }

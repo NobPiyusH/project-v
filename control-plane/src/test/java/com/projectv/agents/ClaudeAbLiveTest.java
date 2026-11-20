@@ -35,7 +35,7 @@ class ClaudeAbLiveTest {
     void claudeResearchAndConceptOnTheDemoInputs() throws Exception {
         BudgetGuard budget = mock(BudgetGuard.class);
         when(budget.canSpendClaude(any(BigDecimal.class))).thenReturn(true);
-        Pricing pricing = new Pricing("../config");
+        Pricing pricing = new Pricing("src/test/resources/config");
         ClaudeChat chat = new ClaudeChat(System.getenv("ANTHROPIC_API_KEY"));
         var research = new ClaudeResearcher(chat, mock(CostLedger.class), budget, pricing, "claude:claude-sonnet-5-5")
                 .research(UUID.randomUUID(), new ResearchRequest(PROMPT, "Midnight Descent: 4 km into the Abyss",

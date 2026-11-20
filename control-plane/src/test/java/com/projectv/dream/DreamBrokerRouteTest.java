@@ -73,7 +73,7 @@ class DreamBrokerRouteTest {
     static void setUp() throws Exception {
         Flyway.configure().dataSource(PG.getJdbcUrl(), PG.getUsername(), PG.getPassword()).load().migrate();
         jdbc = JdbcClient.create(new DriverManagerDataSource(PG.getJdbcUrl(), PG.getUsername(), PG.getPassword()));
-        Pricing pricing = new Pricing("../config");
+        Pricing pricing = new Pricing("src/test/resources/config");
         BudgetGuard budget = new BudgetGuard(jdbc, pricing);
         var json = JsonMapper.builder().build();
         Router router = new Router(jdbc, json, budget, pricing);

@@ -21,7 +21,7 @@ class ClaudeChatTest {
 
     @Test
     void sonnetCostIsPricedFromConfig() throws Exception {
-        Pricing pricing = new Pricing("../config");
+        Pricing pricing = new Pricing("src/test/resources/config");
         // 4,000 in + 3,000 out on Sonnet 5.5 = $0.008 + $0.030 = $0.038 = ₹3.572 at 94/$
         assertEquals(0, new BigDecimal("3.5720").compareTo(pricing.claudeInr(4_000, 3_000)));
         assertEquals(0, new BigDecimal("752.0000").compareTo(pricing.claudeMonthlyCapInr()));

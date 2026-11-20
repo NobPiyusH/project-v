@@ -44,10 +44,10 @@ class MoneyCapsTest {
         Flyway.configure().dataSource(PG.getJdbcUrl(), PG.getUsername(), PG.getPassword()).load().migrate();
         jdbc = JdbcClient.create(new DriverManagerDataSource(PG.getJdbcUrl(), PG.getUsername(), PG.getPassword()));
         var json = JsonMapper.builder().build();
-        pricing = new Pricing("../config");
+        pricing = new Pricing("src/test/resources/config");
         budget = new BudgetGuard(jdbc, pricing);
         var deps = new ProductionDeps(jdbc, json, null, null, new AssetStore(jdbc), new CostLedger(jdbc), pricing, budget,
-                new StylePresets("../config"), "gemini-3.6-flash", "gemini-3.8-flash-tts", "img", "music", "Charon", "app", "cls");
+                new StylePresets("src/test/resources/config"), "gemini-3.6-flash", "gemini-3.8-flash-tts", "img", "music", "Charon", "app", "cls");
         producer = new ProducerService(deps, "gemini-3.6-flash");
     }
 
