@@ -8,7 +8,11 @@ export interface DreamSummary {
   id: string; idea: string; title: string | null; look: string; status: string; step: string | null
   message: string | null; final_asset_id: string | null; thumb_asset_id: string | null; spent_inr: number
   created_at: string; updated_at: string
+  episode: number; parent_id: string | null
 }
+
+/** One episode of a "Choose the path" chain (oldest first). */
+export interface DreamEpisode { id: string; episode: number; title: string | null; chosen_path: string | null; pick_source: string | null; status: string; final_asset_id: string | null }
 
 export interface DreamShot {
   id: string; ord: number; scene: string; picture_prompt: string; motion_prompt: string
@@ -19,6 +23,8 @@ export interface DreamShot {
 export interface DreamDetail extends DreamSummary {
   shot_count: number; quality: string; review_minutes: number; music_asset_id: string | null; music_source: 'bed' | 'lyria'; scout: boolean; scout_json: string | null; scout_angle: number;
   hook_title: boolean; hook_text: string | null; hook_color: string | null; chain_shots: boolean; idea_ref: string | null
+  path_choice: boolean; path_a: string | null; path_b: string | null; chosen_path: string | null; pick_source: string | null
+  chain: DreamEpisode[]; children: { id: string; title: string | null; chosen_path: string | null; status: string }[]
   edit_music: boolean; edit_ambience: boolean; edit_pacing: boolean; check_json: string | null; picture_check_json: string | null; modes_json: string | Record<string, DreamMode>
   shots: DreamShot[]
   costs: { provider_id: string; amount_inr: number; units: number | null; unit_type: string | null; estimated: boolean; note: string; ts: string }[]
@@ -44,6 +50,7 @@ export interface NewDream {
   musicEdit: boolean; ambience: boolean; pacing: boolean
   // optional, all off by default: hook title card, chained shots, and a concept seed from an idea pack (skips the Scout)
   hookTitle?: boolean; hookText?: string; hookColor?: string; chainShots?: boolean; chainGroup?: number; chainLocked?: boolean; ideaPack?: string; ideaId?: string
+  pathChoice?: boolean // "Choose the path": end card with two options; a finished Short can be continued (off by default)
 }
 
 export interface IdeaPackIdea { id: string; title: string; concept: string; hook: string; camera: string; palette: string }
@@ -85,6 +92,8 @@ export const dreamApi = {
   get: (id: string) => call<DreamDetail>('GET', `/${id}`),
   ideaPacks: () => call<IdeaPack[]>('GET', '/idea-packs'),
   setHook: (id: string, text: string, color?: string) => call<void>('POST', `/${id}/hook`, { text, color }),
+  setPaths: (id: string, a: string, b: string) => call<void>('POST', `/${id}/paths`, { a, b }),
+  continueDream: (id: string, path: 'A' | 'B') => call<{ id: string }>('POST', `/${id}/continue`, { path }),
   create: (d: NewDream) => call<{ id: string }>('POST', '', d),
   approve: (id: string, step: DreamStep) => call<void>('POST', `/${id}/steps/${step}/approve`),
   redo: (id: string, step: DreamStep, shotIds: string[], notes: string) =>

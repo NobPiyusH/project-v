@@ -82,6 +82,30 @@ public class DreamController {
         studio.setHook(id, body.text(), body.color());
     }
 
+    public record PathsBody(String a, String b) {
+    }
+
+    /** Edit the two path options of the end card (review or manual step); they apply at the next finish (Redo from Finish, free). */
+    @PostMapping("/{id}/paths")
+    public void paths(@PathVariable UUID id, @RequestBody PathsBody body) {
+        studio.setPaths(id, body.a(), body.b());
+    }
+
+    public record ContinueBody(String path) {
+    }
+
+    /** "Continue this dream": the owner picks path A or B; a new Short (the next episode) starts down that path. */
+    @PostMapping("/{id}/continue")
+    public Map<String, Object> continueDream(@PathVariable UUID id, @RequestBody ContinueBody body) {
+        return Map.of("id", studio.continueDream(id, DreamBranches.PathPick.owner(body.path())));
+    }
+
+    /** The episode chain this Short belongs to (episode 1, 2, 3...). */
+    @GetMapping("/{id}/chain")
+    public List<Map<String, Object>> chain(@PathVariable UUID id) {
+        return studio.chain(id);
+    }
+
     /** Measured GPU timings that replaced the config's guesses (learning loop, phase 1). */
     @GetMapping("/calibration")
     public List<Map<String, Object>> calibration() {

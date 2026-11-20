@@ -322,6 +322,11 @@ def finish(req: dict, tmp: Path) -> dict:
         (tmp / "hook.ass").write_text(hook_ass, encoding="utf-8")
         graph += f";[v]{hook.filter_for('hook.ass')}[vh]"
         video = "[vh]"
+    end_ass = hook.end_card_ass(req.get("pathA") or "", req.get("pathB") or "", width, height, length, req.get("hookColor"))
+    if end_ass:  # "Choose the path" end card over the last ~2 s (off unless the Short asked for it)
+        (tmp / "end.ass").write_text(end_ass, encoding="utf-8")
+        graph += f";{video}{hook.filter_for('end.ass')}[ve]"
+        video = "[ve]"
     run_ffmpeg([*args, "-filter_complex", graph, "-map", video, "-map", "[a]", "-t", f"{length:.3f}",
                 "-c:v", "libx264", "-preset", "slow", "-crf", "17", "-pix_fmt", "yuv420p", "-r", str(fps),
                 "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", str(out)], cwd=tmp)
