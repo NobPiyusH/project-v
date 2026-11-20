@@ -26,6 +26,28 @@ public class DreamGpuController {
         return Map.of("ok", true);
     }
 
+    public record PickBody(String mode, String choice) {
+    }
+
+    /** Every GPU option rentable now (and the blocked ones with the reason), cheapest first: what a Manual pick chooses from. */
+    @GetMapping("/gpu/broker/options")
+    public java.util.List<com.projectv.gpu.broker.GpuBroker.Option> options() {
+        return gpu.options();
+    }
+
+    @GetMapping("/dream/{dreamId}/gpu")
+    public Map<String, Object> pick(@PathVariable UUID dreamId) {
+        var p = gpu.pick(dreamId);
+        return Map.of("mode", p.mode(), "choice", p.choice() == null ? "" : p.choice(), "rented", gpu.isOpen(dreamId));
+    }
+
+    /** Auto (the studio picks, learning from your past picks) or Manual (you pick one option from the list). */
+    @PostMapping("/dream/{dreamId}/gpu")
+    public Map<String, Object> setPick(@PathVariable UUID dreamId, @org.springframework.web.bind.annotation.RequestBody PickBody body) {
+        gpu.setPick(dreamId, body.mode(), body.choice());
+        return pick(dreamId);
+    }
+
     @GetMapping("/gpu/broker")
     public Map<String, Object> status() {
         return Map.of("enabled", gpu.enabled());

@@ -220,4 +220,86 @@ class GpuBrokerTest {
         assertEquals(List.of(r.instance().id()), leases.released);
         assertEquals(1, records.costs.size());
     }
+
+    /** A provider offering several GPUs, like RunPod: 4090 cheap, A6000 mid, 5090 dear. */
+    static class Multi extends Fake {
+        Multi(String id) {
+            super(id);
+        }
+
+        @Override
+        public List<Quote> quotes(GpuSpec spec) {
+            return List.of(new Quote(id, true, "HIGH", "4090|COMMUNITY", 0.34, ""), new Quote(id, true, "LOW", "A6000|SECURE", 0.49, ""),
+                    new Quote(id, true, "HIGH", "5090|SECURE", 0.89, ""));
+        }
+
+        @Override
+        public Quote quote(GpuSpec spec) {
+            return quotes(spec).getFirst();
+        }
+    }
+
+    @Test
+    void optionsAreSortedByPriceAvailableFirstWithReasonsForTheRest() {
+        runpod = new Multi("runpod");
+        jarvis.configured = false;
+        GpuBroker b = broker(Clock.fixed(NOW, ZoneOffset.UTC));
+        List<GpuBroker.Option> o = b.options();
+        assertEquals(List.of("runpod|4090|COMMUNITY", "runpod|A6000|SECURE", "runpod|5090|SECURE"),
+                o.stream().filter(GpuBroker.Option::available).map(GpuBroker.Option::key).toList());
+        GpuBroker.Option blocked = o.stream().filter(x -> x.provider().equals("jarvislabs")).findFirst().orElseThrow();
+        assertFalse(blocked.available());
+        assertTrue(blocked.why().contains("not configured"));
+        assertTrue(o.getLast().hourlyUsd() == 0 || !o.getLast().available() || o.getLast().hourlyUsd() >= o.getFirst().hourlyUsd());
+    }
+
+    @Test
+    void manualPickRentsExactlyThatOptionEvenIfDearer() {
+        runpod = new Multi("runpod");
+        GpuBroker b = broker(Clock.fixed(NOW, ZoneOffset.UTC));
+        GpuBroker.Rental r = b.acquire(shortId, "video.i2v.dream", "img", List.of("w"), Map.of(), null,
+                new GpuBroker.Pick("manual", "runpod|5090|SECURE"));
+        assertEquals("runpod", r.instance().provider());
+        assertTrue(records.decisions.getFirst().contains("your manual pick"));
+    }
+
+    @Test
+    void manualPickThatIsGoneFailsToTheOwnerWithoutFallingBack() {
+        GpuBroker b = broker(Clock.fixed(NOW, ZoneOffset.UTC));
+        GpuBroker.NoGpuAvailableException e = assertThrows(GpuBroker.NoGpuAvailableException.class,
+                () -> b.acquire(shortId, "video.i2v.dream", "img", List.of("w"), Map.of(), null, new GpuBroker.Pick("manual", "runpod|nope|X")));
+        assertTrue(e.getMessage().contains("your pick"));
+        assertTrue(runpod.created.isEmpty() && jarvis.created.isEmpty(), "no silent fallback after a manual pick");
+        assertThrows(GpuBroker.NoGpuAvailableException.class,
+                () -> b.acquire(UUID.randomUUID(), "video.i2v.dream", "img", List.of("w"), Map.of(), null, new GpuBroker.Pick("manual", null)));
+    }
+
+    @Test
+    void autoFollowsALearnedPreferenceWithinThePremiumLimit() {
+        runpod = new Multi("runpod");
+        PreferenceStore learned = new PreferenceStore() {
+            public java.util.Optional<String> learnedKey() { return java.util.Optional.of("runpod|A6000|SECURE"); }
+            public void recordChoice(UUID s, String c, String ch, Map<String, Object> ctx) { }
+        };
+        GpuBroker b = new GpuBroker(List.of(runpod, jarvis, modal), new BrokerConfig(List.of("runpod", "jarvislabs", "modal"), caps, 0,
+                List.of("x"), 24, 48, 80, 1.0, 8000), new GpuWallet(new BrokerConfig(List.of("runpod"), caps, 0, List.of("x"), 24, 48, 80, 1, 8000),
+                p -> 0.0), records, leases, (p, pod, r, h, u) -> { }, new GpuPodLimits("projectv-", 120, 15, 10, 2, 2.0, true),
+                Clock.fixed(NOW, ZoneOffset.UTC), learned);
+        b.acquire(shortId, "video.i2v.dream", "img", List.of("w"), Map.of(), null);
+        assertTrue(records.decisions.getFirst().contains("learned from your last picks"));
+        assertEquals("runpod|A6000|SECURE", records.consideredLog.getFirst().stream()
+                .filter(r -> Boolean.TRUE.equals(r.get("chosen"))).map(r -> r.get("provider") + "|" + r.get("gpu")).findFirst().orElseThrow());
+        // 5090 at $0.89 is 2.6x the cheapest ($0.34): over the 1.5x premium limit, so it would not be followed
+        PreferenceStore dear = new PreferenceStore() {
+            public java.util.Optional<String> learnedKey() { return java.util.Optional.of("runpod|5090|SECURE"); }
+            public void recordChoice(UUID s, String c, String ch, Map<String, Object> ctx) { }
+        };
+        runpod.created.clear();
+        records.decisions.clear();
+        GpuBroker b2 = new GpuBroker(List.of(runpod, jarvis, modal), new BrokerConfig(List.of("runpod"), caps, 0, List.of("x"), 24, 48, 80, 1.0, 8000),
+                new GpuWallet(new BrokerConfig(List.of("runpod"), caps, 0, List.of("x"), 24, 48, 80, 1, 8000), p -> 0.0), records, leases,
+                (p, pod, r, h, u) -> { }, new GpuPodLimits("projectv-", 120, 15, 10, 2, 2.0, true), Clock.fixed(NOW, ZoneOffset.UTC), dear);
+        b2.acquire(UUID.randomUUID(), "video.i2v.dream", "img", List.of("w"), Map.of(), null);
+        assertTrue(records.decisions.getFirst().contains("cheapest eligible"));
+    }
 }

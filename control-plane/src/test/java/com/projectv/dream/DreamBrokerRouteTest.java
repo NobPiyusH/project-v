@@ -85,7 +85,7 @@ class DreamBrokerRouteTest {
                 new GpuPodLimits("projectv-", 120, 15, 10, 2, 2.0, true), java.time.Clock.systemUTC());
         Path worker = Files.createTempFile("worker", ".py");
         Files.writeString(worker, "print('worker')\n");
-        DreamGpu gpu = new DreamGpu(broker, pricing, "broker", worker.toString(), "img", "", 30, 8000, 10, 76, 900, 2.0);
+        DreamGpu gpu = new DreamGpu(broker, jdbc, new com.projectv.gpu.broker.PreferenceStore.Jdbc(jdbc, json), pricing, "broker", worker.toString(), "img", "", 30, 8000, 10, 76, 900, 2.0);
         dreams = new DreamService(jdbc, json, null, new AssetStore(jdbc), pricing, budget, router, new ClipProgress(),
                 "projectv-zimage", "ZImage", "projectv-wan", "Wan", "http://127.0.0.1:8080", BigDecimal.ZERO, 3.5, "", "lyria-3.5",
                 "", "gemini-3.6-flash", "claude:claude-sonnet-5-5", true, gpu);

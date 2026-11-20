@@ -41,7 +41,14 @@ public interface GpuProvider extends PodApi {
 
     boolean enabledByDefault();
 
+    /** The cheapest option in stock (or an unavailable quote saying why not). */
     Quote quote(GpuSpec spec);
+
+    /** Every option in stock, one per GPU (and cloud) the provider offers: what the owner can pick from in Manual mode. */
+    default List<Quote> quotes(GpuSpec spec) {
+        Quote q = quote(spec);
+        return q.available() ? List.of(q) : List.of();
+    }
 
     Instance create(CreateRequest req);
 
