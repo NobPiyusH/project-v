@@ -126,14 +126,14 @@ def _pod_pictures(req: dict, jobs: list[dict], results: list[dict]) -> float:
 
     url = (req.get("gpuUrl") or "").rstrip("/")
     seconds = 0.0
-    beat = podc.lease_beat(req.get("progressUrl") or "http://127.0.0.1:8080", req["videoId"], activity_beat)
+    pod = podc.Rented(req.get("progressUrl") or "http://127.0.0.1:8080", req["videoId"], url,
+                      float(req.get("readyTimeoutSeconds") or 1800), activity_beat)  # a vanished pod is replaced once
     for j in jobs:
         try:
             if not url:
                 raise RuntimeError("GPU pod route: the control plane sent no container group URL")
-            png, info = podc.run(url, "picture", {"prompt": j["prompt"], "seed": int(j.get("seed") or 0),
-                                                    "width": int(j.get("width", 768)), "height": int(j.get("height", 1344))},
-                                  float(req.get("readyTimeoutSeconds") or 1800), beat=beat)
+            png, info = pod.run("picture", {"prompt": j["prompt"], "seed": int(j.get("seed") or 0),
+                                            "width": int(j.get("width", 768)), "height": int(j.get("height", 1344))})
             uri = put_bytes(f"videos/{req['videoId']}/keyframes/{j['shotId']}-{j['attempt']}.png", png, "image/png")
             s = float(info.get("seconds") or 0)
             seconds += s

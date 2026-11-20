@@ -123,6 +123,89 @@ def test_clips_activity_pod_path(monkeypatch):
     assert sent[0][0] == "https://g.example" and sent[0][1] == "clip" and sent[0][2]["frames"] == 81
 
 
+class _Resp:
+    def __init__(self, body: bytes):
+        self.body = body
+
+    def read(self):
+        return self.body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+def _control_plane(monkeypatch, pod_states, replace_url="https://new.example"):
+    """Fake control plane: heartbeat answers the next pod state; replace hands out a new pod URL."""
+    calls = {"replace": 0}
+
+    def urlopen(req, timeout=None):
+        if req.full_url.endswith("/replace"):
+            calls["replace"] += 1
+            return _Resp(json.dumps({"url": replace_url, "readyTimeoutSeconds": 900}).encode())
+        return _Resp(json.dumps({"ok": True, "pod": pod_states.pop(0) if pod_states else "OPEN"}).encode())
+    monkeypatch.setattr(client.urllib.request, "urlopen", urlopen)
+    return calls
+
+
+def test_lease_beat_raises_when_pod_gone_or_released(monkeypatch):
+    _control_plane(monkeypatch, ["GONE", "NONE"])
+    monkeypatch.setattr(client, "health", lambda b: {"ready": False})
+    t = iter([0, 100, 200])
+    beat = client.lease_beat("http://cp", "v", clock=lambda: next(t), pod_url=lambda: "https://old")
+    with pytest.raises(client.PodGone) as gone:
+        beat({})
+    assert not gone.value.released
+    with pytest.raises(client.PodGone) as rel:
+        beat({})
+    assert rel.value.released
+
+
+def test_lease_beat_ignores_gone_while_the_worker_still_answers(monkeypatch):
+    _control_plane(monkeypatch, ["GONE"])
+    monkeypatch.setattr(client, "health", lambda b: {"ready": True})
+    client.lease_beat("http://cp", "v", pod_url=lambda: "https://old")({})  # no raise: a status blip never re-rents
+
+
+def test_rented_replaces_a_vanished_pod_once_and_resubmits(monkeypatch):
+    calls = _control_plane(monkeypatch, [])
+    urls = []
+
+    def fake_run(url, kind, payload, ready, beat=None):
+        urls.append((url, ready))
+        if len(urls) == 1:
+            raise client.PodGone("deleted")
+        return b"MP4", {"seconds": 70}
+    monkeypatch.setattr(client, "run", fake_run)
+    pod = client.Rented("http://cp", "v", "https://old/", 1800)
+    assert pod.run("clip", {}) == (b"MP4", {"seconds": 70})
+    assert urls == [("https://old", 1800), ("https://new.example", 900)] and calls["replace"] == 1
+
+
+def test_rented_second_loss_or_release_fails_fast_without_renting(monkeypatch):
+    calls = _control_plane(monkeypatch, [])
+    n = {"run": 0}
+
+    def gone(*a, **k):
+        n["run"] += 1
+        raise client.PodGone("deleted")
+    monkeypatch.setattr(client, "run", gone)
+    pod = client.Rented("http://cp", "v", "https://old", 1800)
+    with pytest.raises(RuntimeError, match="already replaced once"):
+        pod.run("clip", {})
+    with pytest.raises(RuntimeError, match="GPU pod lost"):
+        pod.run("clip", {})  # the next clip fails at once, no 30-minute wait
+    assert calls["replace"] == 1 and n["run"] == 2
+
+    monkeypatch.setattr(client, "run", lambda *a, **k: (_ for _ in ()).throw(client.PodGone("ended", released=True)))
+    pod2 = client.Rented("http://cp", "v", "https://old", 1800)
+    with pytest.raises(RuntimeError, match="GPU pod lost: ended$"):
+        pod2.run("clip", {})
+    assert calls["replace"] == 1, "a released rental is never rented again"
+
+
 def test_volume_cache_uses_complete_copy_only(tmp_path):
     vol = str(tmp_path)
     assert S.volume_file("", "a.safetensors", 3) is None            # no volume configured

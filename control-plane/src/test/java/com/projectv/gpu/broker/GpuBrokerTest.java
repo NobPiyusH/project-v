@@ -221,6 +221,19 @@ class GpuBrokerTest {
     }
 
     @Test
+    void podStateTellsTheWorkerOpenGoneOrReleased() {
+        GpuBroker b = broker(Clock.fixed(NOW, ZoneOffset.UTC));
+        assertEquals(GpuBroker.PodState.NONE, b.podState(shortId), "no rental yet");
+        acquire(b);
+        assertEquals(GpuBroker.PodState.OPEN, b.podState(shortId));
+        runpod.state = GpuProvider.State.GONE; // deleted from outside while the clips step waits
+        assertEquals(GpuBroker.PodState.GONE, b.podState(shortId));
+        assertEquals(1, runpod.created.size(), "asking never rents");
+        b.release(shortId, "test");
+        assertEquals(GpuBroker.PodState.NONE, b.podState(shortId), "released by the studio: the worker must stop");
+    }
+
+    @Test
     void unreadableStatusKeepsTheRental() {
         runpod = new Fake("runpod") {
             @Override

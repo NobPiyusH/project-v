@@ -353,6 +353,28 @@ public class GpuBroker {
         }
     }
 
+    /** What the media worker should do about the Short's pod while it waits on it or runs jobs. */
+    public enum PodState {
+        /** Still there (or its status is unreadable right now): carry on. */
+        OPEN,
+        /** The provider says it no longer exists (deleted from outside, self-stopped): rent another. */
+        GONE,
+        /** No open rental: the studio released it (Short ended): stop, never rent again for it. */
+        NONE
+    }
+
+    /**
+     * One provider status call. Lets a worker waiting for a pod notice within a minute that it was deleted, instead of
+     * polling a dead address until its 30-minute ready limit.
+     */
+    public PodState podState(UUID shortId) {
+        Rental r = open.get(shortId);
+        if (r == null) {
+            return PodState.NONE;
+        }
+        return gone(r) ? PodState.GONE : PodState.OPEN;
+    }
+
     /** Readiness of the Short's pod (the worker's own /health is the final truth); also keeps the lease warm. */
     public GpuProvider.InstanceStatus status(UUID shortId) {
         Rental r = open.get(shortId);

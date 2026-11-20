@@ -22,8 +22,14 @@ public class DreamGpuController {
     /** The media worker pings this while it waits for the pod or runs jobs, so an active pod is never "idle" to the watchdog. */
     @PostMapping("/internal/gpu/{dreamId}/heartbeat")
     public Map<String, Object> heartbeat(@PathVariable UUID dreamId) {
-        gpu.heartbeat(dreamId);
-        return Map.of("ok", true);
+        return Map.of("ok", true, "pod", gpu.heartbeat(dreamId).name());
+    }
+
+    /** The worker found the pod gone mid-step: rent a replacement (refused once the Short's rental was released). */
+    @PostMapping("/internal/gpu/{dreamId}/replace")
+    public Map<String, Object> replace(@PathVariable UUID dreamId) {
+        var s = gpu.replace(dreamId);
+        return Map.of("url", s.url(), "readyTimeoutSeconds", s.readyTimeoutSeconds());
     }
 
     public record PickBody(String mode, String choice) {

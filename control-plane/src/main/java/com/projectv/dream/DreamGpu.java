@@ -148,10 +148,28 @@ public class DreamGpu {
                 .param("m", manual ? "manual" : "auto").param("c", manual ? choice : null).param("d", dreamId).update();
     }
 
-    public void heartbeat(UUID dreamId) {
-        if (enabled) {
-            broker.heartbeat(dreamId);
+    /** Keeps the lease warm and says whether the pod still exists (the worker re-rents on GONE, stops on NONE). */
+    public GpuBroker.PodState heartbeat(UUID dreamId) {
+        if (!enabled) {
+            return GpuBroker.PodState.OPEN;
         }
+        broker.heartbeat(dreamId);
+        return broker.podState(dreamId);
+    }
+
+    /**
+     * A new pod for a running GPU step whose pod vanished. Only when the Short still holds a rental the provider reports
+     * gone: a released rental (the Short ended) is never rented again from here, and a live one is returned as it is.
+     */
+    public Session replace(UUID dreamId) {
+        if (!enabled) {
+            throw new IllegalStateException("The GPU broker is off (projectv.dream.gpu-provider=modal)");
+        }
+        if (broker.podState(dreamId) == GpuBroker.PodState.NONE) {
+            throw new IllegalStateException("Short " + dreamId + " has no open GPU rental (released); not renting again");
+        }
+        log.warn("GPU pod of Short {} vanished during a GPU step; renting a replacement", dreamId);
+        return session(dreamId); // acquire() releases and books the gone rental, then rents again
     }
 
     public void release(UUID dreamId, String why) {

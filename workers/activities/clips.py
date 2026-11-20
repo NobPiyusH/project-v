@@ -343,7 +343,7 @@ def _pod(req: dict, base: str, video_id: str) -> tuple[list[dict], bool]:
     if not url:
         raise RuntimeError("GPU pod route: the control plane sent no container group URL")
     ready_s = float(req.get("readyTimeoutSeconds") or 1800)
-    beat = podc.lease_beat(base, video_id, _beat)
+    pod = podc.Rented(base, video_id, url, ready_s, _beat)  # a pod that vanishes mid-step is replaced once
     clips: list[dict] = []
     jobs = [(j, f"{j['shotId'][:8]}-{j['kind']}{j['take']}") for j in req["jobs"]]
     chain = bool(req.get("chain"))  # clips already run in turn on the pod; chaining feeds each one's last frame to the next
@@ -365,7 +365,7 @@ def _pod(req: dict, base: str, video_id: str) -> tuple[list[dict], bool]:
                    "negative": j.get("negative"), "seed": int(j["seed"]), "frames": int(j["numFrames"]), "fps": fps,
                    "width": int(j["width"]), "height": int(j["height"])}
         try:
-            mp4, info = podc.run(url, "clip", payload, ready_s, beat=beat)
+            mp4, info = pod.run("clip", payload)
             r = {"mp4": mp4, "seconds": info.get("seconds") or 0, "frames": info.get("frames"), "fps": info.get("fps"),
                  "mode": j["mode"], "coldStart": i == 0}
         except Exception as e:  # noqa: BLE001 - one failed clip never fails the batch

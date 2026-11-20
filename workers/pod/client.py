@@ -27,6 +27,15 @@ class JobFailed(Exception):
     """The worker ran the job and it failed (a real error, not the instance going away)."""
 
 
+class PodGone(Exception):
+    """The control plane says the Short's pod no longer exists (deleted from outside, self-stopped).
+    released=True: the studio itself released it (the Short ended), so nothing may rent again."""
+
+    def __init__(self, msg: str, released: bool = False):
+        super().__init__(msg)
+        self.released = released
+
+
 def _headers(extra: dict | None = None) -> dict:
     # RunPod's proxy sits behind Cloudflare, which answers 403 (error 1010) to Python's default "Python-urllib" agent.
     h = {"User-Agent": "projectv-pod-client/1.0"}
@@ -122,20 +131,75 @@ def run(base: str, kind: str, payload: dict, ready_timeout_s: float, beat=lambda
     raise RuntimeError(f"Pod {kind} failed after {RETRIES} retries: {last}")
 
 
-def lease_beat(control_plane: str, video_id: str, inner=lambda info: None, every: float = 60.0, clock=time.monotonic):
+def lease_beat(control_plane: str, video_id: str, inner=lambda info: None, every: float = 60.0, clock=time.monotonic,
+               pod_url=None):
     """A beat callback that also pings the control plane (at most every `every` s) so the Short's GPU lease stays
-    warm while the worker waits for downloads or runs jobs. Best effort: a failed ping never fails a job."""
+    warm while the worker waits for downloads or runs jobs. Best effort: a failed ping never fails a job.
+    The ping's answer says whether the pod still exists: GONE raises PodGone (the caller rents a replacement), NONE
+    raises PodGone(released=True). A GONE whose worker still answers /health ready is ignored (a status blip must
+    never cost a second rental). pod_url() gives the pod address currently in use (it changes after a replacement)."""
     last = [-1e9]
 
     def beat(info):
         inner(info)
         now = clock()
-        if now - last[0] >= every:
-            last[0] = now
-            try:
-                req = urllib.request.Request(f"{control_plane.rstrip('/')}/api/internal/gpu/{video_id}/heartbeat",
-                                             data=b"{}", headers={"Content-Type": "application/json"}, method="POST")
-                urllib.request.urlopen(req, timeout=5).close()
-            except Exception:  # noqa: BLE001
-                pass
+        if now - last[0] < every:
+            return
+        last[0] = now
+        try:
+            req = urllib.request.Request(f"{control_plane.rstrip('/')}/api/internal/gpu/{video_id}/heartbeat",
+                                         data=b"{}", headers={"Content-Type": "application/json"}, method="POST")
+            with urllib.request.urlopen(req, timeout=5) as r:
+                pod = str(json.loads(r.read() or b"{}").get("pod") or "OPEN").upper()
+        except Exception:  # noqa: BLE001
+            return
+        if pod == "NONE":
+            raise PodGone("the studio released this Short's GPU (the Short ended or was cancelled)", released=True)
+        if pod == "GONE" and not (pod_url and health(pod_url())["ready"]):
+            raise PodGone("the GPU pod no longer exists (deleted from outside or self-stopped)")
     return beat
+
+
+def replace_pod(control_plane: str, video_id: str) -> tuple[str, float]:
+    """Asks the control plane for a replacement pod (it books the gone one and rents again). Returns (url, ready_s)."""
+    req = urllib.request.Request(f"{control_plane.rstrip('/')}/api/internal/gpu/{video_id}/replace",
+                                 data=b"{}", headers={"Content-Type": "application/json"}, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=180) as r:
+            body = json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f"replacement GPU refused: HTTP {e.code} {(e.read() or b'')[:300].decode(errors='replace')}") from e
+    return str(body["url"]).rstrip("/"), float(body.get("readyTimeoutSeconds") or 1800)
+
+
+class Rented:
+    """The Short's pod for one GPU step: runs jobs and, when the pod vanishes mid-step, rents ONE replacement and
+    resubmits the same job there. A second loss (or a released rental) fails the rest of the step fast, so it waits
+    for the owner's Retry within minutes instead of sitting on a dead address for 30 (rule 2b)."""
+
+    REPLACEMENTS = 1
+
+    def __init__(self, control_plane: str, video_id: str, url: str, ready_s: float, inner=lambda info: None):
+        self.control_plane, self.video_id = control_plane, video_id
+        self.url, self.ready_s = url.rstrip("/"), ready_s
+        self.replaced = 0
+        self.lost: str | None = None  # set once the step cannot get a pod any more
+        self.beat = lease_beat(control_plane, video_id, inner, pod_url=lambda: self.url)
+
+    def run(self, kind: str, payload: dict) -> tuple[bytes, dict]:
+        while True:
+            if self.lost:
+                raise RuntimeError(self.lost)
+            try:
+                return run(self.url, kind, payload, self.ready_s, beat=self.beat)
+            except PodGone as e:
+                if e.released or self.replaced >= self.REPLACEMENTS:
+                    self.lost = f"GPU pod lost: {e}" + ("" if e.released else "; already replaced once. Retry rents a new one.")
+                    raise RuntimeError(self.lost) from e
+                self.replaced += 1
+                self.beat({"pod": f"pod gone ({e}); renting a replacement"})
+                try:
+                    self.url, self.ready_s = replace_pod(self.control_plane, self.video_id)
+                except Exception as re:  # noqa: BLE001
+                    self.lost = f"GPU pod lost ({e}) and no replacement: {re}"
+                    raise RuntimeError(self.lost) from re
