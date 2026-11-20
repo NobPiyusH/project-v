@@ -177,10 +177,10 @@ pricing:
   # M3 GPU broker (docs/plans/m3-gpu-router.md): rented GPUs for Dream Shorts. Caps only, never prices (rule 7: hourly
   # rates are read live from each provider). 0 = blocked: the owner raises one when he says yes. Modal keeps its own cap below.
   gpuBroker:
-    order: [runpod, jarvislabs, cloudrift, vast, shadeform, modal]   # first one in stock and inside its cap wins
-    totalCapUsd: 0               # all rented GPUs together per month (0 = no extra total limit beyond each provider cap)
+    order: [runpod, jarvislabs, cloudrift, vast, shadeform, modal]   # tie-break only: the cheapest live price in stock and inside its cap wins
+    totalCapUsd: 8               # all rented GPUs together per month (owner, 20 Nov 2026: 8)
     providers:
-      runpod:     { monthlyCapUsd: 0 }
+      runpod:     { monthlyCapUsd: 8 }   # owner: 8 (20 Nov 2026); other providers stay 0 until they have an adapter and a key
       jarvislabs: { monthlyCapUsd: 0 }
       cloudrift:  { monthlyCapUsd: 0 }
       vast:       { monthlyCapUsd: 0 }

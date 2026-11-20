@@ -23,7 +23,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Provider-neutral GPU broker (docs/plans/m3-gpu-router.md). {@link #acquire} walks the configured provider order and
- * rents one GPU for a Dream Short from the first provider that is configured, inside its wallet cap, in stock at a
+ * rents one GPU for a Dream Short from the cheapest (live price) provider that is configured, inside its wallet cap, in stock at a
  * live price within the watchdog limits, and that actually creates. Every attempt writes a RoutingDecision; every
  * rental ends in {@link #release}, which terminates and books a CostEntry. The boot command is always wrapped with
  * {@link PodSelfStop} and a lease is opened, so the watchdog covers whatever this class fails to clean up (rule 8).
@@ -85,6 +85,11 @@ public class GpuBroker {
         }
         GpuProvider.GpuSpec spec = new GpuProvider.GpuSpec(config.gpuPreference(), config.minVramGb(), config.minRamGb(), config.diskGb());
         List<Map<String, Object>> considered = new ArrayList<>();
+        // Phase 1 (read-only): quote every provider, drop the ones that cannot serve. Phase 2: cheapest live price first
+        // (owner, 20 Nov 2026: "lesser price the better, any provider"); config order only breaks ties.
+        record Eligible(String id, GpuProvider p, GpuProvider.Quote q, Map<String, Object> row) {
+        }
+        List<Eligible> eligible = new ArrayList<>();
         for (String id : config.order()) {
             Map<String, Object> row = new LinkedHashMap<>();
             row.put("provider", id);
@@ -123,6 +128,14 @@ public class GpuBroker {
                 row.put("skipped", e.getMessage());
                 continue;
             }
+            eligible.add(new Eligible(id, p, q, row));
+        }
+        eligible.sort(java.util.Comparator.comparingDouble(e -> e.q().hourlyUsd())); // stable: ties keep config order
+        for (Eligible e : eligible) {
+            String id = e.id();
+            GpuProvider p = e.p();
+            GpuProvider.Quote q = e.q();
+            Map<String, Object> row = e.row();
             Instant now = clock.instant();
             String name = limits.prefix() + id + "-" + shortId.toString().substring(0, 8) + "-"
                     + UUID.randomUUID().toString().substring(0, 4);
@@ -130,20 +143,20 @@ public class GpuBroker {
             GpuProvider.Instance inst;
             try {
                 inst = p.create(new GpuProvider.CreateRequest(name, image, config.diskGb(), argv, env, config.port(), volumeId, q));
-            } catch (RuntimeException e) {
-                row.put("skipped", "create failed: " + e.getMessage());
-                log.warn("GPU broker: {} create failed for Short {}: {}", id, shortId, e.getMessage());
+            } catch (RuntimeException ex) {
+                row.put("skipped", "create failed: " + ex.getMessage());
+                log.warn("GPU broker: {} create failed for Short {}: {}", id, shortId, ex.getMessage());
                 continue;
             }
             try {
                 leases.open(id, inst.id(), inst.name(), "Dream Short " + shortId);
-            } catch (RuntimeException e) { // never keep a pod we cannot lease
+            } catch (RuntimeException ex) { // never keep a pod we cannot lease
                 safeTerminate(p, inst.id());
-                row.put("skipped", "lease failed, pod terminated: " + e.getMessage());
+                row.put("skipped", "lease failed, pod terminated: " + ex.getMessage());
                 continue;
             }
             row.put("chosen", true);
-            String reason = id + ": first provider in order with stock at $%.2f/h inside its wallet".formatted(inst.hourlyUsd());
+            String reason = id + ": cheapest eligible live price, $%.2f/h (%d eligible)".formatted(inst.hourlyUsd(), eligible.size());
             records.decision(shortId, capability, considered, id, reason);
             Rental r = new Rental(shortId, inst, now);
             open.put(shortId, r);

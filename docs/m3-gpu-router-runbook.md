@@ -8,9 +8,9 @@ Nothing is wired into Dream Shorts and nothing has rented a GPU.
 | Setting | Where | Default | Meaning |
 |---|---|---|---|
 | `DREAM_GPU_PROVIDER` | `.env` | `modal` | `modal` = unchanged. `broker` will use rented pods once step 3 (wiring) exists |
-| `pricing.gpuBroker.providers.<id>.monthlyCapUsd` | `config/providers.yaml` | `0` (blocked) | monthly spend cap per provider, checked against the cost ledger before every rental |
-| `pricing.gpuBroker.totalCapUsd` | same | `0` (no extra total) | all rented GPUs together |
-| `pricing.gpuBroker.order` | same | runpod, jarvislabs, cloudrift, vast, shadeform, modal | try in this order |
+| `pricing.gpuBroker.providers.<id>.monthlyCapUsd` | `config/providers.yaml` | runpod `8` (owner), others `0` (blocked) | monthly spend cap per provider, checked against the cost ledger before every rental |
+| `pricing.gpuBroker.totalCapUsd` | same | `8` | all rented GPUs together |
+| `pricing.gpuBroker.order` | same | runpod, jarvislabs, cloudrift, vast, shadeform, modal | tie-break only; the cheapest live price wins |
 | `RUNPOD_API_KEY` | `.env` | empty | without it the RunPod adapter is skipped |
 | `GPU_WATCHDOG_DRY_RUN` | `.env` | `true` | the sweep only logs until you set `false` |
 | `GPU_MAX_PODS`, `GPU_MAX_HOURLY_USD`, `GPU_MAX_RUNTIME_MINUTES`, `GPU_IDLE_MINUTES` | `.env` | 2, 2.0, 120, 15 | start-side refusal and self-stop limits |

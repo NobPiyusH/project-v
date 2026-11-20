@@ -116,7 +116,25 @@ class GpuBrokerTest {
     }
 
     @Test
-    void firstProviderInOrderWinsWithLeaseDecisionAndSelfStop() {
+    void cheapestLivePriceWinsOverConfigOrder() {
+        runpod.hourly = 0.89;
+        jarvis.hourly = 0.45;
+        GpuBroker b = broker(Clock.fixed(NOW, ZoneOffset.UTC));
+        assertEquals("jarvislabs", acquire(b).instance().provider());
+        assertTrue(runpod.created.isEmpty());
+    }
+
+    @Test
+    void cheapestFailsCreateThenNextCheapest() {
+        runpod.hourly = 0.89;
+        jarvis.hourly = 0.45;
+        jarvis.failCreate = true;
+        GpuBroker b = broker(Clock.fixed(NOW, ZoneOffset.UTC));
+        assertEquals("runpod", acquire(b).instance().provider());
+    }
+
+    @Test
+    void equalPriceKeepsConfigOrderWithLeaseDecisionAndSelfStop() {
         GpuBroker b = broker(Clock.fixed(NOW, ZoneOffset.UTC));
         GpuBroker.Rental r = acquire(b);
         assertEquals("runpod", r.instance().provider());

@@ -29,15 +29,15 @@ Adapters: **RunPod** (built now), Jarvislabs, CloudRift, Vast.ai, Shadeform, Mod
 Quirks to honour: RunPod Community 4090/5090 often "no instances" (Secure works); CloudRift REST bodies are
 `{"version":..,"data":{..}}`, header `X-API-Key`, Asia stock thin; Jarvislabs through the `jl` CLI/`JL_API_KEY`.
 
-## 2. Selection order and fallback chain
-Config `projectv.gpu.broker.order` (default `runpod,jarvislabs,cloudrift,vast,shadeform,modal`). For one request the
+## 2. Selection: cheapest live price, then fallback chain
+**Owner, 20 Nov 2026: the lesser price the better, any provider.** The broker quotes every eligible provider and tries them cheapest first; config `projectv.gpu.broker.order` (default `runpod,jarvislabs,cloudrift,vast,shadeform,modal`). For one request the
 broker walks the chain and, for each provider, records why it was skipped or chosen:
 1. enabled in config and `configured()` (key present);
 2. **wallet** allows the estimated cost (section 3);
 3. `quote()` says stock is available at a live price <= `maxHourlyUsd` (the watchdog's limit);
 4. `PodWatchdog.checkCanStart(hourly)` (max pods, max hourly spend);
 5. `create()`; on failure the instance is terminated if it exists, the failure is recorded, the next provider is tried.
-First provider that passes is used for the whole Short (one pod per Short). Modal is last and only if the wallet and
+Cheapest provider that passes is used for the whole Short (one pod per Short). Modal is last and only if the wallet and
 `modal.monthlyCapUsd` allow it (0 until 1 Dec, so it is skipped with that reason). No provider left: the step fails
 to the owner (rule 2b: Retry / Continue without it), never a silent downgrade of quality (fp8 only; no weaker model).
 Within a provider, GPU preference is config (`4090, 5090, A100 40GB, L40S, A6000`, all >= 24 GB), cheapest in stock.
