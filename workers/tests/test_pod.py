@@ -321,3 +321,12 @@ def test_worker_touches_heartbeat_on_requests_and_boot(tmp_path, monkeypatch, li
 def test_heartbeat_path_matches_java_guard():
     java = (__import__("pathlib").Path(__file__).parents[2] / "control-plane/src/main/java/com/projectv/gpu/PodSelfStop.java").read_text()
     assert f'HEARTBEAT = "{S.HEARTBEAT}"' in java
+
+
+def test_unfiltered_finish_look_adds_no_grading_haze_or_grain():
+    from workers.dream import finish as F
+
+    assert F.look_filter("unfiltered") == "null"                       # ffmpeg's pass-through filter
+    assert "gblur" in F.look_filter("dreamcore")                       # (an unknown look would fall back to this haze)
+    g = F.dissolve_graph([5.0, 5.0], 0, 1080, 1920, 24, "unfiltered")
+    assert "[x]null,format=yuv420p[v]" in g and "noise" not in g and "curves" not in g

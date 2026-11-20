@@ -15,6 +15,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.UUID;
 
 /**
@@ -175,6 +176,72 @@ public class DreamGpu {
     public void release(UUID dreamId, String why) {
         if (enabled) {
             broker.release(dreamId, why);
+        }
+    }
+
+    // ------------------------------------------------------------------------------------------- GPU power (owner, 20 Nov 2026)
+
+    /** GPU power Manual: the pod stays on after the GPU steps until the owner turns it off or it sits idle. */
+    public boolean holdManual(UUID dreamId) {
+        return "manual".equals(jdbc.sql("SELECT gpu_hold FROM dream_short WHERE id = :d").param("d", dreamId)
+                .query(String.class).optional().orElse("auto"));
+    }
+
+    public int idleMinutes(UUID dreamId) {
+        return jdbc.sql("SELECT gpu_idle_minutes FROM dream_short WHERE id = :d").param("d", dreamId)
+                .query(Integer.class).optional().orElse(10);
+    }
+
+    /** Auto (the studio turns it off when done) or Manual (the owner's button / idle time), with 5-30 idle minutes. Works while a pod is on. */
+    public void setHold(UUID dreamId, String hold, Integer idleMinutes) {
+        if (!"auto".equalsIgnoreCase(hold) && !"manual".equalsIgnoreCase(hold)) {
+            throw new IllegalArgumentException("hold must be auto or manual");
+        }
+        jdbc.sql("""
+                        UPDATE dream_short SET gpu_hold = :h, gpu_idle_minutes = COALESCE(:i, gpu_idle_minutes), updated_at = now()
+                        WHERE id = :d
+                        """).param("h", hold.toLowerCase()).param("i", idleMinutes == null ? null : Math.max(5, Math.min(30, idleMinutes)))
+                .param("d", dreamId).update();
+    }
+
+    /** The owner's "Turn off GPU": ends the rental now (a running GPU step then fails fast and waits for Retry). */
+    public void turnOff(UUID dreamId) {
+        if (!enabled || !isOpen(dreamId)) {
+            throw new IllegalStateException("This Short has no rented GPU to turn off");
+        }
+        broker.release(dreamId, "turned off by the owner");
+    }
+
+    /** Seconds until a Manual-hold pod turns itself off for being idle; null when this Short holds no pod or is on Auto. */
+    public Long offInSeconds(UUID dreamId, Instant now) {
+        if (!enabled || !holdManual(dreamId)) {
+            return null;
+        }
+        return broker.lastActivity(dreamId)
+                .map(last -> Math.max(0, idleMinutes(dreamId) * 60L - java.time.Duration.between(last, now).toSeconds())).orElse(null);
+    }
+
+    /** Every 30 s: a Manual-hold pod that nothing used for its idle minutes is turned off (rule 8: a forgotten pod is a critical bug). */
+    @org.springframework.scheduling.annotation.Scheduled(initialDelay = 60_000, fixedDelay = 30_000)
+    void releaseIdleManualScheduled() {
+        releaseIdleManual(Instant.now());
+    }
+
+    void releaseIdleManual(Instant now) {
+        if (!enabled) {
+            return;
+        }
+        for (UUID id : broker.openShortIds()) {
+            try {
+                Long left = offInSeconds(id, now); // null when on Auto: never touched here
+                if (left != null && left == 0L) {
+                    int min = idleMinutes(id);
+                    log.info("GPU power Manual: pod of Short {} idle for {} min, turning it off", id, min);
+                    broker.release(id, "manual hold: idle for " + min + " min");
+                }
+            } catch (RuntimeException e) {
+                log.warn("GPU idle check for Short {} failed: {}", id, e.getMessage());
+            }
         }
     }
 

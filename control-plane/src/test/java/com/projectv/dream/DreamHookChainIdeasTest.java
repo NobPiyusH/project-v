@@ -344,6 +344,68 @@ class DreamHookChainIdeasTest {
         assertEquals(false, row.get("chain_locked"));
     }
 
+    // ---------------------------------------------------------------------------------------------------- unfiltered
+
+    static NewDream unfiltered(String prompt) {
+        // every option that would change the owner's words is switched ON here: Unfiltered must turn them off
+        return new NewDream(prompt, "unfiltered", 5, "480p", "MANUAL", null, 10, "bed", true, true, true, true, true,
+                true, "A *BIG* HOOK", "red", false, "impossible-architecture", "folding-street", null, null, true, null, "manual", 15);
+    }
+
+    @Test
+    void unfilteredTurnsOffEverythingThatRewritesOrJudgesThePromptAndKeepsOneShotPerLine() {
+        UUID id = studio.create(unfiltered("a goalkeeper dives in the rain\n\n  a crowd of fans roaring  \nthe ball hits the net"));
+        var row = jdbc.sql("SELECT * FROM dream_short WHERE id = :d").param("d", id).query().singleRow();
+        assertEquals("unfiltered", row.get("look"));
+        assertEquals(false, row.get("scout"));
+        assertEquals(false, row.get("hook_title"));
+        assertEquals(false, row.get("path_choice"));
+        assertEquals(false, row.get("producer_decides"));
+        assertEquals(false, row.get("edit_music"));
+        assertEquals(false, row.get("edit_ambience"));
+        assertEquals(false, row.get("edit_pacing"));
+        assertNull(row.get("idea_ref"), "no idea pack");
+        assertEquals(3, ((Number) row.get("shot_count")).intValue(), "one shot per non-empty line");
+        assertEquals("manual", row.get("gpu_hold"));
+        assertEquals(15, ((Number) row.get("gpu_idle_minutes")).intValue());
+    }
+
+    @Test
+    void unfilteredUsesTheOwnersWordsExactlyWithoutCallingAWriter() {
+        UUID id = studio.create(unfiltered("a goalkeeper dives in the rain, anime style, a man is crying\nthe ball hits the net"));
+        org.mockito.Mockito.clearInvocations(llm);
+        String said = dreams.writeShots(id, "some notes that must not reach any writer");
+        org.mockito.Mockito.verifyNoInteractions(llm);
+        assertTrue(said.contains("2 shots") && said.contains("exactly as written"), said);
+        var rows = jdbc.sql("SELECT scene, picture_prompt, motion_prompt FROM dream_shot WHERE dream_short_id = :d ORDER BY ord")
+                .param("d", id).query().listOfRows();
+        assertEquals(2, rows.size());
+        assertEquals("a goalkeeper dives in the rain, anime style, a man is crying", rows.get(0).get("picture_prompt"));
+        assertEquals(rows.get(0).get("picture_prompt"), rows.get(0).get("motion_prompt"), "the same words drive the picture and the motion");
+        assertEquals("the ball hits the net", rows.get(1).get("picture_prompt"));
+        assertEquals("a goalkeeper dives in the rain,…", text("SELECT title FROM dream_short WHERE id = :d", id));
+
+        media(UUID.fromString(jdbc.sql("SELECT id::text FROM dream_shot WHERE dream_short_id = :d AND ord = 0").param("d", id).query(String.class).single()),
+                "s3://b/p1.png", null);
+        var jobs = dreams.clipJobs(id, null);
+        assertEquals(1, jobs.size());
+        assertEquals("a goalkeeper dives in the rain, anime style, a man is crying", jobs.getFirst().prompt(), "no look style, camera or 'no people' added");
+        assertNull(jobs.getFirst().negative(), "no negative prompt added");
+        assertEquals(0, DreamService.look("unfiltered").dissolveSec(), "hard cuts");
+        assertEquals(1.0, DreamService.look("unfiltered").speed());
+        assertEquals("", DreamService.look("unfiltered").pictureStyle());
+    }
+
+    @Test
+    void unfilteredSkipsTheQualityChecksThatJudgeNoPeopleAndFeelGood() {
+        UUID id = studio.create(unfiltered("a goalkeeper dives in the rain"));
+        dreams.writeShots(id, null);
+        UUID s = UUID.fromString(jdbc.sql("SELECT id::text FROM dream_shot WHERE dream_short_id = :d").param("d", id).query(String.class).single());
+        media(s, "s3://b/p1.png", null);
+        assertNull(dreams.pictureCheckRequest(id), "no picture check");
+        assertNull(dreams.checkRequest(id), "no quality check");
+    }
+
     // ---------------------------------------------------------------------------------------------------- idea pack
 
     @Test

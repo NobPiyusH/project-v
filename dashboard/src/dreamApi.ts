@@ -50,6 +50,7 @@ export interface NewDream {
   musicEdit: boolean; ambience: boolean; pacing: boolean
   // optional, all off by default: hook title card, chained shots, and a concept seed from an idea pack (skips the Scout)
   hookTitle?: boolean; hookText?: string; hookColor?: string; chainShots?: boolean; chainGroup?: number; chainLocked?: boolean; chainBridge?: boolean; ideaPack?: string; ideaId?: string
+  gpuHold?: 'auto' | 'manual'; gpuIdleMinutes?: number // GPU power (default auto)
   pathChoice?: boolean // "Choose the path": end card with two options; a finished Short can be continued (off by default)
 }
 
@@ -71,7 +72,11 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
 }
 
 export interface GpuOption { provider: string; gpu: string | null; key: string | null; stock: string; hourlyUsd: number; available: boolean; why: string | null }
-export interface GpuPick { mode: 'auto' | 'manual'; choice: string; rented: boolean }
+export interface GpuPick {
+  mode: 'auto' | 'manual'; choice: string; rented: boolean
+  // GPU power: auto = the studio turns the pod off when done; manual = stays on until turned off or idle
+  hold: 'auto' | 'manual'; idleMinutes: number; offInSeconds: number | null
+}
 
 async function gpuCall<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(path, {
@@ -88,6 +93,8 @@ export const dreamApi = {
   gpuOptions: () => gpuCall<GpuOption[]>('GET', '/api/gpu/broker/options'),
   gpuPick: (id: string) => gpuCall<GpuPick>('GET', `/api/dream/${id}/gpu`),
   setGpuPick: (id: string, mode: 'auto' | 'manual', choice?: string) => gpuCall<GpuPick>('POST', `/api/dream/${id}/gpu`, { mode, choice }),
+  setGpuHold: (id: string, hold: 'auto' | 'manual', idleMinutes?: number) => gpuCall<GpuPick>('POST', `/api/dream/${id}/gpu/hold`, { hold, idleMinutes }),
+  gpuOff: (id: string) => gpuCall<GpuPick>('POST', `/api/dream/${id}/gpu/off`),
   list: () => call<DreamSummary[]>('GET', ''),
   get: (id: string) => call<DreamDetail>('GET', `/${id}`),
   ideaPacks: () => call<IdeaPack[]>('GET', '/idea-packs'),

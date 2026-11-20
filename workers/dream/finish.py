@@ -33,6 +33,8 @@ LOOKS = {
     # The owner's examples (18 Nov 2026) are clean: no haze, no grain, no vignette; vivid colour, crisp detail.
     # A whisper of moving grain (alls=2) breaks up the too-smooth "AI" surface without looking like a filter.
     # Shadows are lifted a touch first (the 19 Nov test crushed the dark ground to pure black).
+    # Unfiltered (owner, 20 Nov 2026): the picture as the model made it, no grading, haze, grain or sharpening.
+    "unfiltered": "null",
     "lonely": "curves=all='0/0.035 0.2/0.215 1/1',eq=saturation=1.12:contrast=1.04,unsharp=5:5:0.5:5:5:0,noise=alls=2:allf=t",
     "drive": "curves=all='0/0.035 0.2/0.215 1/1',eq=saturation=1.1:contrast=1.04,unsharp=5:5:0.5:5:5:0,noise=alls=2:allf=t",
     # Idea pack "Impossible architecture": clean and crisp like the realistic looks, a touch more contrast for dusk skylines.

@@ -29,6 +29,8 @@ public class DreamStudio {
      * @param ideaPack   with {@code ideaId}: start from a curated concept seed (idea pack) instead of researching; the Scout is skipped
      * @param pathChoice "Choose the path": the Short ends on an end card with two path options, and a finished Short can be
      *                   continued down the chosen path as the next episode (default off)
+     * @param gpuHold    GPU power: "auto" (default: the studio turns the pod off when the GPU steps are over) or "manual" (stays on
+     *                   until the owner turns it off, or {@code gpuIdleMinutes} (5-30, default 10) pass with no GPU work)
      * @param chainBridge first-last frame chaining: every shot keeps its picture and clip N runs from picture N to
      *                   picture N+1 (default off; wins over {@code chainShots}, the two never run together)
      */
@@ -36,7 +38,18 @@ public class DreamStudio {
                            Map<String, String> modes, Integer reviewMinutes, String music, Boolean scout,
                            Boolean musicEdit, Boolean ambience, Boolean pacing, Boolean producerDecides,
                            Boolean hookTitle, String hookText, String hookColor, Boolean chainShots, String ideaPack,
-                           String ideaId, Integer chainGroup, Boolean chainLocked, Boolean pathChoice, Boolean chainBridge) {
+                           String ideaId, Integer chainGroup, Boolean chainLocked, Boolean pathChoice, Boolean chainBridge,
+                           String gpuHold, Integer gpuIdleMinutes) {
+        public NewDream(String idea, String look, Integer shots, String quality, String defaultMode,
+                        Map<String, String> modes, Integer reviewMinutes, String music, Boolean scout,
+                        Boolean musicEdit, Boolean ambience, Boolean pacing, Boolean producerDecides,
+                        Boolean hookTitle, String hookText, String hookColor, Boolean chainShots, String ideaPack,
+                        String ideaId, Integer chainGroup, Boolean chainLocked, Boolean pathChoice, Boolean chainBridge) {
+            this(idea, look, shots, quality, defaultMode, modes, reviewMinutes, music, scout, musicEdit, ambience, pacing,
+                    producerDecides, hookTitle, hookText, hookColor, chainShots, ideaPack, ideaId, chainGroup, chainLocked,
+                    pathChoice, chainBridge, null, null);
+        }
+
         public NewDream(String idea, String look, Integer shots, String quality, String defaultMode,
                         Map<String, String> modes, Integer reviewMinutes, String music, Boolean scout,
                         Boolean musicEdit, Boolean ambience, Boolean pacing, Boolean producerDecides,
@@ -44,7 +57,7 @@ public class DreamStudio {
                         String ideaId, Integer chainGroup, Boolean chainLocked, Boolean pathChoice) {
             this(idea, look, shots, quality, defaultMode, modes, reviewMinutes, music, scout, musicEdit, ambience, pacing,
                     producerDecides, hookTitle, hookText, hookColor, chainShots, ideaPack, ideaId, chainGroup, chainLocked,
-                    pathChoice, null);
+                    pathChoice, null, null, null);
         }
 
         public NewDream(String idea, String look, Integer shots, String quality, String defaultMode,
@@ -115,7 +128,10 @@ public class DreamStudio {
     }
 
     UUID create(NewDream req, Continuation cont) {
-        boolean seeded = req.ideaPack() != null && !req.ideaPack().isBlank() && req.ideaId() != null && !req.ideaId().isBlank();
+        // Unfiltered (owner, 20 Nov 2026): the prompt is used exactly as written, so nothing that rewrites or judges it is on:
+        // no idea pack, Scout, hook title, path-choice end card, editing rules (music cut, ambience, pacing) or Producer.
+        boolean raw = DreamService.UNFILTERED.equals(req.look());
+        boolean seeded = !raw && req.ideaPack() != null && !req.ideaPack().isBlank() && req.ideaId() != null && !req.ideaId().isBlank();
         var seed = seeded ? DreamIdeaPacks.idea(req.ideaPack(), req.ideaId()) : java.util.Optional.<DreamIdeaPacks.Idea>empty();
         if (seeded && seed.isEmpty()) {
             throw new IllegalArgumentException("Unknown idea: " + req.ideaPack() + "/" + req.ideaId());
@@ -128,10 +144,14 @@ public class DreamStudio {
         if (seeded) { // the pack decides the look; the idea comes from the pack, so there is nothing for the Scout to research
             look = DreamIdeaPacks.pack(req.ideaPack()).map(DreamIdeaPacks.Pack::look).filter(DreamService.LOOKS::containsKey).orElse(look);
         }
-        boolean hookTitle = Boolean.TRUE.equals(req.hookTitle());
+        boolean hookTitle = !raw && Boolean.TRUE.equals(req.hookTitle());
         String hookText = !hookTitle ? null : req.hookText() != null && !req.hookText().isBlank() ? req.hookText().strip()
                 : seed.map(DreamIdeaPacks.Idea::hook).orElse(null);
-        int shots = req.shots() == null ? 5 : Math.max(2, Math.min(8, req.shots()));
+        // Unfiltered: one shot per non-empty line of the prompt (the writing step sets the real count).
+        int shots = raw ? (int) Math.max(1, Math.min(8, ideaText.lines().filter(l -> !l.isBlank()).count()))
+                : req.shots() == null ? 5 : Math.max(2, Math.min(8, req.shots()));
+        String gpuHold = "manual".equalsIgnoreCase(req.gpuHold()) ? "manual" : "auto";
+        int gpuIdle = req.gpuIdleMinutes() == null ? 10 : Math.max(5, Math.min(30, req.gpuIdleMinutes()));
         String quality = "720p".equals(req.quality()) ? "720p" : "480p";
         int review = req.reviewMinutes() == null ? 10 : Math.max(1, Math.min(240, req.reviewMinutes()));
         // One chain style per Short: first-last frame wins over last-frame chaining (the two need different pictures).
@@ -153,13 +173,13 @@ public class DreamStudio {
                                                  music_source, scout, edit_music, edit_ambience, edit_pacing, producer_decides,
                                                  hook_title, hook_text, hook_color, hook_locked, chain_shots, idea_ref,
                                                  chain_group, chain_locked, path_choice, parent_id, episode, chosen_path,
-                                                 pick_source, start_clip_asset_id, scene_seed, chain_bridge)
+                                                 pick_source, start_clip_asset_id, scene_seed, chain_bridge, gpu_hold, gpu_idle_minutes)
                         VALUES (:id, :idea, :look, :n, :q, CAST(:modes AS jsonb), :r, 'RUNNING', 'SCOUT', :wf, :music, :scout,
                                 :em, :ea, :ep, :pd, :ht, :htext, :hcol, :hlock, :chain, :iref, :cgroup, :clocked, :pc, :parent,
-                                :episode, :cpath, :psrc, :sclip, :seed, :bridge)
+                                :episode, :cpath, :psrc, :sclip, :seed, :bridge, :ghold, :gidle)
                         """)
-                .param("bridge", bridge)
-                .param("pc", Boolean.TRUE.equals(req.pathChoice()))
+                .param("bridge", bridge).param("ghold", gpuHold).param("gidle", gpuIdle)
+                .param("pc", !raw && Boolean.TRUE.equals(req.pathChoice()))
                 .param("parent", cont == null ? null : cont.parentId()).param("episode", cont == null ? 1 : cont.episode())
                 .param("cpath", cont == null ? null : cont.chosenPath()).param("psrc", cont == null ? null : cont.pickSource())
                 .param("sclip", cont == null ? null : cont.startClipAssetId()).param("seed", cont == null ? null : cont.seed())
@@ -170,10 +190,11 @@ public class DreamStudio {
                 .param("hcol", req.hookColor() == null || req.hookColor().isBlank() ? null : req.hookColor().strip())
                 .param("hlock", hookText != null).param("chain", lastFrame)
                 .param("iref", seeded ? DreamIdeaPacks.ref(req.ideaPack(), req.ideaId()) : null)
-                .param("pd", Boolean.TRUE.equals(req.producerDecides()))
-                .param("em", req.musicEdit() == null || req.musicEdit()).param("ea", req.ambience() == null || req.ambience())
-                .param("ep", req.pacing() == null || req.pacing())
-                .param("scout", !seeded && (req.scout() == null || req.scout()))
+                .param("pd", !raw && Boolean.TRUE.equals(req.producerDecides()))
+                .param("em", !raw && (req.musicEdit() == null || req.musicEdit()))
+                .param("ea", !raw && (req.ambience() == null || req.ambience()))
+                .param("ep", !raw && (req.pacing() == null || req.pacing()))
+                .param("scout", !seeded && !raw && (req.scout() == null || req.scout()))
                 .param("music", "lyria".equalsIgnoreCase(req.music()) ? "lyria" : "bed")
                 .param("id", id).param("idea", ideaText).param("look", look).param("n", shots).param("q", quality)
                 .param("modes", json.writeValueAsString(modeNames)).param("r", review).param("wf", workflowId).update();

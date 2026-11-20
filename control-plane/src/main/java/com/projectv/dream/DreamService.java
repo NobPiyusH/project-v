@@ -100,7 +100,18 @@ public class DreamService {
 
     /** What the new-Short form offers: the order above (the Autopilot rotates only through that) plus looks picked by hand. */
     public static final List<String> SELECTABLE_LOOKS = List.of("lonely", "drive", "walkthrough", "dreamcore", "impossible",
-            "architecture");
+            "architecture", "unfiltered");
+
+    /**
+     * Owner, 20 Nov 2026: a general generator that makes exactly what he wrote. No writer, no look style or camera rules, no
+     * "no people", no lessons, no Scout, no quality judging, no grading or haze at the finish. One line of the prompt = one shot,
+     * used word for word as both the picture prompt and the motion prompt.
+     */
+    public static final String UNFILTERED = "unfiltered";
+
+    static boolean unfiltered(Map<String, Object> d) {
+        return UNFILTERED.equals(d.get("look"));
+    }
 
     /**
      * The owner's rule for every Dream Short (19 Nov 2026): it may look different each time, but it must feel good or
@@ -249,7 +260,9 @@ public class DreamService {
                     "Impossible place: one photo-real scene where two worlds that never meet are joined (e.g. a roadside "
                             + "diner on the Moon), believable light and scale, wide views, awe. No people close up, no text, no brands.",
                     "photorealistic, cinematic wide shot, believable lighting and scale, rich detail, no text",
-                    "slow cinematic camera move (push-in, drift or crane), subtle life in the scene, no cuts"));
+                    "slow cinematic camera move (push-in, drift or crane), subtle life in the scene, no cuts"),
+            // Nothing is added to the owner's words (see UNFILTERED): empty style suffixes, hard cuts, normal speed.
+            UNFILTERED, new Look("Unfiltered: the owner's own prompt, exactly as written.", "", "", ONE_WORLD, 0, 0, 1.0, "none"));
 
     private final JdbcClient jdbc;
     private final ObjectMapper json;
@@ -331,6 +344,11 @@ public class DreamService {
     private void releaseGpuIfDone(UUID id, String step, String status) {
         if (gpu != null && (List.of("COMPLETED", "CANCELLED", "FAILED_WAITING").contains(status)
                 || "MUSIC".equals(step) || "FINISH".equals(step))) {
+            // GPU power Manual (owner, 20 Nov 2026): the pod stays on after the GPU steps, for a quick redo. It goes off by
+            // the owner's button, after the idle time (DreamGpu.releaseIdleManual), or when the Short is cancelled.
+            if (gpu.holdManual(id) && !"CANCELLED".equals(status)) {
+                return;
+            }
             gpu.release(id, step + " " + status);
         }
     }
@@ -372,6 +390,9 @@ public class DreamService {
     public String writeShots(UUID id, String notes) {
         warmGpu(id);
         Map<String, Object> d = dream(id);
+        if (unfiltered(d)) {
+            return writeUnfiltered(id, d);
+        }
         Look look = look((String) d.get("look"));
         int count = ((Number) d.get("shot_count")).intValue();
         Scouted scouted = scouted(d);
@@ -449,6 +470,35 @@ public class DreamService {
                     .param("a", options.get(0)).param("b", options.get(1)).param("d", id).update();
         }
         return "\"%s\": %d shots in one world (%s).".formatted(w.title(), shots.size(), Objects.toString(w.palette(), "").strip());
+    }
+
+    /** Unfiltered "writing": no model is called. Each non-empty line of the prompt becomes one shot, word for word (at most 8). */
+    private String writeUnfiltered(UUID id, Map<String, Object> d) {
+        List<String> lines = Objects.toString(d.get("idea"), "").lines().map(String::strip).filter(l -> !l.isEmpty()).limit(8).toList();
+        if (lines.isEmpty()) {
+            throw new IllegalStateException("The prompt is empty");
+        }
+        String[] words = lines.getFirst().split("\\s+");
+        String title = String.join(" ", java.util.Arrays.copyOf(words, Math.min(words.length, 6))) + (words.length > 6 ? "…" : "");
+        List<PlannedDreamShot> shots = lines.stream().map(l -> new PlannedDreamShot(l, l)).toList();
+        jdbc.sql("DELETE FROM dream_shot WHERE dream_short_id = :d").param("d", id).update();
+        int ord = 0;
+        for (PlannedDreamShot s : shots) {
+            jdbc.sql("""
+                            INSERT INTO dream_shot (id, dream_short_id, ord, scene, picture_prompt, motion_prompt)
+                            VALUES (:id, :d, :o, :scene, :pp, :mp)
+                            """)
+                    .param("id", UUID.randomUUID()).param("d", id).param("o", ord++).param("scene", s.scene())
+                    .param("pp", s.scene()).param("mp", s.motion()).update();
+        }
+        DreamWorld w = new DreamWorld(title, String.join(" ", lines), "", "", "", shots);
+        jdbc.sql("""
+                        UPDATE dream_short SET title = :t, shot_count = :n, world_json = CAST(:w AS jsonb), final_asset_id = NULL,
+                               music_asset_id = NULL, updated_at = now() WHERE id = :d
+                        """)
+                .param("t", title).param("n", shots.size()).param("w", json.writeValueAsString(w)).param("d", id).update();
+        return "Unfiltered: %d shot%s, your words exactly as written (nothing added, no writer called).".formatted(shots.size(),
+                shots.size() == 1 ? "" : "s");
     }
 
     // ------------------------------------------------------------------------------------------- SCOUT
@@ -695,7 +745,7 @@ public class DreamService {
             if (wanted == null ? s.get("picture_asset_id") != null : !wanted.contains(shotId)) {
                 continue;
             }
-            String prompt = (String) s.get("picture_prompt") + lessons("PICTURE");
+            String prompt = (String) s.get("picture_prompt") + (unfiltered(d) ? "" : lessons("PICTURE"));
             if (notes != null && !notes.isBlank()) {
                 prompt = prompt + " Owner's notes: " + notes.strip();
             }
@@ -854,7 +904,8 @@ public class DreamService {
         Set<String> wanted = only == null ? null : new HashSet<>(only);
         List<ClipJob> jobs = new ArrayList<>();
         // The Producer's stop-rule fixes for this Short's clips (a cause that came back twice): firm prompt + negative.
-        List<RedoStopRule.Cause> fixes = jdbc.sql("""
+        // (Unfiltered: nothing is ever added to the owner's words.)
+        List<RedoStopRule.Cause> fixes = unfiltered(d) ? List.<RedoStopRule.Cause>of() : jdbc.sql("""
                         SELECT DISTINCT stop_cause FROM producer_decision
                         WHERE dream_short_id = :d AND stage = 'DREAM_CLIPS' AND stop_rule = 'prompt_fix'
                         """).param("d", id).query(String.class).list().stream().map(RedoStopRule::causeByKey)
@@ -1174,7 +1225,7 @@ public class DreamService {
 
     public DreamTypes.DreamCheckRequest checkRequest(UUID id) {
         Map<String, Object> d = dream(id);
-        if (!qualityCheck || d.get("final_asset_id") == null) {
+        if (!qualityCheck || unfiltered(d) || d.get("final_asset_id") == null) { // the checks judge "no people, feel-good": not the owner's own prompt
             return null;
         }
         try {
@@ -1190,7 +1241,7 @@ public class DreamService {
     public DreamTypes.DreamCheckRequest pictureCheckRequest(UUID id) {
         Map<String, Object> d = dream(id);
         List<String> pictures = shots(id).stream().map(s -> (String) s.get("picture_uri")).filter(Objects::nonNull).toList();
-        if (!qualityCheck || pictures.isEmpty()) {
+        if (!qualityCheck || unfiltered(d) || pictures.isEmpty()) {
             return null;
         }
         try {

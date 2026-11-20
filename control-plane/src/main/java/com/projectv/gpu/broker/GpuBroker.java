@@ -112,6 +112,24 @@ public class GpuBroker {
         return Optional.ofNullable(open.get(shortId));
     }
 
+    /** The Shorts that hold a rented pod right now. */
+    public List<UUID> openShortIds() {
+        return List.copyOf(open.keySet());
+    }
+
+    /**
+     * When the Short's pod was last used: the newest lease heartbeat (the worker pings it while it waits on or runs a job;
+     * renting or reusing the pod also counts). Falls back to the time it was rented.
+     */
+    public Optional<Instant> lastActivity(UUID shortId) {
+        Rental r = open.get(shortId);
+        if (r == null) {
+            return Optional.empty();
+        }
+        Instant beat = leases.find(r.instance().id()).map(PodLeases.Lease::heartbeatAt).orElse(null);
+        return Optional.of(beat != null && beat.isAfter(r.createdAt()) ? beat : r.createdAt());
+    }
+
     /**
      * Rents (or returns the open) GPU for this Short.
      *

@@ -44,7 +44,31 @@ public class DreamGpuController {
     @GetMapping("/dream/{dreamId}/gpu")
     public Map<String, Object> pick(@PathVariable UUID dreamId) {
         var p = gpu.pick(dreamId);
-        return Map.of("mode", p.mode(), "choice", p.choice() == null ? "" : p.choice(), "rented", gpu.isOpen(dreamId));
+        var out = new java.util.LinkedHashMap<String, Object>();
+        out.put("mode", p.mode());
+        out.put("choice", p.choice() == null ? "" : p.choice());
+        out.put("rented", gpu.isOpen(dreamId));
+        out.put("hold", gpu.holdManual(dreamId) ? "manual" : "auto");
+        out.put("idleMinutes", gpu.idleMinutes(dreamId));
+        out.put("offInSeconds", gpu.offInSeconds(dreamId, java.time.Instant.now())); // null unless Manual and a pod is on
+        return out;
+    }
+
+    public record HoldBody(String hold, Integer idleMinutes) {
+    }
+
+    /** GPU power: Auto (the studio turns the pod off when the GPU steps are over) or Manual (it stays on until turned off or idle). */
+    @PostMapping("/dream/{dreamId}/gpu/hold")
+    public Map<String, Object> setHold(@PathVariable UUID dreamId, @org.springframework.web.bind.annotation.RequestBody HoldBody body) {
+        gpu.setHold(dreamId, body.hold(), body.idleMinutes());
+        return pick(dreamId);
+    }
+
+    /** "Turn off GPU": ends this Short's rental now. */
+    @PostMapping("/dream/{dreamId}/gpu/off")
+    public Map<String, Object> turnOff(@PathVariable UUID dreamId) {
+        gpu.turnOff(dreamId);
+        return pick(dreamId);
     }
 
     /** Auto (the studio picks, learning from your past picks) or Manual (you pick one option from the list). */
