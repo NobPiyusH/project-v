@@ -18,6 +18,7 @@ export interface DreamShot {
 
 export interface DreamDetail extends DreamSummary {
   shot_count: number; quality: string; review_minutes: number; music_asset_id: string | null; music_source: 'bed' | 'lyria'; scout: boolean; scout_json: string | null; scout_angle: number;
+  hook_title: boolean; hook_text: string | null; hook_color: string | null; chain_shots: boolean; idea_ref: string | null
   edit_music: boolean; edit_ambience: boolean; edit_pacing: boolean; check_json: string | null; picture_check_json: string | null; modes_json: string | Record<string, DreamMode>
   shots: DreamShot[]
   costs: { provider_id: string; amount_inr: number; units: number | null; unit_type: string | null; estimated: boolean; note: string; ts: string }[]
@@ -41,7 +42,12 @@ export interface NewDream {
   music: 'bed' | 'lyria'
   scout: boolean
   musicEdit: boolean; ambience: boolean; pacing: boolean
+  // optional, all off by default: hook title card, chained shots, and a concept seed from an idea pack (skips the Scout)
+  hookTitle?: boolean; hookText?: string; hookColor?: string; chainShots?: boolean; ideaPack?: string; ideaId?: string
 }
+
+export interface IdeaPackIdea { id: string; title: string; concept: string; hook: string; camera: string; palette: string }
+export interface IdeaPack { id: string; name: string; look: string; description: string; ideas: IdeaPackIdea[] }
 
 async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(`/api/dream${path}`, {
@@ -77,6 +83,8 @@ export const dreamApi = {
   setGpuPick: (id: string, mode: 'auto' | 'manual', choice?: string) => gpuCall<GpuPick>('POST', `/api/dream/${id}/gpu`, { mode, choice }),
   list: () => call<DreamSummary[]>('GET', ''),
   get: (id: string) => call<DreamDetail>('GET', `/${id}`),
+  ideaPacks: () => call<IdeaPack[]>('GET', '/idea-packs'),
+  setHook: (id: string, text: string, color?: string) => call<void>('POST', `/${id}/hook`, { text, color }),
   create: (d: NewDream) => call<{ id: string }>('POST', '', d),
   approve: (id: string, step: DreamStep) => call<void>('POST', `/${id}/steps/${step}/approve`),
   redo: (id: string, step: DreamStep, shotIds: string[], notes: string) =>

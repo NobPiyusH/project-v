@@ -107,3 +107,20 @@ What went wrong in the first Dream Shorts tests, and the rule each one became:
    measured motion and colour before calling it fine, and write camera prompts as a person filming, not a camera rig.
 5. **Haze and grain made it look worse, not dreamier.** The owner wants it real; effects that announce themselves are out.
 6. **Before saying "something approved this", read the workflow history**: signals record when and from where.
+
+## Hook title, chained shots and the idea pack (20 Nov 2026, all OFF by default)
+
+Three per-Short options for the "impossible architecture" style (a continuous drift through one warping city, a big
+two-colour title in the first seconds). Each is a checkbox on the Start form and a field on `POST /api/dream`; a Short
+that does not ask for them is unchanged (migration V34 adds the columns with default off).
+
+| Option | Form / API | What it does |
+|---|---|---|
+| **Hook title** | "Hook title" + text + "Big word" colour; `hookTitle`, `hookText`, `hookColor` | The writer also returns a 3-6 word curiosity hook (`THE STREET *FOLDED* LIKE PAPER`; the starred word is the big one). The Finish burns it in for ~1.8 s (`workers/dream/hook.py`, libass): up to 3 lines, white outlined text, one larger coloured word (red by default; yellow, orange, pink, cyan or `RRGGBB`), centred 30 % down with 10 % side margins, fade in/out. Blank text = the writer's (or the idea's) hook. Edit it on the Short's page (`POST /api/dream/{id}/hook`), then "Redo from Finish" (free); an edited hook is locked, so a rewrite never replaces it. |
+| **Chained shots** | "Chain shots"; `chainShots` | Clip N+1 starts from the last frame of clip N (`last_frame_png` in `workers/activities/clips.py`), so the camera flows through one scene. Clips run one at a time on both routes (Modal: one `generate_one` call per clip on a warm container; broker: in order on the pod). The Write step describes ONE continuous camera move in ONE world. Per-clip cost entries are unchanged; a failed clip leaves the ones after it waiting (they fail fast, no GPU time) until the owner retries or redoes it (rule 2b); a redone shot continues from the clip before it. Redoing a shot does not redo the ones after it: redo them too if the join matters. |
+| **Idea pack** | "Idea pack" picker; `ideaPack` + `ideaId` | `control-plane/src/main/resources/dream/idea-packs.json` holds 24 original concept seeds (twisting towers, looping bridges, folding streets, stairs in the sky, ...), each with a hook and a camera note. Picking one fills the idea, sets the `architecture` look, skips the Scout (nothing to research) and hands the seed to the writer. `GET /api/dream/idea-packs` lists them. Add packs by editing the JSON; no code change. |
+
+The `architecture` look (clean photo-real city, 2.5 s shots, hard cuts, its own camera rule: slow continuous glide) is
+selectable but not in `LOOK_ORDER`, so the Autopilot's daily rotation does not pick it.
+Chaining with the idea pack: the pictures step still makes a picture for every shot (shot 1 starts the chain; the others
+are the fallback if a last frame cannot be read). Skipping those pictures is a possible later saving.

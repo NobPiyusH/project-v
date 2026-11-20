@@ -283,8 +283,8 @@ def ffprobe_bin() -> str:
     return str(Path(ffmpeg_bin()).with_name("ffprobe" + Path(ffmpeg_bin()).suffix))
 
 
-def run_ffmpeg(args: list[str]) -> None:
-    proc = subprocess.run([ffmpeg_bin(), "-hide_banner", "-y", *args], capture_output=True, text=True, check=False)
+def run_ffmpeg(args: list[str], cwd: Path | str | None = None) -> None:
+    proc = subprocess.run([ffmpeg_bin(), "-hide_banner", "-y", *args], capture_output=True, text=True, check=False, cwd=cwd)
     if proc.returncode != 0:
         raise RuntimeError("ffmpeg failed: " + proc.stderr[-2000:])
 

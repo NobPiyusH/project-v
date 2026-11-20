@@ -64,7 +64,22 @@ public class DreamController {
 
     @GetMapping("/looks")
     public List<String> looks() {
-        return DreamService.LOOK_ORDER;
+        return DreamService.SELECTABLE_LOOKS;
+    }
+
+    /** The idea packs (curated concept seeds with a hook title and a camera note) for the new-Short idea picker. */
+    @GetMapping("/idea-packs")
+    public List<DreamIdeaPacks.Pack> ideaPacks() {
+        return DreamIdeaPacks.packs();
+    }
+
+    public record HookBody(String text, String color) {
+    }
+
+    /** Edit the hook title (review or manual step); it applies at the next finish (Redo from Finish, free). */
+    @PostMapping("/{id}/hook")
+    public void hook(@PathVariable UUID id, @RequestBody HookBody body) {
+        studio.setHook(id, body.text(), body.color());
     }
 
     /** Measured GPU timings that replaced the config's guesses (learning loop, phase 1). */

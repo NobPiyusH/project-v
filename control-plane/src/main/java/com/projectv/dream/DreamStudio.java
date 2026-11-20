@@ -20,9 +20,25 @@ import java.util.UUID;
 @Service
 public class DreamStudio {
 
+    /**
+     * @param hookTitle  burn a big two-colour hook title into the first ~2 s (default off); {@code hookText} is the owner's own
+     *                   (blank = the idea pack's, else the writer's); {@code hookColor} the big word's colour (default red)
+     * @param chainShots each clip starts from the last frame of the one before: one continuous camera move (default off)
+     * @param ideaPack   with {@code ideaId}: start from a curated concept seed (idea pack) instead of researching; the Scout is skipped
+     */
     public record NewDream(String idea, String look, Integer shots, String quality, String defaultMode,
                            Map<String, String> modes, Integer reviewMinutes, String music, Boolean scout,
-                           Boolean musicEdit, Boolean ambience, Boolean pacing, Boolean producerDecides) {
+                           Boolean musicEdit, Boolean ambience, Boolean pacing, Boolean producerDecides,
+                           Boolean hookTitle, String hookText, String hookColor, Boolean chainShots, String ideaPack,
+                           String ideaId) {
+        /** What the Autopilot passes: all of the above, and the three new options off. */
+        public NewDream(String idea, String look, Integer shots, String quality, String defaultMode,
+                        Map<String, String> modes, Integer reviewMinutes, String music, Boolean scout,
+                        Boolean musicEdit, Boolean ambience, Boolean pacing, Boolean producerDecides) {
+            this(idea, look, shots, quality, defaultMode, modes, reviewMinutes, music, scout, musicEdit, ambience, pacing,
+                    producerDecides, null, null, null, null, null, null);
+        }
+
         /** The dashboard's form (the Producer follows the global trust switch). */
         public NewDream(String idea, String look, Integer shots, String quality, String defaultMode, Map<String, String> modes,
                         Integer reviewMinutes, String music, Boolean scout, Boolean musicEdit, Boolean ambience, Boolean pacing) {
@@ -48,10 +64,22 @@ public class DreamStudio {
     }
 
     public UUID create(NewDream req) {
-        if (req.idea() == null || req.idea().isBlank()) {
+        boolean seeded = req.ideaPack() != null && !req.ideaPack().isBlank() && req.ideaId() != null && !req.ideaId().isBlank();
+        var seed = seeded ? DreamIdeaPacks.idea(req.ideaPack(), req.ideaId()) : java.util.Optional.<DreamIdeaPacks.Idea>empty();
+        if (seeded && seed.isEmpty()) {
+            throw new IllegalArgumentException("Unknown idea: " + req.ideaPack() + "/" + req.ideaId());
+        }
+        if (!seeded && (req.idea() == null || req.idea().isBlank())) {
             throw new IllegalArgumentException("Type an idea first");
         }
+        String ideaText = req.idea() == null || req.idea().isBlank() ? seed.get().concept() : req.idea().strip();
         String look = DreamService.LOOKS.containsKey(req.look()) ? req.look() : DreamService.LOOK_ORDER.getFirst();
+        if (seeded) { // the pack decides the look; the idea comes from the pack, so there is nothing for the Scout to research
+            look = DreamIdeaPacks.pack(req.ideaPack()).map(DreamIdeaPacks.Pack::look).filter(DreamService.LOOKS::containsKey).orElse(look);
+        }
+        boolean hookTitle = Boolean.TRUE.equals(req.hookTitle());
+        String hookText = !hookTitle ? null : req.hookText() != null && !req.hookText().isBlank() ? req.hookText().strip()
+                : seed.map(DreamIdeaPacks.Idea::hook).orElse(null);
         int shots = req.shots() == null ? 5 : Math.max(2, Math.min(8, req.shots()));
         String quality = "720p".equals(req.quality()) ? "720p" : "480p";
         int review = req.reviewMinutes() == null ? 10 : Math.max(1, Math.min(240, req.reviewMinutes()));
@@ -68,22 +96,31 @@ public class DreamStudio {
         }
         jdbc.sql("""
                         INSERT INTO dream_short (id, idea, look, shot_count, quality, modes_json, review_minutes, status, step, workflow_id,
-                                                 music_source, scout, edit_music, edit_ambience, edit_pacing, producer_decides)
+                                                 music_source, scout, edit_music, edit_ambience, edit_pacing, producer_decides,
+                                                 hook_title, hook_text, hook_color, hook_locked, chain_shots, idea_ref)
                         VALUES (:id, :idea, :look, :n, :q, CAST(:modes AS jsonb), :r, 'RUNNING', 'SCOUT', :wf, :music, :scout,
-                                :em, :ea, :ep, :pd)
+                                :em, :ea, :ep, :pd, :ht, :htext, :hcol, :hlock, :chain, :iref)
                         """)
+                .param("ht", hookTitle).param("htext", hookText)
+                .param("hcol", req.hookColor() == null || req.hookColor().isBlank() ? null : req.hookColor().strip())
+                .param("hlock", hookText != null).param("chain", Boolean.TRUE.equals(req.chainShots()))
+                .param("iref", seeded ? DreamIdeaPacks.ref(req.ideaPack(), req.ideaId()) : null)
                 .param("pd", Boolean.TRUE.equals(req.producerDecides()))
                 .param("em", req.musicEdit() == null || req.musicEdit()).param("ea", req.ambience() == null || req.ambience())
                 .param("ep", req.pacing() == null || req.pacing())
-                .param("scout", req.scout() == null || req.scout())
+                .param("scout", !seeded && (req.scout() == null || req.scout()))
                 .param("music", "lyria".equalsIgnoreCase(req.music()) ? "lyria" : "bed")
-                .param("id", id).param("idea", req.idea().strip()).param("look", look).param("n", shots).param("q", quality)
+                .param("id", id).param("idea", ideaText).param("look", look).param("n", shots).param("q", quality)
                 .param("modes", json.writeValueAsString(modeNames)).param("r", review).param("wf", workflowId).update();
         DreamShortWorkflow wf = temporal.newWorkflowStub(DreamShortWorkflow.class,
                 WorkflowOptions.newBuilder().setWorkflowId(workflowId).setTaskQueue(TaskQueues.CONTROL).build());
         WorkflowClient.start(wf::run, new DreamRequest(id.toString(), defaultMode, modes, review));
-        dreams.evidence().event(id, null, "create", null, req.idea(), Map.of("look", look, "shots", shots, "quality", quality,
+        var created = new java.util.LinkedHashMap<String, Object>(Map.of("look", look, "shots", shots, "quality", quality,
                 "music", "lyria".equalsIgnoreCase(req.music()) ? "lyria" : "bed", "mode", defaultMode.name()));
+        if (hookTitle) created.put("hookTitle", true);
+        if (Boolean.TRUE.equals(req.chainShots())) created.put("chainShots", true);
+        if (seeded) created.put("idea", DreamIdeaPacks.ref(req.ideaPack(), req.ideaId()));
+        dreams.evidence().event(id, null, "create", null, ideaText, created);
         return id;
     }
 
@@ -213,6 +250,12 @@ public class DreamStudio {
     public void stopClips(UUID id) {
         clipProgress.requestStop(id);
         dreams.evidence().event(id, "CLIPS", "stop", null, null, null);
+    }
+
+    /** The owner edits the hook title (and its colour); it shows at the next finish and the writer never replaces it. */
+    public void setHook(UUID id, String text, String color) {
+        dreams.setHook(id, text, color);
+        dreams.evidence().event(id, "FINISH", "hook", null, text, null);
     }
 
     /** The owner picks which of the Scout's angles the writer follows (1-based); then approves the Scout step. */

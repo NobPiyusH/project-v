@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { assetUrl } from '../api'
-import { DREAM_STEPS, dreamApi, type DreamDetail, type DreamLesson, type DreamMode, type DreamStep, type DreamSummary, type LessonTarget } from '../dreamApi'
+import { DREAM_STEPS, dreamApi, type DreamDetail, type IdeaPack, type DreamLesson, type DreamMode, type DreamStep, type DreamSummary, type LessonTarget } from '../dreamApi'
 import { usePoll } from '../hooks'
 
 type EditKey = 'musicEdit' | 'ambience' | 'pacing'
@@ -13,6 +13,53 @@ const EDIT_COLUMN: Record<EditKey, 'edit_music' | 'edit_ambience' | 'edit_pacing
   musicEdit: 'edit_music', ambience: 'edit_ambience', pacing: 'edit_pacing',
 }
 const STEP_LABEL: Record<DreamStep, string> = { SCOUT: 'Scout', WRITE: 'Write', PICTURES: 'Pictures', CLIPS: 'Clips', MUSIC: 'Music', FINISH: 'Finish' }
+
+const HOOK_COLOURS = ['red', 'yellow', 'orange', 'pink', 'cyan']
+
+/** The idea pack picker: choose a curated concept seed instead of typing an idea (the Scout is then skipped). */
+function IdeaPicker({ packs, picked, onPick }: {
+  packs: IdeaPack[] | null | undefined
+  picked: { pack: string; id: string } | null
+  onPick: (pack: IdeaPack | null, idea: IdeaPack['ideas'][number] | null) => void
+}) {
+  if (!packs || packs.length === 0) return null
+  const pack = packs.find((p) => p.id === picked?.pack) ?? packs[0]
+  const idea = pack.ideas.find((i) => i.id === picked?.id)
+  return (
+    <div className="small" style={{ marginTop: 8 }}>
+      <label>Idea pack <select value={picked ? pack.id : ''} onChange={(e) => {
+        const p = packs.find((x) => x.id === e.target.value)
+        onPick(p ?? null, p ? p.ideas[0] : null)
+      }}>
+        <option value="">None (type your own)</option>
+        {packs.map((p) => <option key={p.id} value={p.id}>{p.name} ({p.ideas.length})</option>)}</select></label>{' '}
+      {picked && <label>Idea <select value={picked.id} onChange={(e) => onPick(pack, pack.ideas.find((i) => i.id === e.target.value) ?? null)}>
+        {pack.ideas.map((i) => <option key={i.id} value={i.id}>{i.title}</option>)}</select></label>}
+      {picked && idea && <div className="muted">Hook: {idea.hook.replace(/\*/g, '')} · Camera: {idea.camera}</div>}
+    </div>
+  )
+}
+
+/** Edit the hook title; the starred word is the big coloured one. It shows at the next finish (Redo from Finish is free). */
+function HookCard({ d, onSave }: { d: DreamDetail; onSave: (text: string, color: string) => void }) {
+  const [text, setText] = useState(d.hook_text ?? '')
+  const [color, setColor] = useState(d.hook_color ?? 'red')
+  const [edited, setEdited] = useState(false)
+  const shown = edited ? text : d.hook_text ?? ''
+  return (
+    <section className="card">
+      <div className="card-head"><h2>Hook title</h2><span className="pill">first ~2 s of the finished Short</span></div>
+      <div className="row">
+        <input value={shown} placeholder="Written with the shots: edit it here (*star* the big word)" style={{ flex: 1, minWidth: 240 }}
+          onChange={(e) => { setText(e.target.value); setEdited(true) }} />
+        <label className="small">Big word <select value={color} onChange={(e) => { setColor(e.target.value); setEdited(true) }}>
+          {HOOK_COLOURS.map((c) => <option key={c} value={c}>{c}</option>)}</select></label>
+        <button disabled={!edited} onClick={() => { onSave(text, color); setEdited(false) }}>Save</button>
+      </div>
+      <p className="muted small">Up to 3 lines; the starred word is large and coloured. Saved text is kept when the shots are rewritten.</p>
+    </section>
+  )
+}
 
 function statusBadge(status: string) {
   const cls = status === 'COMPLETED' ? 'b-ok' : status.startsWith('WAITING') ? 'b-warn'
@@ -40,17 +87,25 @@ function DreamHome() {
   const [music, setMusic] = useState<'bed' | 'lyria'>('bed')
   const [scout, setScout] = useState(true)
   const [ed, setEd] = useState({ musicEdit: true, ambience: true, pacing: true })
+  const [hook, setHook] = useState(false)
+  const [hookText, setHookText] = useState('')
+  const [hookColor, setHookColor] = useState('red')
+  const [chain, setChain] = useState(false)
+  const [ideaRef, setIdeaRef] = useState<{ pack: string; id: string } | null>(null)
+  const { data: packs } = usePoll(dreamApi.ideaPacks, 600000)
   const [busy, setBusy] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
 
   async function start() {
-    if (!idea.trim()) {
+    if (!idea.trim() && !ideaRef) {
       setFormError('Type an idea first')
       return
     }
     setBusy(true)
     try {
-      const r = await dreamApi.create({ idea, look, shots, quality, defaultMode: mode, reviewMinutes: review, music, scout, ...ed })
+      const r = await dreamApi.create({ idea, look, shots, quality, defaultMode: mode, reviewMinutes: review, music, scout, ...ed,
+        ...(hook ? { hookTitle: true, hookText, hookColor } : {}), ...(chain ? { chainShots: true } : {}),
+        ...(ideaRef ? { ideaPack: ideaRef.pack, ideaId: ideaRef.id } : {}) })
       window.location.hash = `#/dream/${r.id}`
     } catch (e) {
       setFormError(e instanceof Error ? e.message : String(e))
@@ -67,14 +122,27 @@ function DreamHome() {
         <textarea rows={2} value={idea} placeholder="A pink house under a cloud at the end of a tiled pier"
           onChange={(e) => { setIdea(e.target.value); setFormError(null) }} style={{ width: '100%' }} />
         {formError && <p className="error small">{formError}</p>}
+        <IdeaPicker packs={packs} picked={ideaRef} onPick={(pack, i) => {
+          if (!pack || !i) { setIdeaRef(null); return }
+          setIdeaRef({ pack: pack.id, id: i.id }); setIdea(i.concept); setLook(pack.look); setScout(false)
+          setHookText(i.hook); setFormError(null)
+        }} />
         <div className="row" style={{ marginTop: 10 }}>
           <label className="small">Look <select value={look} onChange={(e) => setLook(e.target.value)}>
-            <option value="lonely">Lonely object</option><option value="drive">Drive-by</option><option value="walkthrough">Walk-through</option><option value="dreamcore">Dreamcore (soft pastel)</option><option value="impossible">Impossible place</option></select></label>
+            <option value="lonely">Lonely object</option><option value="drive">Drive-by</option><option value="walkthrough">Walk-through</option><option value="dreamcore">Dreamcore (soft pastel)</option><option value="impossible">Impossible place</option><option value="architecture">Impossible architecture</option></select></label>
           <label className="small">Shots <select value={shots} onChange={(e) => setShots(Number(e.target.value))}>
             {[3, 4, 5, 6].map((n) => <option key={n} value={n}>{n}</option>)}</select></label>
           {EDIT_SWITCHES.map(([k, label]) => <label key={k} className="small"><input type="checkbox" checked={ed[k]}
             onChange={(e) => setEd({ ...ed, [k]: e.target.checked })} /> {label}</label>)}
           <label className="small"><input type="checkbox" checked={scout} onChange={(e) => setScout(e.target.checked)} /> Scout similar Shorts first (≈₹6)</label>
+          <label className="small" title="A big two-colour title in the first ~2 s (off by default)"><input type="checkbox" checked={hook}
+            onChange={(e) => setHook(e.target.checked)} /> Hook title</label>
+          {hook && <input className="small" value={hookText} placeholder="blank = written for you; *star* the big word" style={{ width: 250 }}
+            onChange={(e) => setHookText(e.target.value)} />}
+          {hook && <label className="small">Big word <select value={hookColor} onChange={(e) => setHookColor(e.target.value)}>
+            {HOOK_COLOURS.map((c) => <option key={c} value={c}>{c}</option>)}</select></label>}
+          <label className="small" title="Each clip starts from the last frame of the one before: one continuous camera move. Clips then run one at a time (off by default)">
+            <input type="checkbox" checked={chain} onChange={(e) => setChain(e.target.checked)} /> Chain shots (one continuous scene)</label>
           <label className="small">Music <select value={music} onChange={(e) => setMusic(e.target.value as 'bed' | 'lyria')}>
             <option value="bed">Your track (free)</option><option value="lyria">Lyria (≈₹10)</option></select></label>
           <label className="small">Clips <select value={quality} onChange={(e) => setQuality(e.target.value)}>
@@ -190,6 +258,8 @@ function DreamView({ id }: { id: string }) {
       </section>
 
       <GpuCard id={id} />
+
+      {d.hook_title && <HookCard d={d} onSave={(text, color) => act(() => dreamApi.setHook(id, text, color))} />}
 
       <Timeline d={d} />
 

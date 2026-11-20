@@ -98,6 +98,10 @@ public class DreamService {
     /** Order shown on the new-Short form; the first is the default. */
     public static final List<String> LOOK_ORDER = List.of("lonely", "drive", "walkthrough", "dreamcore", "impossible");
 
+    /** What the new-Short form offers: the order above (the Autopilot rotates only through that) plus looks picked by hand. */
+    public static final List<String> SELECTABLE_LOOKS = List.of("lonely", "drive", "walkthrough", "dreamcore", "impossible",
+            "architecture");
+
     /**
      * The owner's rule for every Dream Short (19 Nov 2026): it may look different each time, but it must feel good or
      * nostalgic, have the best possible picture, and look real, never obviously AI.
@@ -111,6 +115,29 @@ public class DreamService {
             + "no people appear in any shot. No brand names or logos. In each shot's motion prompt describe only how the view "
             + "moves (e.g. 'handheld, slow step forward, slight sway'); never write the words phone, person, hand, someone or "
             + "holding (19 Nov: 'phone held at chest height' made Wan add a man filming).";
+
+    /**
+     * Feeling and camera rule of the impossible-architecture look (idea pack): the same calm, real-looking wonder, but the
+     * camera glides continuously through the scene (a slow drift, tilt or turn), as in the studio's reference Shorts.
+     */
+    static final String FEEL_ARCHITECTURE = "Feeling: calm wonder, beautiful and impossible, never scary or gloomy. Every "
+            + "shot is one believable, photo-real piece of city (real materials, real light, true-to-life scale) whose geometry "
+            + "breaks the rules in ONE clear way. The camera glides slowly and continuously through the scene: a steady drift "
+            + "forward, a slow tilt or a gentle turn; no cuts, no zoom, no shaking. No people, no brand names or logos, no "
+            + "readable text. In each shot's motion prompt describe only how the view moves and how the impossible geometry slowly "
+            + "shifts (never the words phone, person, hand, someone or holding).";
+
+    /** Writer structure when the owner chains the shots: one unbroken take, each shot starts where the last ended. */
+    static final String CHAIN_STRUCTURE = "Invent %d shots that are consecutive moments of ONE continuous camera move through ONE "
+            + "world: each shot starts exactly where the previous shot ended (its first frame IS the previous shot's last "
+            + "frame) and the camera keeps travelling the same way, so the Short plays as a single unbroken take. Never cut "
+            + "to another place or time of day. In each shot's scene describe what the camera sees at the END of that "
+            + "shot; in its motion describe the same continuous movement (direction and speed) carrying on.";
+
+    /** Asked of the writer only when the Short has a hook title (setting off = the prompt is unchanged). */
+    static final String HOOK_FIELD = ", \"hook\": a 3 to 6 word hook title for the first two seconds, upper case, written to make "
+            + "a viewer curious about THIS Short (a surprising claim about the place, not a description), with exactly ONE key "
+            + "word between asterisks, e.g. THE STREET *FOLDED* LIKE PAPER; no brand names";
 
     /** Ends every picture prompt of the realistic looks: what makes a still read as a real photo, not an AI image. */
     static final String REAL_PHOTO = "real photograph, natural light falloff, real-world wear and small imperfections "
@@ -179,6 +206,20 @@ public class DreamService {
                     "dreamcore, liminal space, pastel pink and mint palette, soft hazy daylight, 35mm film photo, slight "
                             + "lens blur, nostalgic, surreal, calm, empty, no people, no text",
                     "slow continuous camera move, like walking forward in a dream; gentle, smooth, no cuts, no people"),
+            // Idea pack "Impossible architecture": photo-real cities that break the rules, one continuous drifting camera.
+            "architecture", new Look(
+                    "Impossible architecture (dreamcore city): one photo-real city scene (towers, bridges, streets, stairs) whose "
+                            + "geometry breaks the rules in one clear way (twisting towers, a looping bridge, a folding street, "
+                            + "stairs into the sky). Vertical wide compositions, dusk or golden light, believable materials. "
+                            + "No people, no text, no brands.",
+                    "photograph, photorealistic, cinematic vertical wide shot of impossible architecture, dramatic dusk or golden "
+                            + "light, rich architectural detail, believable materials and scale, soft atmospheric haze, no people, "
+                            + "no text, no logos, " + REAL_PHOTO,
+                    "slow continuous camera glide through the scene (steady drift forward, slow tilt or gentle turn), the impossible "
+                            + "geometry slowly shifts and warps, lights flicker softly, no cuts, no zoom, no people",
+                    "Invent %d shots that move through ONE impossible city world, each a single continuous camera move, "
+                            + "every shot showing a new angle of the same warping place.",
+                    2.5, 0, 1.0, "none"),
             "impossible", new Look(
                     "Impossible place: one photo-real scene where two worlds that never meet are joined (e.g. a roadside "
                             + "diner on the Moon), believable light and scale, wide views, awe. No people close up, no text, no brands.",
@@ -329,12 +370,16 @@ public class DreamService {
         Look look = look((String) d.get("look"));
         int count = ((Number) d.get("shot_count")).intValue();
         Scouted scouted = scouted(d);
+        boolean chain = Boolean.TRUE.equals(d.get("chain_shots"));
+        boolean hook = Boolean.TRUE.equals(d.get("hook_title"));
+        var seed = DreamIdeaPacks.resolve((String) d.get("idea_ref"));
         // The owner's chosen Scout angle replaces the look's shot structure (19 Nov: as a user-message note it lost
-        // to "a different place every shot" twice). The look still sets the style.
+        // to "a different place every shot" twice). The look still sets the style. Chained shots (off by default) are
+        // one unbroken take, so the writer describes one continuous camera move in one world.
         String structure = scouted != null && scouted.chosen() != null
                 ? ("Invent %d shots that are consecutive moments of ONE idea the owner chose, in the same place, flowing "
                 + "into each other: %s - %s").formatted(count, scouted.chosen().title(), scouted.chosen().idea())
-                : look.structure().formatted(count);
+                : chain ? CHAIN_STRUCTURE.formatted(count) : look.structure().formatted(count);
         String system = """
                 You are the writer of a short, wordless, music-led vertical video (YouTube Shorts / Reels) for a channel
                 about dreams and impossible places. %s Every shot must be a fresh, specific image (not generic).
@@ -347,9 +392,11 @@ public class DreamService {
                 shelter, rusty corrugated tin roof sloping back, three glass side panels, wooden slat bench inside, one
                 round lamp under the roof"; empty if no object recurs), never mention the hero's look differently in a scene,
                 "shots": [{"scene": what this shot shows (one or two sentences, concrete), "motion": the camera move and
-                the small motion inside the scene}]} with exactly %d shots.
-                """.formatted(structure, FEEL, look.brief(), count) + lessons("WRITER");
+                the small motion inside the scene}]%s} with exactly %d shots.
+                """.formatted(structure, "architecture".equals(d.get("look")) ? FEEL_ARCHITECTURE : FEEL, look.brief(),
+                hook ? HOOK_FIELD : "", count) + lessons("WRITER");
         String user = "Idea: " + d.get("idea") + (notes == null || notes.isBlank() ? "" : "\nOwner's notes for this rewrite: " + notes)
+                + (seed.isPresent() ? DreamIdeaPacks.forWriter(seed.get()) : "")
                 + (scouted == null ? "" : scouted.forWriter());
         java.time.Instant since = java.time.Instant.now();
         DreamWorld w = llm.call(null, "dream.write", system, user, DreamWorld.class);
@@ -380,6 +427,10 @@ public class DreamService {
                                music_asset_id = NULL, updated_at = now() WHERE id = :d
                         """)
                 .param("t", w.title()).param("w", json.writeValueAsString(w)).param("d", id).update();
+        if (hook && w.hook() != null && !w.hook().isBlank()) { // the owner's (or the idea pack's) own hook is never replaced
+            jdbc.sql("UPDATE dream_short SET hook_text = :h WHERE id = :d AND NOT hook_locked").param("h", w.hook().strip())
+                    .param("d", id).update();
+        }
         return "\"%s\": %d shots in one world (%s).".formatted(w.title(), shots.size(), Objects.toString(w.palette(), "").strip());
     }
 
@@ -708,7 +759,7 @@ public class DreamService {
             route(id, "DREAM_CLIPS", "video.i2v.dream", POD, inr);
             var session = this.gpu.session(id);
             return new ClipRequest(storageId(id), wanApp, wanClass, publicUrl, jobs, 1, sec, inr, "pod", null, null, 0,
-                    session.url(), session.readyTimeoutSeconds());
+                    session.url(), session.readyTimeoutSeconds(), chained(id));
         }
         double gpu = gpuSeconds(jobs, (String) dream(id).get("quality"));
         BigDecimal inr = pricing.modalGpuInr("H100", gpu);
@@ -717,7 +768,12 @@ public class DreamService {
         // One GPU, clips in turn: the ~2 min start-up + model load is paid once for the whole Short. When the AI
         // Producer runs this Short by itself, the GPU stays warm a little after each batch so its redo skips a start-up.
         return new ClipRequest(storageId(id), wanApp, wanClass, publicUrl, jobs, 1, gpu, inr.setScale(2, RoundingMode.HALF_UP),
-                "wan", null, null, holdSeconds(id));
+                "wan", null, null, holdSeconds(id), null, 0, chained(id));
+    }
+
+    /** Whether this Short chains its shots (each clip starts from the last frame of the one before). Off by default. */
+    boolean chained(UUID id) {
+        return Boolean.TRUE.equals(dream(id).get("chain_shots"));
     }
 
     /** Warm-redo hold for this Short's clip batches: only when the AI Producer decides on it by itself (autopilot). */
@@ -742,8 +798,12 @@ public class DreamService {
         String fixPrompt = fixes.stream().map(c -> " " + c.promptFix()).collect(java.util.stream.Collectors.joining());
         String negative = fixes.isEmpty() ? null
                 : fixes.stream().map(RedoStopRule.Cause::negative).collect(java.util.stream.Collectors.joining(", "));
+        boolean chain = Boolean.TRUE.equals(d.get("chain_shots"));
+        String before = null; // the clip of the shot before this one, when it already exists (chained shots)
         for (Map<String, Object> s : shots(id)) {
             String shotId = s.get("id").toString();
+            String clipBefore = before;
+            before = (String) s.get("clip_uri");
             if (s.get("picture_uri") == null) {
                 continue;
             }
@@ -753,7 +813,7 @@ public class DreamService {
             int take = ((Number) s.get("clip_takes")).intValue() + 1;
             jobs.add(new ClipJob(shotId, ((Number) s.get("ord")).intValue() + 1, take, "dream", "fast",
                     (String) s.get("picture_uri"), fixPrompt.isEmpty() ? (String) s.get("motion_prompt") : s.get("motion_prompt") + fixPrompt, size[0], size[1], frames,
-                    Math.abs((long) shotId.hashCode()) + take, negative));
+                    Math.abs((long) shotId.hashCode()) + take, negative, chain ? clipBefore : null));
         }
         return jobs;
     }
@@ -842,10 +902,12 @@ public class DreamService {
             throw new IllegalStateException("No clips were made: " + String.join(" | ", errors));
         }
         staleFinal(id);
-        return "%d/%d clips made (Wan %s, %s)%s%s%s.".formatted(ok, req.jobs().size(), onPod ? "fp8 on a rented pod" : "fast", dream(id).get("quality"),
+        return "%d/%d clips made (Wan %s, %s%s)%s%s%s.".formatted(ok, req.jobs().size(), onPod ? "fp8 on a rented pod" : "fast", dream(id).get("quality"),
+                req.chain() ? ", chained" : "",
                 gpu > 0 ? " in %.0f s of GPU time".formatted(gpu) : "",
                 stopped > 0 ? "; stopped before " + stopped + " finished" : "",
-                errors.isEmpty() ? "" : "; " + errors.size() + " failed: " + errors.getFirst());
+                errors.isEmpty() ? "" : "; " + errors.size() + " failed: " + errors.getFirst()
+                        + (req.chain() ? " (the shots after a failed one wait for it: Retry or redo it, they continue from its last frame)" : ""));
     }
 
     // ------------------------------------------------------------------------------------------- MUSIC
@@ -999,7 +1061,24 @@ public class DreamService {
                 look.speed(), look.handheld(), !Boolean.FALSE.equals(d.get("edit_music")),
                 !Boolean.FALSE.equals(d.get("edit_ambience")), !Boolean.FALSE.equals(d.get("edit_pacing")),
                 // a picked Scout angle is one story told in order: pacing must not reshuffle it (19 Nov: the ending played third)
-                scouted(d) != null && scouted(d).chosen() != null);
+                scouted(d) != null && scouted(d).chosen() != null,
+                Boolean.TRUE.equals(d.get("hook_title")) ? blankToNull((String) d.get("hook_text")) : null,
+                (String) d.get("hook_color"));
+    }
+
+    private static String blankToNull(String s) {
+        return s == null || s.isBlank() ? null : s.strip();
+    }
+
+    /**
+     * The owner edits the hook title (in the review or manual step); it applies at the next finish ("Redo from Finish",
+     * free) and a rewrite by the writer never replaces it. Null {@code color} keeps the colour; blank {@code text} clears it.
+     */
+    public void setHook(UUID id, String text, String color) {
+        jdbc.sql("""
+                        UPDATE dream_short SET hook_text = :t, hook_color = COALESCE(:c, hook_color), hook_locked = true,
+                               updated_at = now() WHERE id = :id
+                        """).param("t", blankToNull(text)).param("c", blankToNull(color)).param("id", id).update();
     }
 
     @Transactional

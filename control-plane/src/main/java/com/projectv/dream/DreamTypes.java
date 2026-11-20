@@ -32,7 +32,12 @@ public final class DreamTypes {
 
     /** The writer's output: one world shared by every shot, so the Short looks like one place. */
     /** {@code hero}: the one recurring object described exactly once, pasted into every picture so it stays the same. */
-    public record DreamWorld(String title, String world, String palette, String light, String hero, List<PlannedDreamShot> shots) {
+    /** {@code hook}: the 3-6 word hook title (the starred word is the big coloured one); only written when the Short asks for it. */
+    public record DreamWorld(String title, String world, String palette, String light, String hero, List<PlannedDreamShot> shots,
+                             String hook) {
+        public DreamWorld(String title, String world, String palette, String light, String hero, List<PlannedDreamShot> shots) {
+            this(title, world, palette, light, hero, shots, null);
+        }
     }
 
     /** What a step would cost before anything is spent. {@code needsApproval}: over the auto-approve amount. */
@@ -51,7 +56,15 @@ public final class DreamTypes {
     public record DreamFinishRequest(String dreamId, String look, List<DreamFinishClip> clips, int width, int height,
                                      int fps, double dissolveSec, String musicDir, String progressUrl, String musicUri,
                                      String musicName, double speed, String handheld, boolean musicEdit,
-                                     boolean ambience, boolean pacing, boolean keepOrder) {
+                                     boolean ambience, boolean pacing, boolean keepOrder, String hookText, String hookColor) {
+        /** {@code hookText}: the hook title burned into the first ~2 s (null = none, the default); {@code hookColor}: its big word's colour. */
+        public DreamFinishRequest(String dreamId, String look, List<DreamFinishClip> clips, int width, int height,
+                                  int fps, double dissolveSec, String musicDir, String progressUrl, String musicUri,
+                                  String musicName, double speed, String handheld, boolean musicEdit,
+                                  boolean ambience, boolean pacing, boolean keepOrder) {
+            this(dreamId, look, clips, width, height, fps, dissolveSec, musicDir, progressUrl, musicUri, musicName, speed,
+                    handheld, musicEdit, ambience, pacing, keepOrder, null, null);
+        }
     }
 
     /** @param smoothing "rife-laptop" | "ffmpeg" (how 16 fps became 24); {@code music} the track used, or null */

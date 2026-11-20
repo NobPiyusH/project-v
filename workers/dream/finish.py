@@ -16,7 +16,7 @@ from pathlib import Path
 from temporalio import activity
 
 from workers.common import ffmpeg_bin, get_bytes, log, media_duration, put_file, run_ffmpeg, workdir
-from workers.dream import edit
+from workers.dream import edit, hook
 
 MUSIC_EXTENSIONS = {".mp3", ".wav", ".m4a", ".flac", ".ogg", ".aac"}
 
@@ -35,6 +35,8 @@ LOOKS = {
     # Shadows are lifted a touch first (the 19 Nov test crushed the dark ground to pure black).
     "lonely": "curves=all='0/0.035 0.2/0.215 1/1',eq=saturation=1.12:contrast=1.04,unsharp=5:5:0.5:5:5:0,noise=alls=2:allf=t",
     "drive": "curves=all='0/0.035 0.2/0.215 1/1',eq=saturation=1.1:contrast=1.04,unsharp=5:5:0.5:5:5:0,noise=alls=2:allf=t",
+    # Idea pack "Impossible architecture": clean and crisp like the realistic looks, a touch more contrast for dusk skylines.
+    "architecture": "curves=all='0/0.03 0.2/0.21 1/1',eq=saturation=1.1:contrast=1.06,unsharp=5:5:0.5:5:5:0,noise=alls=2:allf=t",
     "walkthrough": ("curves=all='0/0.03 0.2/0.21 1/1',eq=saturation=1.08:contrast=1.03:brightness=0.01,"
                     "unsharp=5:5:0.4:5:5:0,noise=alls=2:allf=t"),
 }
@@ -314,9 +316,15 @@ def finish(req: dict, tmp: Path) -> dict:
         graph += ";[mus]"
     graph += "loudnorm=I=-14:TP=-1.5:LRA=11,aresample=48000[a]" if track or ambiences else "anull[a]"
     out = tmp / "dream-short.mp4"
-    run_ffmpeg([*args, "-filter_complex", graph, "-map", "[v]", "-map", "[a]", "-t", f"{length:.3f}",
+    video = "[v]"
+    hook_ass = hook.hook_ass(req.get("hookText") or "", width, height, req.get("hookColor"))
+    if hook_ass:  # the hook title card (setting is off unless the Short asked for it)
+        (tmp / "hook.ass").write_text(hook_ass, encoding="utf-8")
+        graph += f";[v]{hook.filter_for('hook.ass')}[vh]"
+        video = "[vh]"
+    run_ffmpeg([*args, "-filter_complex", graph, "-map", video, "-map", "[a]", "-t", f"{length:.3f}",
                 "-c:v", "libx264", "-preset", "slow", "-crf", "17", "-pix_fmt", "yuv420p", "-r", str(fps),
-                "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", str(out)])
+                "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", str(out)], cwd=tmp)
     uri = put_file(f"videos/{dream_id}/dream-short.mp4", out, "video/mp4")
     smoothing = "rife-laptop" if how == {"rife-laptop"} else "ffmpeg" if "ffmpeg" in how else sorted(how)[0]
     log.info("Dream Short %s finished: %.1f s (%s, music: %s, %d cuts on the music, order %s, %d ambiences)", dream_id,
