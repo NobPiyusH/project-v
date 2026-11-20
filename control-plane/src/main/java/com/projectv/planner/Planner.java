@@ -3,10 +3,7 @@ package com.projectv.planner;
 import com.projectv.workflow.Stage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.chat.client.ResponseEntity;
 import org.springframework.ai.chat.model.ChatModel;
-import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -15,13 +12,11 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeoutException;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * R1 Planner: free-text prompt -> {@link VideoPlan}. Uses Gemini when a key is configured; otherwise (or if the
+ * R1 Planner: free-text prompt -> {@link VideoPlan}. Uses Claude first (via Llm), then Gemini, when a key is configured; otherwise (or if the
  * call fails) a rule-based fallback, so the pipeline never blocks on the LLM.
  */
 @Service
@@ -40,25 +35,19 @@ public class Planner {
     private final StylePresets presets;
     private final String apiKey;
     private final String modelName;
-    private final long timeoutSeconds;
-    private final String fallbacks;
-    private final com.projectv.agents.OpenAiCompatChat nvidia;
+    private final com.projectv.agents.Llm llm;
+    private final String storyModel;
 
-    private record Out(VideoPlan plan, Long tokens) {
-    }
-
-    public Planner(ObjectProvider<ChatModel> chatModel, StylePresets presets, com.projectv.agents.OpenAiCompatChat nvidia,
+    public Planner(ObjectProvider<ChatModel> chatModel, StylePresets presets, com.projectv.agents.Llm llm,
                    @Value("${spring.ai.google.genai.api-key:}") String apiKey,
                    @Value("${spring.ai.google.genai.chat.options.model:}") String modelName,
-                   @Value("${projectv.planner.timeout-seconds:90}") long timeoutSeconds,
-                   @Value("${projectv.models.text-fallbacks:}") String fallbacks) {
+                   @Value("${projectv.models.story:}") String storyModel) {
         this.chatModel = chatModel;
         this.presets = presets;
         this.apiKey = apiKey;
         this.modelName = modelName;
-        this.timeoutSeconds = timeoutSeconds;
-        this.fallbacks = fallbacks;
-        this.nvidia = nvidia;
+        this.llm = llm;
+        this.storyModel = storyModel;
     }
 
     public boolean llmConfigured() {
@@ -69,49 +58,23 @@ public class Planner {
         return modelName;
     }
 
-    public Outcome plan(String prompt, String ownerNotes) {
+    public Outcome plan(java.util.UUID videoId, String prompt, String ownerNotes) {
         if (!llmConfigured()) {
             return fallback(prompt, "No GEMINI_API_KEY configured");
         }
         try {
-            // Hard time limit per model plus the ordered fallback list (Work X): a hung or retired model moves on to
-            // the next one instead of blocking or failing the video; the rule-based plan is the last resort.
-            com.projectv.agents.ModelFallback.Attempt<Out> attempt = com.projectv.agents.ModelFallback.run(
-                    com.projectv.agents.ModelFallback.models(modelName, fallbacks), timeoutSeconds, "PLAN", m -> {
-                        if (com.projectv.agents.OpenAiCompatChat.handles(m)) {
-                            var n = nvidia.call(m, systemPrompt(), userPrompt(prompt, ownerNotes), VideoPlan.class);
-                            return new Out(n.entity(), n.totalTokens());
-                        }
-                        ResponseEntity<ChatResponse, VideoPlan> response = ChatClient.create(chatModel.getObject())
-                                .prompt()
-                                .options(org.springframework.ai.chat.prompt.ChatOptions.builder().model(m))
-                                .system(systemPrompt())
-                                .user(userPrompt(prompt, ownerNotes))
-                                .call()
-                                .responseEntity(VideoPlan.class);
-                        Long tokens = null;
-                        if (response.response() != null && response.response().getMetadata() != null
-                                && response.response().getMetadata().getUsage() != null) {
-                            Integer total = response.response().getMetadata().getUsage().getTotalTokens();
-                            tokens = total == null ? null : total.longValue();
-                        }
-                        return new Out(response.entity(), tokens);
-                    });
-            String usedModel = attempt.model();
-            VideoPlan plan = normalise(attempt.value().plan(), prompt);
-            String source = com.projectv.agents.OpenAiCompatChat.handles(usedModel) ? usedModel : "gemini:" + usedModel;
-            return new Outcome(plan, stagesFor(plan), source, attempt.value().tokens(), null);
-        } catch (TimeoutException e) {
-            log.warn("Gemini planning timed out after {}s, using rule-based fallback", timeoutSeconds);
-            return fallback(prompt, "No Gemini model answered within " + timeoutSeconds + "s");
+            // Llm tries Claude first (when keyed and under its monthly cap), then the Gemini list, with the time limit,
+            // budget checks, AICredits fallback and the cost ledger entry all handled there. Rules are the last resort.
+            com.projectv.agents.Llm.Answer<VideoPlan> answer = llm.callWithModel(videoId, "PLAN", systemPrompt(),
+                    userPrompt(prompt, ownerNotes), VideoPlan.class, storyModel);
+            String used = answer.model();
+            String source = used.contains(":") || "aicredits".equals(used) ? used : "gemini:" + used;
+            VideoPlan plan = normalise(answer.entity(), prompt);
+            return new Outcome(plan, stagesFor(plan), source, null, null);
         } catch (Exception e) {
-            if (e instanceof InterruptedException) {
-                Thread.currentThread().interrupt();
-            }
             // Never log the key; the exception message from the client does not contain it.
-            Throwable cause = e instanceof ExecutionException && e.getCause() != null ? e.getCause() : e;
-            log.warn("Gemini planning failed, using rule-based fallback: {}", cause.toString());
-            return fallback(prompt, "Gemini call failed: " + cause.getClass().getSimpleName());
+            log.warn("Planning failed, using rule-based fallback: {}", e.toString());
+            return fallback(prompt, "Planning call failed: " + e.getClass().getSimpleName());
         }
     }
 

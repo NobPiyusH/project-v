@@ -70,6 +70,15 @@ public class Llm {
      *                  shot plan); skipped when it isn't configured or its monthly cap is used up
      */
     public <T> T call(UUID videoId, String purpose, String system, String user, Class<T> type, String preferred) {
+        return callWithModel(videoId, purpose, system, user, type, preferred).entity();
+    }
+
+    /** An answer plus the model that produced it ({@code aicredits} when the AICredits fallback answered). */
+    public record Answer<T>(T entity, String model) {
+    }
+
+    /** Same as {@link #call(UUID, String, String, String, Class, String)} but also says which model answered. */
+    public <T> Answer<T> callWithModel(UUID videoId, String purpose, String system, String user, Class<T> type, String preferred) {
         ChatModel cm = chatModel.getIfAvailable();
         if (cm == null) {
             throw new IllegalStateException("No LLM configured: set GEMINI_API_KEY in .env");
@@ -83,7 +92,7 @@ public class Llm {
             // Owner (19 Nov 2026): a capped text call may go to the AICredits fallback (its own ₹50 cap), if enabled.
             T fb = aicredits.retry(videoId, purpose, models, e, system, user, type);
             if (fb != null) {
-                return fb;
+                return new Answer<>(fb, "aicredits");
             }
             throw e;
         }
@@ -126,11 +135,11 @@ public class Llm {
             if (r.entity() == null) {
                 throw new IllegalStateException(purpose + ": the model returned no parsable result");
             }
-            return r.entity();
+            return new Answer<>(r.entity(), a.model());
         } catch (TimeoutException e) {
             T fb = aicredits.retry(videoId, purpose, models, e, system, user, type);
             if (fb != null) {
-                return fb;
+                return new Answer<>(fb, "aicredits");
             }
             throw new IllegalStateException(purpose + ": no model in " + models + " answered within " + timeoutSeconds + "s");
         } catch (InterruptedException e) {
@@ -141,7 +150,7 @@ public class Llm {
             // Outage only (5xx, 429, timeout, connection): one retry of the same model via AICredits, if enabled.
             T fb = aicredits.retry(videoId, purpose, models, c, system, user, type);
             if (fb != null) {
-                return fb;
+                return new Answer<>(fb, "aicredits");
             }
             throw new IllegalStateException(purpose + " failed: " + c.getClass().getSimpleName() + ": " + c.getMessage(), c);
         } catch (RuntimeException e) {
