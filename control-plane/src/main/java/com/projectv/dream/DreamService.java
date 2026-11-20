@@ -259,41 +259,22 @@ public class DreamService {
     private final BigDecimal autoApproveInr;
     private final double shotSeconds;
     private final String musicDir;
-    private final String musicModel;
-    private final String musicBed;
     private final String listenModel;
     private final DreamEvidence evidence;
+    private final DreamMusic music;
     private final String briefModel;
     private final boolean qualityCheck;
     private final DreamGpu gpu; // null on the Modal route (the default)
 
     /** Modal route (the default): what every existing caller and test uses. */
     public DreamService(JdbcClient jdbc, ObjectMapper json, Llm llm, AssetStore assets, Pricing pricing, BudgetGuard budget,
-                        Router router, com.projectv.video.ClipProgress clipProgress, String zimageApp, String zimageClass,
-                        String wanApp, String wanClass, String publicUrl, BigDecimal autoApproveInr, double shotSeconds,
-                        String musicDir, String musicModel, String musicBed, String listenModel, String briefModel,
-                        boolean qualityCheck) {
-        this(jdbc, json, llm, assets, pricing, budget, router, clipProgress, zimageApp, zimageClass, wanApp, wanClass,
-                publicUrl, autoApproveInr, shotSeconds, musicDir, musicModel, musicBed, listenModel, briefModel,
-                qualityCheck, null);
+                        Router router, com.projectv.video.ClipProgress clipProgress, DreamSettings settings) {
+        this(jdbc, json, llm, assets, pricing, budget, router, clipProgress, settings, null);
     }
 
     @org.springframework.beans.factory.annotation.Autowired
     public DreamService(JdbcClient jdbc, ObjectMapper json, Llm llm, AssetStore assets, Pricing pricing, BudgetGuard budget,
-                        Router router, com.projectv.video.ClipProgress clipProgress,
-                        @Value("${projectv.modal.zimage-app:projectv-zimage}") String zimageApp,
-                        @Value("${projectv.modal.zimage-class:ZImage}") String zimageClass,
-                        @Value("${projectv.video.modal-app:projectv-wan}") String wanApp,
-                        @Value("${projectv.video.modal-class:Wan}") String wanClass,
-                        @Value("${projectv.public-url:http://127.0.0.1:8080}") String publicUrl,
-                        @Value("${projectv.dream.auto-approve-inr:0}") BigDecimal autoApproveInr,
-                        @Value("${projectv.dream.shot-seconds:3.5}") double shotSeconds,
-                        @Value("${projectv.dream.music-dir:}") String musicDir,
-                        @Value("${projectv.models.music:lyria-3.5}") String musicModel,
-                        @Value("${projectv.dream.music-bed:}") String musicBed,
-                        @Value("${projectv.models.vision:gemini-3.6-flash}") String listenModel,
-                        @Value("${projectv.models.story:claude:claude-sonnet-5-5}") String briefModel,
-                        @Value("${projectv.dream.quality-check:true}") boolean qualityCheck,
+                        Router router, com.projectv.video.ClipProgress clipProgress, DreamSettings settings,
                         DreamGpu gpu) {
         this.jdbc = jdbc;
         this.json = json;
@@ -303,20 +284,19 @@ public class DreamService {
         this.budget = budget;
         this.router = router;
         this.clipProgress = clipProgress;
-        this.zimageApp = zimageApp;
-        this.zimageClass = zimageClass;
-        this.wanApp = wanApp;
-        this.wanClass = wanClass;
-        this.publicUrl = publicUrl;
-        this.autoApproveInr = autoApproveInr;
-        this.shotSeconds = shotSeconds;
-        this.musicDir = musicDir;
-        this.musicModel = musicModel;
-        this.musicBed = musicBed;
-        this.listenModel = listenModel;
+        this.zimageApp = settings.zimageApp();
+        this.zimageClass = settings.zimageClass();
+        this.wanApp = settings.wanApp();
+        this.wanClass = settings.wanClass();
+        this.publicUrl = settings.publicUrl();
+        this.autoApproveInr = settings.autoApproveInr();
+        this.shotSeconds = settings.shotSeconds();
+        this.musicDir = settings.musicDir();
+        this.listenModel = settings.listenModel();
         this.evidence = new DreamEvidence(jdbc, json);
-        this.briefModel = briefModel;
-        this.qualityCheck = qualityCheck;
+        this.briefModel = settings.briefModel();
+        this.qualityCheck = settings.qualityCheck();
+        this.music = new DreamMusic(this, jdbc, json, assets, pricing, budget, router, evidence, settings);
         this.gpu = gpu != null && gpu.enabled() ? gpu : null;
     }
 
@@ -980,116 +960,29 @@ public class DreamService {
         return look.shotSeconds() > 0 ? look.shotSeconds() : shotSeconds;
     }
 
+    // MUSIC lives in DreamMusic; these keep the public API.
+
     @Transactional
     public com.projectv.media.MediaTypes.MusicRequest musicRequest(UUID id, String notes) {
-        Map<String, Object> d = dream(id);
-        Look look = look((String) d.get("look"));
-        DreamWorld w = d.get("world_json") == null ? null : json.readValue(d.get("world_json").toString(), DreamWorld.class);
-        double target = shortSeconds(shots(id).size(), look);
-        BigDecimal inr = pricing.musicInr(1);
-        route(id, "DREAM_MUSIC", "music.dream", LYRIA, inr);
-        budget.require(inr, "Dream Short music (1 Lyria generation)");
-        String world = w == null ? String.valueOf(d.get("idea"))
-                : String.join(" ", Objects.toString(w.world(), ""), "Palette:", Objects.toString(w.palette(), ""),
-                "Light:", Objects.toString(w.light(), ""));
-        String prompt = String.join("\n",
-                "Instrumental music only, no vocals, no lyrics. About " + Math.round(target) + " seconds, for a wordless vertical Short.",
-                "Feeling: a calm, slightly eerie dream; soft, warm, floating, nostalgic. Gentle start, no hard drums.",
-                "Look of the video: " + look.brief(),
-                "World: " + world,
-                notes == null || notes.isBlank() ? "" : "Owner's notes: " + notes.strip()).strip();
-        return new com.projectv.media.MediaTypes.MusicRequest(storageId(id), musicModel, prompt, target, 1);
+        return music.musicRequest(id, notes);
     }
 
     @Transactional
     public String saveMusic(UUID id, com.projectv.media.MediaTypes.MusicResult r) {
-        int songs = r.usage() == null || r.usage().isEmpty() ? Math.max(1, r.segments()) : r.usage().size();
-        // Recorded as gemini_api: the provider the monthly Gemini cap counts (BudgetGuard.GEMINI).
-        cost(id, BudgetGuard.GEMINI, pricing.musicInr(songs), songs, "song", true, "Dream Short music (" + r.model() + ")");
-        UUID asset = assets.create(new NewAsset(null, "audio", r.uri(), "audio/wav", null, null, r.durationSec(),
-                LYRIA, r.model(), null, null, AssetStore.LICENCE_GEMINI, true));
-        jdbc.sql("UPDATE asset SET dream_short_id = :d WHERE id = :a").param("d", id).param("a", asset).update();
-        jdbc.sql("UPDATE dream_short SET music_asset_id = :a, final_asset_id = NULL, updated_at = now() WHERE id = :d")
-                .param("a", asset).param("d", id).update();
-        return "Music: %.0f s at about %.0f BPM (%s).".formatted(r.durationSec(), r.bpm(), r.model());
+        return music.saveMusic(id, r);
     }
 
     public String musicSource(UUID id) {
-        return "lyria".equals(dream(id).get("music_source")) ? "lyria" : "bed";
+        return music.musicSource(id);
     }
 
-    /** A new piece of the bed each time (seeded by the Short and how many pieces it has had), away from used starts. */
     public DreamTypes.DreamBedRequest musicBedRequest(UUID id) {
-        if (musicBed == null || musicBed.isBlank()) {
-            throw new IllegalStateException("No music bed is set: put the track's storage address in DREAM_MUSIC_BED "
-                    + "(or choose Lyria for this Short)");
-        }
-        List<Double> used = jdbc.sql("""
-                        SELECT p.seed FROM provenance p JOIN asset a ON a.provenance_id = p.id
-                        WHERE p.provider = :p AND p.model = :m AND p.seed IS NOT NULL
-                        """).param("p", BED).param("m", bedName()).query(Long.class).list()
-                .stream().map(ms -> ms / 1000.0).toList();
-        int takes = jdbc.sql("""
-                        SELECT count(*) FROM asset a JOIN provenance p ON p.id = a.provenance_id
-                        WHERE a.dream_short_id = :d AND p.provider = :p
-                        """).param("d", id).param("p", BED).query(Integer.class).single();
-        Map<String, Object> d = dream(id);
-        List<Map<String, Object>> shots = shots(id);
-        DreamWorld w = d.get("world_json") == null ? null : json.readValue(d.get("world_json").toString(), DreamWorld.class);
-        List<String> scenes = shots.stream().map(s -> Objects.toString(s.get("scene"), "")).filter(s -> !s.isBlank()).toList();
-        String brief = String.join("\n",
-                "Look: " + look((String) d.get("look")).brief(),
-                "Idea: " + d.get("idea"),
-                w == null ? "" : "World: " + Objects.toString(w.world(), "") + " Palette: " + Objects.toString(w.palette(), "")
-                        + " Light: " + Objects.toString(w.light(), ""),
-                scenes.isEmpty() ? "" : "Shots, in order: " + String.join(" | ", scenes)).strip();
-        List<String> pictures = shots.stream().map(s -> (String) s.get("picture_uri")).filter(Objects::nonNull).limit(3).toList();
-        String model = listenModel;
-        try {
-            budget.require(LISTEN_ESTIMATE_INR, "Dream Short music pick (Gemini listens to the pieces)");
-        } catch (BudgetGuard.BudgetExceededException e) {
-            model = null; // over the Gemini cap: pick by loudness only, never block the Short over a few paise
-        }
-        return new DreamTypes.DreamBedRequest(storageId(id), musicBed, shortSeconds(shots.size(), look((String) d.get("look"))),
-                id + "#" + takes, used,
-                model, brief, pictures, BED_CANDIDATES);
+        return music.musicBedRequest(id);
     }
 
     @Transactional
     public String saveMusicBed(UUID id, DreamTypes.DreamBedResult r) {
-        if (r.usage() != null) {
-            evidence.costCheck(id, "MUSIC", LISTEN_ESTIMATE_INR.doubleValue(), pricing.textInr(r.usage()).doubleValue());
-            cost(id, BudgetGuard.GEMINI, pricing.textInr(r.usage()), r.usage().totalTokens(), "token", false,
-                    "Dream Short music pick: Gemini listened to " + r.heard() + " pieces (" + r.model() + ")");
-            UUID pick = router.recordExternal(null, "DREAM_MUSIC_PICK", "audio.listen", BudgetGuard.GEMINI,
-                    "best fit of " + r.heard() + " pieces: " + Objects.toString(r.why(), ""), List.of(Map.of("provider", BudgetGuard.GEMINI)));
-            tag("routing_decision", pick, id);
-        }
-        UUID decision = router.recordExternal(null, "DREAM_MUSIC", "music.dream", "local_laptop",
-                "owner's music bed: free and his own track (Lyria only when chosen for this Short)",
-                List.of(Map.of("provider", "local_laptop")));
-        tag("routing_decision", decision, id);
-        cost(id, "local_laptop", BigDecimal.ZERO, r.durationSec(), "second", false,
-                "Dream Short music: the owner's music bed (" + r.bedName() + "), free");
-        UUID asset = assets.create(new NewAsset(null, "audio", r.uri(), "audio/wav", null, null, r.durationSec(),
-                BED, bedName(), "piece from %s to %s of %s".formatted(clock(r.startSec()), clock(r.startSec() + r.durationSec()), musicBed),
-                Math.round(r.startSec() * 1000), LICENCE_OWNER_MUSIC, false));
-        jdbc.sql("UPDATE asset SET dream_short_id = :d WHERE id = :a").param("d", id).param("a", asset).update();
-        jdbc.sql("UPDATE dream_short SET music_asset_id = :a, final_asset_id = NULL, updated_at = now() WHERE id = :d")
-                .param("a", asset).param("d", id).update();
-        String how = r.usage() != null ? "best of " + r.heard() + " pieces by ear: " + r.why()
-                : r.why() == null || r.why().isBlank() ? "picked by loudness" : r.why();
-        return "Music: %.0f s of your track \"%s\" from %s (%s).".formatted(r.durationSec(), r.bedName(), clock(r.startSec()), how);
-    }
-
-    /** The bed's file name, e.g. "7 weeks and 3 days 1 hour.m4a" (used as the provenance model). */
-    private String bedName() {
-        return musicBed.substring(musicBed.lastIndexOf('/') + 1);
-    }
-
-    private static String clock(double sec) {
-        long s = Math.round(sec);
-        return "%d:%02d".formatted(s / 60, s % 60);
+        return music.saveMusicBed(id, r);
     }
 
     // ------------------------------------------------------------------------------------------- FINISH
@@ -1234,18 +1127,18 @@ public class DreamService {
     // ------------------------------------------------------------------------------------------- shared helpers
 
     /** The router's choice, logged and linked to the Short. Throws (deferral) when nothing can run it. */
-    private void route(UUID id, String stage, String capability, String provider, BigDecimal inr) {
+    void route(UUID id, String stage, String capability, String provider, BigDecimal inr) {
         var choice = router.choose(null, stage, capability, List.of(new Router.Candidate(provider, inr)), provider, true);
         tag("routing_decision", choice.decisionId(), id);
     }
 
-    private void tag(String table, UUID rowId, UUID dreamId) {
+    void tag(String table, UUID rowId, UUID dreamId) {
         if (rowId != null) {
             jdbc.sql("UPDATE " + table + " SET dream_short_id = :d WHERE id = :id").param("d", dreamId).param("id", rowId).update();
         }
     }
 
-    private void cost(UUID id, String provider, BigDecimal inr, double units, String unitType, boolean estimated, String note) {
+    void cost(UUID id, String provider, BigDecimal inr, double units, String unitType, boolean estimated, String note) {
         jdbc.sql("""
                         INSERT INTO cost_entry (id, video_id, dream_short_id, provider_id, amount_inr, units, unit_type, estimated, note)
                         VALUES (:id, NULL, :d, :p, :amt, :u, :ut, :est, :note)

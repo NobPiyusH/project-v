@@ -42,7 +42,7 @@ class RouterTest {
     static void setUp() throws Exception {
         Flyway.configure().dataSource(PG.getJdbcUrl(), PG.getUsername(), PG.getPassword()).load().migrate();
         jdbc = JdbcClient.create(new DriverManagerDataSource(PG.getJdbcUrl(), PG.getUsername(), PG.getPassword()));
-        Pricing pricing = new Pricing("../config");
+        Pricing pricing = new Pricing("src/test/resources/config");
         router = new Router(jdbc, JsonMapper.builder().build(), new BudgetGuard(jdbc, pricing), pricing);
     }
 

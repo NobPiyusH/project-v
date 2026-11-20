@@ -67,10 +67,10 @@ class ProductionPersistenceTest {
         var ds = new DriverManagerDataSource(PG.getJdbcUrl(), PG.getUsername(), PG.getPassword());
         jdbc = JdbcClient.create(ds);
         json = JsonMapper.builder().build();
-        Pricing pricing = new Pricing("../config");
+        Pricing pricing = new Pricing("src/test/resources/config");
         budget = new BudgetGuard(jdbc, pricing);
         var deps = new ProductionDeps(jdbc, json, null, null, new AssetStore(jdbc), new CostLedger(jdbc), pricing, budget,
-                new StylePresets("../config"), "gemini-3.6-flash", "gemini-3.8-flash-tts", "img", "music", "Charon", "app", "cls");
+                new StylePresets("src/test/resources/config"), "gemini-3.6-flash", "gemini-3.8-flash-tts", "img", "music", "Charon", "app", "cls");
         voice = new VoiceStage(deps);
         producer = new ProducerService(deps, "gemini-3.6-flash");
         shots = new ShotStage(deps);
@@ -129,10 +129,17 @@ class ProductionPersistenceTest {
                 .param("v", video).query(String.class).list());
     }
 
+    /** Counts the migration files themselves, so adding a migration never breaks this test. */
+    static int expectedMigrations() throws java.io.IOException {
+        try (var files = java.nio.file.Files.list(java.nio.file.Path.of("src/main/resources/db/migration"))) {
+            return (int) files.filter(p -> p.getFileName().toString().matches("V[0-9]+__.*[.]sql")).count();
+        }
+    }
+
     @Test
-    void allMigrationsApplyAndLicencesAreSeeded() {
+    void allMigrationsApplyAndLicencesAreSeeded() throws Exception {
         assertEquals(12, jdbc.sql("SELECT count(*) FROM licence").query(Integer.class).single()); // main 11 + owner music (V22)
-        assertEquals(34, jdbc.sql("SELECT count(*) FROM flyway_schema_history WHERE success").query(Integer.class).single()); // main V1-V19 + Dream Shorts V20-V25 + autopilot V26 + Dream check V27 + Dream lessons V28 + stop rule V29 + Scout cache V30 + GPU watchdog V31 + Dream GPU pick V32 + GPU lease short V33 + hook/chain/ideas V34
+        assertEquals(expectedMigrations(), jdbc.sql("SELECT count(*) FROM flyway_schema_history WHERE success").query(Integer.class).single());
     }
 
     @Test
@@ -453,7 +460,7 @@ class ProductionPersistenceTest {
 
     @Test
     void theMonthlyGeminiCapStopsSpending() throws Exception {
-        BigDecimal cap = new Pricing("../config").geminiMonthlyCapInr();
+        BigDecimal cap = new Pricing("src/test/resources/config").geminiMonthlyCapInr();
         BigDecimal before = budget.geminiSpentThisMonth();
         jdbc.sql("INSERT INTO cost_entry (id, video_id, provider_id, amount_inr) VALUES (:id, :v, 'gemini_api', :amt)")
                 .param("id", UUID.randomUUID()).param("v", video).param("amt", cap.subtract(before).subtract(BigDecimal.valueOf(5)))

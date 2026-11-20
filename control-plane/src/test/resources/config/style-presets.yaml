@@ -1,0 +1,47 @@
+# Style presets the Planner chooses from (R1). MelodySheep-style is one preset among several.
+# Add or edit presets freely; the Planner reads this file at startup.
+presets:
+  - id: cinematic_awe
+    name: Cinematic documentary (awe)
+    description: >
+      MelodySheep-like. Music-first, continuous "flowmotion" camera through vast scales (space, deep time,
+      geology), sparse poetic narration, an on-screen clock or counter. Slow reveals, light and atmosphere.
+    visualStyle: >
+      Photorealistic cinematic space and nature imagery, IMAX scale, volumetric light, deep blacks, rich teal-and-amber palette, anamorphic widescreen composition, no text, no people unless asked
+    defaults: { format: long_form, durationSec: 480, aspectRatio: "16:9", narration: sparse, music: lead }
+
+  - id: explainer_clean
+    name: Explainer
+    description: >
+      Clear, friendly teaching video. Full narration drives the edit; AI video and motion graphics illustrate
+      each point; diagrams, labels and text cards. Good for "how X works" topics.
+    visualStyle: >
+      Clean, bright, high-detail cinematic illustration with clear focal subject, soft studio lighting, uncluttered background, no text
+    defaults: { format: long_form, durationSec: 360, aspectRatio: "16:9", narration: full, music: support }
+
+  - id: documentary_story
+    name: Story documentary
+    description: >
+      History or science told as a story: a hook, rising tension, a reveal. Full narration, cinematic AI
+      footage, period-accurate visuals, music supports emotion.
+    visualStyle: >
+      Photorealistic period-accurate cinematic still, natural light, film grain, shallow depth of field, documentary realism, no text
+    defaults: { format: long_form, durationSec: 600, aspectRatio: "16:9", narration: full, music: support }
+
+  - id: ambient_visual
+    name: Ambient / visual film
+    description: >
+      No or almost no narration. Beautiful continuous visuals (nature, space, oceans, cities) carried by
+      music and sound design, for relaxing or background viewing.
+    visualStyle: >
+      Breathtaking photorealistic landscape and nature cinematography, golden hour or blue hour light, calm composition, no text, no people
+    defaults: { format: long_form, durationSec: 600, aspectRatio: "16:9", narration: none, music: lead }
+
+  - id: shorts_punchy
+    name: Short / Reel (punchy)
+    description: >
+      Vertical 30-60 s. Hook in the first 2 seconds, fast cuts every 1-3 s, big word-by-word captions,
+      one surprising idea, loop-friendly ending.
+    visualStyle: >
+      Bold, high-contrast, vibrant cinematic image with one clear subject centred for a vertical frame, dramatic lighting, no text
+    defaults: { format: short, durationSec: 45, aspectRatio: "9:16", narration: full, music: support }

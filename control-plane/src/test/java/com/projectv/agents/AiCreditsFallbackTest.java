@@ -49,7 +49,7 @@ class AiCreditsFallbackTest {
         ledger = mock(CostLedger.class);
         budget = mock(BudgetGuard.class);
         router = mock(Router.class);
-        pricing = new Pricing("../config");
+        pricing = new Pricing("src/test/resources/config");
         when(budget.canSpendAicredits(any())).thenReturn(true);
         when(chat.call(anyString(), anyString(), anyString(), eq(String.class)))
                 .thenReturn(new OpenAiCompatChat.Result<>("fallback answer", 1_000, 2_000, 3_000));

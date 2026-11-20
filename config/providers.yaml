@@ -65,48 +65,54 @@ providers:
     secret_ref: GEMINI_API_KEY
     enabled: true
 
-  - id: modal_a100
-    name: Modal (serverless A100)
-    kind: gpu_serverless
-    capabilities: [video.wan22_14b, image.flux2, upscale.seedvr, interp.rife]
-    quota: { type: monthly_usd, amount: 30, reset: "monthly@1" }
-    enabled: false
+  # unused: no router job asks for these capabilities and Modal runs as modal_wan/modal_zimage; enable by adding a router job + candidate for video.wan22_14b
+  # - id: modal_a100
+  #   name: Modal (serverless A100)
+  #   kind: gpu_serverless
+  #   capabilities: [video.wan22_14b, image.flux2, upscale.seedvr, interp.rife]
+  #   quota: { type: monthly_usd, amount: 30, reset: "monthly@1" }
+  #   enabled: false
 
-  - id: kaggle_t4
-    name: Kaggle notebooks (T4/P100)
-    kind: gpu_notebook
-    capabilities: [upscale.realesrgan, image.zimage_turbo, tts.kokoro, interp.rife]
-    quota: { type: weekly_hours, amount: 30, reset: "weekly@SUN00:00Z" }
-    enabled: false
+  # unused: no notebook adapter exists; enable by writing a Kaggle runner and a router/broker job that targets it
+  # - id: kaggle_t4
+  #   name: Kaggle notebooks (T4/P100)
+  #   kind: gpu_notebook
+  #   capabilities: [upscale.realesrgan, image.zimage_turbo, tts.kokoro, interp.rife]
+  #   quota: { type: weekly_hours, amount: 30, reset: "weekly@SUN00:00Z" }
+  #   enabled: false
 
-  - id: lightning_t4
-    name: Lightning AI (T4)
-    kind: gpu_notebook
-    capabilities: [upscale.realesrgan, image.zimage_turbo, interp.rife]
-    quota: { type: monthly_credits, amount: 15, reset: "monthly@1" }
-    enabled: false
+  # unused: no notebook adapter exists; enable by writing a Lightning runner and a router/broker job that targets it
+  # - id: lightning_t4
+  #   name: Lightning AI (T4)
+  #   kind: gpu_notebook
+  #   capabilities: [upscale.realesrgan, image.zimage_turbo, interp.rife]
+  #   quota: { type: monthly_credits, amount: 15, reset: "monthly@1" }
+  #   enabled: false
 
-  - id: vast_4090_interruptible
-    name: Vast.ai RTX 4090 (interruptible)
-    kind: gpu_pod
-    capabilities: [video.wan22_14b, image.flux2, upscale.seedvr]
-    cost: { unit: gpu_hour, live_price: true }
-    interruptible: true
-    enabled: false
+  # unused: the GPU broker owns rented pods (pricing.gpuBroker.providers.vast, stub adapter, cap 0); enable by implementing the Vast adapter in gpu/broker
+  # - id: vast_4090_interruptible
+  #   name: Vast.ai RTX 4090 (interruptible)
+  #   kind: gpu_pod
+  #   capabilities: [video.wan22_14b, image.flux2, upscale.seedvr]
+  #   cost: { unit: gpu_hour, live_price: true }
+  #   interruptible: true
+  #   enabled: false
 
-  - id: runpod_4090_community
-    name: RunPod RTX 4090 (community)
-    kind: gpu_pod
-    capabilities: [video.wan22_14b, image.flux2, upscale.seedvr]
-    cost: { unit: gpu_hour, live_price: true }
-    enabled: false
+  # unused: RunPod is the broker's runpod provider and the gpu_pod entry above; enable only if a router job needs a RunPod-specific capability
+  # - id: runpod_4090_community
+  #   name: RunPod RTX 4090 (community)
+  #   kind: gpu_pod
+  #   capabilities: [video.wan22_14b, image.flux2, upscale.seedvr]
+  #   cost: { unit: gpu_hour, live_price: true }
+  #   enabled: false
 
-  - id: gemini_api_veo
-    name: Gemini API Veo (video, paid)
-    kind: api
-    capabilities: [video.veo_fast, video.veo_quality]
-    secret_ref: GEMINI_API_KEY
-    enabled: false
+  # unused: no Veo client or router job (Veo is done by hand via manual_flow); enable by adding a Veo client and a video.veo_* job
+  # - id: gemini_api_veo
+  #   name: Gemini API Veo (video, paid)
+  #   kind: api
+  #   capabilities: [video.veo_fast, video.veo_quality]
+  #   secret_ref: GEMINI_API_KEY
+  #   enabled: false
 
   - id: manual_flow
     name: Google Flow (you, by hand)

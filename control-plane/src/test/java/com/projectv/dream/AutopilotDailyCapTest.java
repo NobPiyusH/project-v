@@ -34,7 +34,7 @@ class AutopilotDailyCapTest {
     static void setUp() throws Exception {
         Flyway.configure().dataSource(PG.getJdbcUrl(), PG.getUsername(), PG.getPassword()).load().migrate();
         jdbc = JdbcClient.create(new DriverManagerDataSource(PG.getJdbcUrl(), PG.getUsername(), PG.getPassword()));
-        producer = new DreamProducer(jdbc, JsonMapper.builder().build(), null, null, new Pricing("../config"), "gemini-3.6-flash");
+        producer = new DreamProducer(jdbc, JsonMapper.builder().build(), null, null, new Pricing("src/test/resources/config"), "gemini-3.6-flash");
     }
 
     UUID dream(boolean autopilot) {

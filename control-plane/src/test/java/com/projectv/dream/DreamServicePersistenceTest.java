@@ -49,13 +49,13 @@ class DreamServicePersistenceTest {
     static void setUp() throws Exception {
         Flyway.configure().dataSource(PG.getJdbcUrl(), PG.getUsername(), PG.getPassword()).load().migrate();
         jdbc = JdbcClient.create(new DriverManagerDataSource(PG.getJdbcUrl(), PG.getUsername(), PG.getPassword()));
-        Pricing pricing = new Pricing("../config");
+        Pricing pricing = new Pricing("src/test/resources/config");
         BudgetGuard budget = new BudgetGuard(jdbc, pricing);
         var json = JsonMapper.builder().build();
         Router router = new Router(jdbc, json, budget, pricing);
         dreams = new DreamService(jdbc, json, null, new AssetStore(jdbc), pricing, budget, router, new ClipProgress(),
-                "projectv-zimage", "ZImage", "projectv-wan", "Wan", "http://127.0.0.1:8080", BigDecimal.ZERO, 3.5, "", "lyria-3.5",
-                "s3://projectv/music-beds/my track.m4a", "gemini-3.6-flash", "claude:claude-sonnet-5-5", true);
+                new DreamSettings("projectv-zimage", "ZImage", "projectv-wan", "Wan", "http://127.0.0.1:8080", BigDecimal.ZERO, 3.5, "", "lyria-3.5",
+                "s3://projectv/music-beds/my track.m4a", "gemini-3.6-flash", "claude:claude-sonnet-5-5", true));
         jdbc.sql("""
                         INSERT INTO provider (id, name, kind, capabilities_json, config_json, enabled)
                         VALUES ('local_laptop', 'Laptop', 'local', CAST('["ffmpeg"]' AS jsonb), CAST('{}' AS jsonb), true)
@@ -340,7 +340,7 @@ class DreamServicePersistenceTest {
 
     @Test
     void producerReviewsAreKeptWithTheShortAndAutopilotShortsAreHeldToTheDailyCap() throws Exception {
-        var pricing = new Pricing("../config");
+        var pricing = new Pricing("src/test/resources/config");
         var producer = new DreamProducer(jdbc, JsonMapper.builder().build(), dreams, null, pricing, "gemini-3.6-flash");
         jdbc.sql("UPDATE dream_short SET producer_decides = true WHERE id = :d").param("d", dream).update();
         assertTrue(producer.decides(dream.toString()));
@@ -369,7 +369,7 @@ class DreamServicePersistenceTest {
     }
     @Test
     void theSameClipIssueTwiceGetsOnePromptFixOnTheClipsThenTheOwnerIsAsked() throws Exception {
-        var producer = new DreamProducer(jdbc, JsonMapper.builder().build(), dreams, null, new Pricing("../config"), "gemini-3.6-flash");
+        var producer = new DreamProducer(jdbc, JsonMapper.builder().build(), dreams, null, new Pricing("src/test/resources/config"), "gemini-3.6-flash");
         dreams.savePictures(dream, dreams.pictureRequest(dream, null, null), new KeyframeResult(List.of(
                 new KeyframeOutput(shot1.toString(), "s3://b/p1.png", "modal_zimage", "z", 1L, 5.0, null, null, List.of()),
                 new KeyframeOutput(shot2.toString(), "s3://b/p2.png", "modal_zimage", "z", 2L, 5.0, null, null, List.of())), 10));
