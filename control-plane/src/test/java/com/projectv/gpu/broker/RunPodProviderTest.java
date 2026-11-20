@@ -29,7 +29,7 @@ class RunPodProviderTest {
     @BeforeEach
     void start() throws IOException {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-        server.createContext("/v2/gpu-types", ex -> {
+        server.createContext("/v2/catalog/gpus", ex -> {
             String q = ex.getRequestURI().getQuery();
             requests.add(ex.getRequestMethod() + " " + ex.getRequestURI());
             boolean secure = q.contains("cloud=SECURE");

@@ -91,7 +91,7 @@ public class RunPodProvider implements GpuProvider {
             for (String gpu : spec.gpuPreference()) {
                 Map<String, Object> r;
                 try {
-                    r = http.get().uri(java.net.URI.create(baseUrl + "/gpu-types/" + enc(gpu)
+                    r = http.get().uri(java.net.URI.create(baseUrl + "/catalog/gpus/" + enc(gpu)
                                     + "?include=AVAILABILITY&product=POD&cloud=" + cloud))
                             .header("Authorization", "Bearer " + apiKey).retrieve().body(Map.class);
                 } catch (RuntimeException e) {
