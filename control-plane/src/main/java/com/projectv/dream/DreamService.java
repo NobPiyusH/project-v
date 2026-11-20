@@ -371,6 +371,7 @@ public class DreamService {
         int group = ((Number) d.get("chain_group")).intValue();
         boolean locked = chain && group == 0 && Boolean.TRUE.equals(d.get("chain_locked"));
         boolean hook = Boolean.TRUE.equals(d.get("hook_title"));
+        boolean paths = Boolean.TRUE.equals(d.get("path_choice"));
         var seed = DreamIdeaPacks.resolve((String) d.get("idea_ref"));
         // The owner's chosen Scout angle replaces the look's shot structure (19 Nov: as a user-message note it lost
         // to "a different place every shot" twice). The look still sets the style. Chained shots (off by default) are
@@ -395,10 +396,11 @@ public class DreamService {
                 "shots": [{"scene": what this shot shows (one or two sentences, concrete), "motion": the camera move and
                 the small motion inside the scene}]%s} with exactly %d shots.
                 """.formatted(structure, "architecture".equals(d.get("look")) ? FEEL_ARCHITECTURE : FEEL, look.brief(),
-                (hook ? HOOK_FIELD : "") + (locked ? CAMERA_PATH_FIELD : ""), count) + lessons("WRITER");
+                (hook ? HOOK_FIELD : "") + (locked ? CAMERA_PATH_FIELD : "") + (paths ? DreamBranches.PATH_FIELD : ""), count) + lessons("WRITER");
         String user = "Idea: " + d.get("idea") + (notes == null || notes.isBlank() ? "" : "\nOwner's notes for this rewrite: " + notes)
                 + (seed.isPresent() ? DreamIdeaPacks.forWriter(seed.get()) : "")
-                + (scouted == null ? "" : scouted.forWriter());
+                + (scouted == null ? "" : scouted.forWriter())
+                + continuation(d);
         java.time.Instant since = java.time.Instant.now();
         DreamWorld w = llm.call(null, "dream.write", system, user, DreamWorld.class);
         if (w == null || w.shots() == null || w.shots().isEmpty()) {
@@ -431,6 +433,11 @@ public class DreamService {
         if (hook && w.hook() != null && !w.hook().isBlank()) { // the owner's (or the idea pack's) own hook is never replaced
             jdbc.sql("UPDATE dream_short SET hook_text = :h WHERE id = :d AND NOT hook_locked").param("h", w.hook().strip())
                     .param("d", id).update();
+        }
+        List<String> options = paths ? DreamBranches.cleanPaths(w.paths()) : null;
+        if (options != null) { // the owner's own edited options are never replaced
+            jdbc.sql("UPDATE dream_short SET path_a = :a, path_b = :b WHERE id = :d AND NOT path_locked")
+                    .param("a", options.get(0)).param("b", options.get(1)).param("d", id).update();
         }
         return "\"%s\": %d shots in one world (%s).".formatted(w.title(), shots.size(), Objects.toString(w.palette(), "").strip());
     }
@@ -666,10 +673,15 @@ public class DreamService {
         Set<String> wanted = only == null ? null : new HashSet<>(only);
         boolean chain = chained(id);
         int group = chain ? chainGroup(id) : 0;
+        Map<String, Object> d = dream(id);
+        boolean fromParent = d.get("start_clip_asset_id") != null;
         for (Map<String, Object> s : shots(id)) {
             String shotId = s.get("id").toString();
             if (continues(chain, group, ((Number) s.get("ord")).intValue())) {
                 continue; // chained: this clip starts from the last frame of the one before, so it needs no picture
+            }
+            if (fromParent && ((Number) s.get("ord")).intValue() == 0) {
+                continue; // a continued episode: shot 1 starts from the previous episode's last frame
             }
             if (wanted == null ? s.get("picture_asset_id") != null : !wanted.contains(shotId)) {
                 continue;
@@ -681,7 +693,7 @@ public class DreamService {
             int attempt = ((Number) s.get("picture_takes")).intValue() + 1;
             // One seed for the whole Short (owner, 19 Nov: the shelter changed shape every shot); a redo moves it on.
             jobs.add(new KeyframeJob(shotId, attempt, gpu != null ? POD : ZIMAGE, prompt, 768, 1344, "9:16", "1K", null,
-                    Math.abs((long) id.hashCode()) + attempt - 1));
+                    sceneSeed(id, d) + attempt - 1));
         }
         if (gpu != null) {
             if (jobs.isEmpty()) {
@@ -833,7 +845,9 @@ public class DreamService {
         boolean chain = Boolean.TRUE.equals(d.get("chain_shots"));
         int group = chain ? ((Number) d.get("chain_group")).intValue() : 0;
         boolean locked = chain && group == 0 && Boolean.TRUE.equals(d.get("chain_locked"));
-        long sceneSeed = Math.abs((long) id.hashCode());
+        long sceneSeed = sceneSeed(id, d);
+        // A continued episode: shot 1 starts from the last frame of the previous episode's last clip (no picture of its own).
+        String parentClip = d.get("start_clip_asset_id") == null ? null : assets.uriOf((UUID) d.get("start_clip_asset_id"));
         String before = null; // the clip of the shot before this one, when it already exists (chained shots)
         for (Map<String, Object> s : shots(id)) {
             String shotId = s.get("id").toString();
@@ -841,7 +855,11 @@ public class DreamService {
             before = (String) s.get("clip_uri");
             int ord = ((Number) s.get("ord")).intValue();
             boolean continues = continues(chain, group, ord);
-            if (s.get("picture_uri") == null && !continues) {
+            boolean fromParent = ord == 0 && parentClip != null;
+            if (fromParent) {
+                clipBefore = parentClip;
+            }
+            if (s.get("picture_uri") == null && !continues && !fromParent) {
                 continue; // (a chained shot after the first has no picture of its own: it starts from the clip before)
             }
             if (wanted == null ? s.get("clip_asset_id") != null : !wanted.contains(shotId)) {
@@ -850,7 +868,7 @@ public class DreamService {
             int take = ((Number) s.get("clip_takes")).intValue() + 1;
             jobs.add(new ClipJob(shotId, ((Number) s.get("ord")).intValue() + 1, take, "dream", "fast",
                     (String) s.get("picture_uri"), fixPrompt.isEmpty() ? (String) s.get("motion_prompt") : s.get("motion_prompt") + fixPrompt, size[0], size[1], frames,
-                    (locked ? sceneSeed : Math.abs((long) shotId.hashCode())) + take, negative, continues ? clipBefore : null));
+                    (locked ? sceneSeed : Math.abs((long) shotId.hashCode())) + take, negative, continues || fromParent ? clipBefore : null));
         }
         return jobs;
     }
@@ -1011,9 +1029,83 @@ public class DreamService {
                 look.speed(), look.handheld(), !Boolean.FALSE.equals(d.get("edit_music")),
                 !Boolean.FALSE.equals(d.get("edit_ambience")), !Boolean.FALSE.equals(d.get("edit_pacing")),
                 // a picked Scout angle is one story told in order: pacing must not reshuffle it (19 Nov: the ending played third)
-                scouted(d) != null && scouted(d).chosen() != null,
+                // and so is a path-choice Short: the end card asks about where the LAST shot leaves you
+                scouted(d) != null && scouted(d).chosen() != null || pathChoice(d),
                 Boolean.TRUE.equals(d.get("hook_title")) ? blankToNull((String) d.get("hook_text")) : null,
-                (String) d.get("hook_color"));
+                (String) d.get("hook_color"),
+                pathChoice(d) ? blankToNull((String) d.get("path_a")) : null,
+                pathChoice(d) ? blankToNull((String) d.get("path_b")) : null);
+    }
+
+    /** "Choose the path" is on and both options are written. */
+    static boolean pathChoice(Map<String, Object> d) {
+        return Boolean.TRUE.equals(d.get("path_choice")) && blankToNull((String) d.get("path_a")) != null
+                && blankToNull((String) d.get("path_b")) != null;
+    }
+
+    /** The world's seed: inherited down an episode chain (scene_seed), else derived from the Short's id as before. */
+    static long sceneSeed(UUID id, Map<String, Object> d) {
+        return d.get("scene_seed") != null ? ((Number) d.get("scene_seed")).longValue() : Math.abs((long) id.hashCode());
+    }
+
+    /** The writer's continuation context for an episode after the first (empty for every other Short). */
+    String continuation(Map<String, Object> d) {
+        if (d.get("parent_id") == null) {
+            return "";
+        }
+        Object branch = dream((UUID) d.get("parent_id")).get("branch_json");
+        Map<String, Object> memory = branch == null ? Map.of()
+                : json.readValue(branch.toString(), new tools.jackson.core.type.TypeReference<Map<String, Object>>() {
+                });
+        return DreamBranches.forWriter(memory, (String) d.get("chosen_path"), ((Number) d.get("episode")).intValue());
+    }
+
+    /**
+     * The owner edits the two path options (review or manual step); they apply at the next finish ("Redo from Finish",
+     * free) and a rewrite by the writer never replaces them.
+     */
+    public void setPaths(UUID id, String a, String b) {
+        String ca = DreamBranches.cleanPath(a), cb = DreamBranches.cleanPath(b);
+        if (ca == null || cb == null) {
+            throw new IllegalArgumentException("Write both paths (2-4 words each)");
+        }
+        jdbc.sql("UPDATE dream_short SET path_a = :a, path_b = :b, path_locked = true, updated_at = now() WHERE id = :id")
+                .param("a", ca).param("b", cb).param("id", id).update();
+    }
+
+    /**
+     * Branch memory, saved when a path-choice Short finishes: what the next episode needs to continue the same world
+     * from this one's last frame.
+     */
+    void saveBranch(UUID id) {
+        Map<String, Object> d = dream(id);
+        if (!Boolean.TRUE.equals(d.get("path_choice"))) {
+            return;
+        }
+        List<Map<String, Object>> shots = shots(id);
+        Map<String, Object> last = shots.isEmpty() ? Map.of() : shots.getLast();
+        DreamWorld w = d.get("world_json") == null ? null : json.readValue(d.get("world_json").toString(), DreamWorld.class);
+        Map<String, Object> b = new java.util.LinkedHashMap<>();
+        b.put("title", d.get("title"));
+        if (w != null) {
+            b.put("world", w.world());
+            b.put("palette", w.palette());
+            b.put("light", w.light());
+            b.put("hero", w.hero());
+            b.put("cameraPath", w.cameraPath());
+        }
+        b.put("lastScene", last.get("scene"));
+        b.put("lastClipAssetId", last.get("clip_asset_id") == null ? null : last.get("clip_asset_id").toString());
+        b.put("seed", sceneSeed(id, d));
+        b.put("look", d.get("look"));
+        b.put("chainShots", d.get("chain_shots"));
+        b.put("chainGroup", d.get("chain_group"));
+        b.put("chainLocked", d.get("chain_locked"));
+        b.put("pathA", d.get("path_a"));
+        b.put("pathB", d.get("path_b"));
+        b.put("episode", d.get("episode"));
+        jdbc.sql("UPDATE dream_short SET branch_json = CAST(:b AS jsonb) WHERE id = :id")
+                .param("b", json.writeValueAsString(b)).param("id", id).update();
     }
 
     private static String blankToNull(String s) {
@@ -1040,6 +1132,7 @@ public class DreamService {
                 "local_laptop", "dream finish (" + r.smoothing() + ", FFmpeg look)", null, null, AssetStore.LICENCE_WAN, true));
         jdbc.sql("UPDATE asset SET dream_short_id = :d, fps = :f WHERE id = :a").param("d", id).param("f", r.fps()).param("a", asset).update();
         jdbc.sql("UPDATE dream_short SET final_asset_id = :a, updated_at = now() WHERE id = :d").param("a", asset).param("d", id).update();
+        saveBranch(id);
         evidence.metrics(id, asset, (String) dream(id).get("look"), r.metrics());
         UUID decision = router.recordExternal(null, "DREAM_FINISH", "interp.rife", "local_laptop",
                 "laptop first: smoothing, look and mix are free on this laptop (" + r.smoothing() + ")",

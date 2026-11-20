@@ -27,12 +27,23 @@ public class DreamStudio {
      *                   {@code chainGroup} = chains of N shots (2: shots 1+2 chained, 3+4 chained...), null/0 = one chain;
      *                   {@code chainLocked} = a locked scene (one chain only): one camera path, one world and seed, cleaned last frames
      * @param ideaPack   with {@code ideaId}: start from a curated concept seed (idea pack) instead of researching; the Scout is skipped
+     * @param pathChoice "Choose the path": the Short ends on an end card with two path options, and a finished Short can be
+     *                   continued down the chosen path as the next episode (default off)
      */
     public record NewDream(String idea, String look, Integer shots, String quality, String defaultMode,
                            Map<String, String> modes, Integer reviewMinutes, String music, Boolean scout,
                            Boolean musicEdit, Boolean ambience, Boolean pacing, Boolean producerDecides,
                            Boolean hookTitle, String hookText, String hookColor, Boolean chainShots, String ideaPack,
-                           String ideaId, Integer chainGroup, Boolean chainLocked) {
+                           String ideaId, Integer chainGroup, Boolean chainLocked, Boolean pathChoice) {
+        public NewDream(String idea, String look, Integer shots, String quality, String defaultMode,
+                        Map<String, String> modes, Integer reviewMinutes, String music, Boolean scout,
+                        Boolean musicEdit, Boolean ambience, Boolean pacing, Boolean producerDecides,
+                        Boolean hookTitle, String hookText, String hookColor, Boolean chainShots, String ideaPack,
+                        String ideaId, Integer chainGroup, Boolean chainLocked) {
+            this(idea, look, shots, quality, defaultMode, modes, reviewMinutes, music, scout, musicEdit, ambience, pacing,
+                    producerDecides, hookTitle, hookText, hookColor, chainShots, ideaPack, ideaId, chainGroup, chainLocked, null);
+        }
+
         /** What the Autopilot passes: all of the above, and the three new options off. */
         public NewDream(String idea, String look, Integer shots, String quality, String defaultMode,
                         Map<String, String> modes, Integer reviewMinutes, String music, Boolean scout,
@@ -84,6 +95,14 @@ public class DreamStudio {
     }
 
     public UUID create(NewDream req) {
+        return create(req, null);
+    }
+
+    /** A continued episode: the parent, the path picked and the parent's last clip (shot 1 starts from its last frame). */
+    record Continuation(UUID parentId, int episode, String chosenPath, String pickSource, UUID startClipAssetId, long seed) {
+    }
+
+    UUID create(NewDream req, Continuation cont) {
         boolean seeded = req.ideaPack() != null && !req.ideaPack().isBlank() && req.ideaId() != null && !req.ideaId().isBlank();
         var seed = seeded ? DreamIdeaPacks.idea(req.ideaPack(), req.ideaId()) : java.util.Optional.<DreamIdeaPacks.Idea>empty();
         if (seeded && seed.isEmpty()) {
@@ -118,10 +137,16 @@ public class DreamStudio {
                         INSERT INTO dream_short (id, idea, look, shot_count, quality, modes_json, review_minutes, status, step, workflow_id,
                                                  music_source, scout, edit_music, edit_ambience, edit_pacing, producer_decides,
                                                  hook_title, hook_text, hook_color, hook_locked, chain_shots, idea_ref,
-                                                 chain_group, chain_locked)
+                                                 chain_group, chain_locked, path_choice, parent_id, episode, chosen_path,
+                                                 pick_source, start_clip_asset_id, scene_seed)
                         VALUES (:id, :idea, :look, :n, :q, CAST(:modes AS jsonb), :r, 'RUNNING', 'SCOUT', :wf, :music, :scout,
-                                :em, :ea, :ep, :pd, :ht, :htext, :hcol, :hlock, :chain, :iref, :cgroup, :clocked)
+                                :em, :ea, :ep, :pd, :ht, :htext, :hcol, :hlock, :chain, :iref, :cgroup, :clocked, :pc, :parent,
+                                :episode, :cpath, :psrc, :sclip, :seed)
                         """)
+                .param("pc", Boolean.TRUE.equals(req.pathChoice()))
+                .param("parent", cont == null ? null : cont.parentId()).param("episode", cont == null ? 1 : cont.episode())
+                .param("cpath", cont == null ? null : cont.chosenPath()).param("psrc", cont == null ? null : cont.pickSource())
+                .param("sclip", cont == null ? null : cont.startClipAssetId()).param("seed", cont == null ? null : cont.seed())
                 .param("clocked", Boolean.TRUE.equals(req.chainLocked()) && Boolean.TRUE.equals(req.chainShots())
                         && (req.chainGroup() == null || req.chainGroup() == 0))
                 .param("cgroup", req.chainGroup() == null ? 0 : Math.max(0, Math.min(8, req.chainGroup())))
@@ -144,6 +169,9 @@ public class DreamStudio {
         if (hookTitle) created.put("hookTitle", true);
         if (Boolean.TRUE.equals(req.chainShots())) created.put("chainShots", true);
         if (seeded) created.put("idea", DreamIdeaPacks.ref(req.ideaPack(), req.ideaId()));
+        if (Boolean.TRUE.equals(req.pathChoice())) created.put("pathChoice", true);
+        if (cont != null) created.putAll(Map.of("parent", cont.parentId().toString(), "episode", cont.episode(),
+                "path", cont.chosenPath(), "pickedBy", cont.pickSource()));
         dreams.evidence().event(id, null, "create", null, ideaText, created);
         return id;
     }
@@ -180,6 +208,7 @@ public class DreamStudio {
     public List<Map<String, Object>> list() {
         return jdbc.sql("""
                         SELECT d.id, d.idea, d.title, d.look, d.status, d.step, d.message, d.final_asset_id, d.created_at, d.updated_at,
+                               d.episode, d.parent_id,
                                (SELECT p.picture_asset_id FROM dream_shot p WHERE p.dream_short_id = d.id ORDER BY p.ord LIMIT 1) AS thumb_asset_id,
                                COALESCE((SELECT sum(amount_inr) FROM cost_entry c WHERE c.dream_short_id = d.id), 0) AS spent_inr
                         FROM dream_short d ORDER BY d.created_at DESC LIMIT 100
@@ -190,6 +219,10 @@ public class DreamStudio {
     public Map<String, Object> detail(UUID id) {
         Map<String, Object> out = new LinkedHashMap<>(dreams.dream(id));
         out.remove("world_json");
+        out.put("branch_json", out.get("branch_json") == null ? null : out.get("branch_json").toString());
+        out.put("chain", chain(id));
+        out.put("children", jdbc.sql("SELECT id, title, chosen_path, status FROM dream_short WHERE parent_id = :d ORDER BY created_at")
+                .param("d", id).query().listOfRows());
         out.put("scout_json", out.get("scout_json") == null ? null : out.get("scout_json").toString());
         out.put("check_json", out.get("check_json") == null ? null : out.get("check_json").toString());
         out.put("picture_check_json", out.get("picture_check_json") == null ? null : out.get("picture_check_json").toString());
@@ -274,6 +307,69 @@ public class DreamStudio {
     public void stopClips(UUID id) {
         clipProgress.requestStop(id);
         dreams.evidence().event(id, "CLIPS", "stop", null, null, null);
+    }
+
+    /** The owner edits the two path options of the end card; they show at the next finish and the writer never replaces them. */
+    public void setPaths(UUID id, String a, String b) {
+        dreams.setPaths(id, a, b);
+        dreams.evidence().event(id, "FINISH", "paths", null, a + " / " + b, null);
+    }
+
+    /**
+     * "Continue this dream": a new Short, the next episode, down the picked path in the same world. Shot 1 starts from the
+     * parent's last frame (chained-shots machinery); the writer reads the parent's branch memory; settings and the world's
+     * seed are inherited. Picking is a {@link DreamBranches.PathPick}: the owner by hand now, the comment vote later.
+     */
+    @SuppressWarnings("unchecked")
+    public UUID continueDream(UUID parentId, DreamBranches.PathPick pick) {
+        Map<String, Object> p = dreams.dream(parentId);
+        if (!Boolean.TRUE.equals(p.get("path_choice"))) {
+            throw new IllegalStateException("This Short has no path choice: turn on Choose the path for a new Short");
+        }
+        if (!"COMPLETED".equals(p.get("status")) || p.get("final_asset_id") == null || p.get("branch_json") == null) {
+            throw new IllegalStateException("Finish this Short first: its last frame starts the next episode");
+        }
+        String path = DreamBranches.pathOf(p, pick.path());
+        if (path == null || path.isBlank()) {
+            throw new IllegalStateException("Path " + pick.path() + " has no text yet");
+        }
+        Map<String, Object> branch = json.readValue(p.get("branch_json").toString(),
+                new tools.jackson.core.type.TypeReference<Map<String, Object>>() {
+                });
+        Object lastClip = branch.get("lastClipAssetId");
+        if (lastClip == null) {
+            throw new IllegalStateException("The last shot has no clip: redo it first");
+        }
+        Map<String, String> modes = json.readValue(p.get("modes_json").toString(),
+                new tools.jackson.core.type.TypeReference<Map<String, String>>() {
+                });
+        int episode = ((Number) p.get("episode")).intValue() + 1;
+        // Same settings as the parent: same look, length, quality, editing, hook and chain options, path choice stays on.
+        NewDream req = new NewDream(DreamBranches.childIdea(p.get("title"), path, episode), (String) p.get("look"),
+                ((Number) p.get("shot_count")).intValue(), (String) p.get("quality"), "REVIEW", modes,
+                ((Number) p.get("review_minutes")).intValue(), (String) p.get("music_source"), false,
+                (Boolean) p.get("edit_music"), (Boolean) p.get("edit_ambience"), (Boolean) p.get("edit_pacing"),
+                (Boolean) p.get("producer_decides"), (Boolean) p.get("hook_title"), null, (String) p.get("hook_color"),
+                (Boolean) p.get("chain_shots"), null, null, ((Number) p.get("chain_group")).intValue(),
+                (Boolean) p.get("chain_locked"), true);
+        UUID child = create(req, new Continuation(parentId, episode, path, pick.source(), UUID.fromString(lastClip.toString()),
+                ((Number) branch.get("seed")).longValue()));
+        dreams.evidence().event(parentId, null, "continue", null, path,
+                pick.votes() == null ? Map.of("child", child.toString(), "path", pick.path(), "source", pick.source())
+                        : Map.of("child", child.toString(), "path", pick.path(), "source", pick.source(), "votes", pick.votes()));
+        return child;
+    }
+
+    /** The episode chain this Short belongs to, oldest first (episode 1, 2, 3...), following parent links. */
+    public List<Map<String, Object>> chain(UUID id) {
+        return jdbc.sql("""
+                        WITH RECURSIVE up AS (
+                            SELECT id, parent_id, 0 AS depth FROM dream_short WHERE id = :id
+                            UNION ALL SELECT d.id, d.parent_id, up.depth + 1 FROM dream_short d JOIN up ON d.id = up.parent_id
+                              WHERE up.depth < 100)
+                        SELECT d.id, d.episode, d.title, d.chosen_path, d.pick_source, d.status, d.final_asset_id
+                        FROM up JOIN dream_short d ON d.id = up.id ORDER BY d.episode
+                        """).param("id", id).query().listOfRows();
     }
 
     /** The owner edits the hook title (and its colour); it shows at the next finish and the writer never replaces it. */

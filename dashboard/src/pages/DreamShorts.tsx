@@ -61,6 +61,40 @@ function HookCard({ d, onSave }: { d: DreamDetail; onSave: (text: string, color:
   )
 }
 
+/** "Choose the path": the two end-card options (editable), the episode chain, and Continue this dream (owner picks A or B). */
+function PathCard({ d, onSave, onContinue }: { d: DreamDetail; onSave: (a: string, b: string) => void; onContinue: (p: 'A' | 'B') => void }) {
+  const [a, setA] = useState(d.path_a ?? '')
+  const [b, setB] = useState(d.path_b ?? '')
+  const [edited, setEdited] = useState(false)
+  const shownA = edited ? a : d.path_a ?? ''
+  const shownB = edited ? b : d.path_b ?? ''
+  const finished = d.status === 'COMPLETED' && !!d.final_asset_id
+  return (
+    <section className="card">
+      <div className="card-head"><h2>Choose the path</h2><span className="pill">end card, last ~2 s · episode {d.episode}</span></div>
+      {d.chain.length > 1 && <div className="row small" style={{ marginBottom: 8 }}>
+        {d.chain.map((e) => <a key={e.id} href={`#/dream/${e.id}`} className={`pill ${e.id === d.id ? 'b-info' : ''}`}>
+          Episode {e.episode}{e.chosen_path ? ` · ${e.chosen_path}` : ''}{e.pick_source === 'comments' ? ' (comments)' : ''}</a>)}
+      </div>}
+      <div className="row">
+        <label className="small">← A <input value={shownA} placeholder="the door" style={{ width: 160 }}
+          onChange={(e) => { setA(e.target.value); if (!edited) setB(shownB); setEdited(true) }} /></label>
+        <label className="small">B → <input value={shownB} placeholder="the stairs" style={{ width: 160 }}
+          onChange={(e) => { setB(e.target.value); if (!edited) setA(shownA); setEdited(true) }} /></label>
+        <button disabled={!edited} onClick={() => { onSave(a, b); setEdited(false) }}>Save</button>
+        <span style={{ flex: 1 }} />
+        {finished && d.path_a && d.path_b && <>
+          <span className="small">Continue this dream:</span>
+          <button className="primary" onClick={() => { if (window.confirm(`Start episode ${d.episode + 1} down path A: "${d.path_a}"? It starts from this Short's last frame; paid steps ask before spending.`)) onContinue('A') }}>A: {d.path_a}</button>
+          <button className="primary" onClick={() => { if (window.confirm(`Start episode ${d.episode + 1} down path B: "${d.path_b}"? It starts from this Short's last frame; paid steps ask before spending.`)) onContinue('B') }}>B: {d.path_b}</button>
+        </>}
+      </div>
+      {d.children.length > 0 && <p className="small">Continued: {d.children.map((c) => <a key={c.id} href={`#/dream/${c.id}`} style={{ marginRight: 10 }}>{c.title ?? 'new episode'} ({c.chosen_path})</a>)}</p>}
+      <p className="muted small">2-4 words each, written with the shots; your edit is kept when the shots are rewritten and shows at the next finish (Redo from Finish is free).</p>
+    </section>
+  )
+}
+
 function statusBadge(status: string) {
   const cls = status === 'COMPLETED' ? 'b-ok' : status.startsWith('WAITING') ? 'b-warn'
     : status === 'FAILED_WAITING' ? 'b-bad' : status === 'CANCELLED' ? 'b-idle' : 'b-info'
@@ -93,6 +127,7 @@ function DreamHome() {
   const [chain, setChain] = useState(false)
   const [chainGroup, setChainGroup] = useState(0)
   const [locked, setLocked] = useState(false)
+  const [pathChoice, setPathChoice] = useState(false)
   const [ideaRef, setIdeaRef] = useState<{ pack: string; id: string } | null>(null)
   const { data: packs } = usePoll(dreamApi.ideaPacks, 600000)
   const [busy, setBusy] = useState(false)
@@ -107,7 +142,7 @@ function DreamHome() {
     try {
       const r = await dreamApi.create({ idea, look, shots, quality, defaultMode: mode, reviewMinutes: review, music, scout, ...ed,
         ...(hook ? { hookTitle: true, hookText, hookColor } : {}), ...(chain ? { chainShots: true, chainGroup, chainLocked: locked && chainGroup === 0 } : {}),
-        ...(ideaRef ? { ideaPack: ideaRef.pack, ideaId: ideaRef.id } : {}) })
+        ...(ideaRef ? { ideaPack: ideaRef.pack, ideaId: ideaRef.id } : {}), ...(pathChoice ? { pathChoice: true } : {}) })
       window.location.hash = `#/dream/${r.id}`
     } catch (e) {
       setFormError(e instanceof Error ? e.message : String(e))
@@ -149,6 +184,8 @@ function DreamHome() {
             <option value={0}>all shots in one scene</option><option value={2}>pairs (1+2, 3+4...)</option><option value={3}>threes (1+2+3, 4+5+6...)</option></select></label>}
           {chain && chainGroup === 0 && <label className="small" title="One camera path for the whole Short, one world and seed, cleaned last frames">
             <input type="checkbox" checked={locked} onChange={(e) => setLocked(e.target.checked)} /> Locked scene</label>}
+          <label className="small" title="Ends on a two-way choice (end card); a finished Short can be continued down the chosen path as the next episode (off by default)">
+            <input type="checkbox" checked={pathChoice} onChange={(e) => setPathChoice(e.target.checked)} /> Choose the path</label>
           <label className="small">Music <select value={music} onChange={(e) => setMusic(e.target.value as 'bed' | 'lyria')}>
             <option value="bed">Your track (free)</option><option value="lyria">Lyria (≈₹10)</option></select></label>
           <label className="small">Clips <select value={quality} onChange={(e) => setQuality(e.target.value)}>
@@ -172,7 +209,7 @@ function DreamHome() {
             <tbody>{shorts.map((d: DreamSummary) => (
               <tr key={d.id} style={{ cursor: 'pointer' }} onClick={() => { window.location.hash = `#/dream/${d.id}` }}>
                 <td style={{ width: 40 }}>{d.thumb_asset_id && <img src={assetUrl(d.thumb_asset_id)} alt="" style={{ width: 32, borderRadius: 4 }} />}</td>
-                <td><strong>{d.title ?? d.idea}</strong>{d.title && <div className="muted small">{d.idea}</div>}</td>
+                <td><strong>{d.title ?? d.idea}</strong>{d.episode > 1 && <span className="pill" style={{ marginLeft: 6 }}>Ep {d.episode}</span>}{d.title && <div className="muted small">{d.idea}</div>}</td>
                 <td>{statusBadge(d.status)}
                   {d.status === 'WAITING_COST' && (
                     <div><button className="primary small" style={{ marginTop: 6 }}
@@ -266,6 +303,9 @@ function DreamView({ id }: { id: string }) {
       <GpuCard id={id} />
 
       {d.hook_title && <HookCard d={d} onSave={(text, color) => act(() => dreamApi.setHook(id, text, color))} />}
+
+      {d.path_choice && <PathCard d={d} onSave={(a, b) => act(() => dreamApi.setPaths(id, a, b))}
+        onContinue={(p) => act(async () => { const r = await dreamApi.continueDream(id, p); window.location.hash = `#/dream/${r.id}` })} />}
 
       <Timeline d={d} />
 

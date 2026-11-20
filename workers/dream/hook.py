@@ -115,3 +115,43 @@ def apply_hook(src: Path, dst: Path, text: str, width: int, height: int, color: 
     if proc.returncode != 0:
         raise RuntimeError("hook title failed: " + proc.stderr[-1500:])
     return True
+
+
+# ---------------------------------------------------------------------------------------------- "Choose the path" end card
+
+END_SECONDS = 2.0
+END_CENTRE_Y = 0.42     # a little lower than the hook: the question sits mid-frame, still clear of the caption zone
+END_PROMPT = "comment A or B"
+ARROW_A, ARROW_B = "←", "→"   # left / right arrows (Segoe UI has both)
+
+
+def _path_words(text: str) -> str:
+    """One option for the card: upper case, at most 4 words, no ASS control characters."""
+    return " ".join(re.sub(r"[*{}\\]", "", text or "").upper().split()[:4])
+
+
+def end_card_ass(path_a: str, path_b: str, width: int, height: int, length: float, color: str | None = None,
+                 prompt: str = END_PROMPT, seconds: float = END_SECONDS) -> str | None:
+    """The .ass file for the end card over the last `seconds` of a `length`-second Short: WHICH WAY? (big, coloured), the
+    two options with arrows (A left, B right), and a small prompt to comment. Same style, fonts and safe margins as the
+    hook title. None when either option is missing (the card is off)."""
+    a, b = _path_words(path_a), _path_words(path_b)
+    if not a or not b:
+        return None
+    rows = [[("WHICH", False), ("WAY?", True)], [(f"{ARROW_A} A: {a}", False)], [(f"B: {b} {ARROW_B}", False)]]
+    normal, big = font_sizes(rows, width, height)
+    small = max(1, round(normal * 0.62))
+    accent = _colour(color)
+    body = (rf"{{\fs{big}\c{accent}}}WHICH WAY?{{\fs{normal}\c&HFFFFFF&}}\N{ARROW_A} A: {a}\N"
+            rf"B: {b} {ARROW_B}\N{{\fs{small}}}{_path_words(prompt) or END_PROMPT.upper()}")
+    outline, shadow = max(3, normal // 12), max(2, normal // 22)
+    style = (f"Style: End,Segoe UI,{normal},&H00FFFFFF,&H00FFFFFF,&H00101010,&H80000000,-1,0,0,0,100,100,0,0,1,"
+             f"{outline},{shadow},5,{round(width * SIDE_MARGIN)},{round(width * SIDE_MARGIN)},0,1")
+    start = max(0.0, length - seconds)
+    pos = rf"{{\pos({width // 2},{round(height * END_CENTRE_Y)})\fad({FADE_IN_MS},0)}}"
+    return (f"[Script Info]\nScriptType: v4.00+\nPlayResX: {width}\nPlayResY: {height}\nWrapStyle: 2\n\n"
+            "[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, "
+            "Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, "
+            f"MarginL, MarginR, MarginV, Encoding\n{style}\n\n[Events]\n"
+            "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
+            f"Dialogue: 0,{_ts(start)},{_ts(length + 1)},End,,0,0,0,,{pos}{body}\n")

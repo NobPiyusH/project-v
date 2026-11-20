@@ -151,6 +151,11 @@ def start_image(j: dict, chain: bool, made: dict[int, bytes], failed: set[int], 
             return last_frame_png(mp4, clean)
         except Exception as e:  # noqa: BLE001
             raise ChainBroken(f"the last frame of shot {before} could not be read ({e}); retry or redo shot {before}") from e
+    if not j.get("imageUri") and j.get("chainFromUri"):  # a continued episode: shot 1 starts on the previous episode's last frame
+        try:
+            return last_frame_png(get_bytes(j["chainFromUri"]), clean)
+        except Exception as e:  # noqa: BLE001
+            raise ChainBroken(f"the previous episode's last frame could not be read ({e}); retry") from e
     return get_bytes(j["imageUri"])
 
 
@@ -417,7 +422,7 @@ def generate_clips(req: dict) -> dict:
     jobs = []
     for j in req["jobs"]:
         key = f"{video_id[:8]}-{j['shotId'][:8]}-{j['kind']}{j['take']}"
-        jobs.append((j, key, {"id": key, "image": get_bytes(j["imageUri"]) if j.get("imageUri") else None, "prompt": j["prompt"], "width": j["width"],
+        jobs.append((j, key, {"id": key, "image": get_bytes(j["imageUri"]) if j.get("imageUri") else start_image(j, False, {}, set()) if j.get("chainFromUri") and j["shotNumber"] == 1 else None, "prompt": j["prompt"], "width": j["width"],
                               "height": j["height"], "numFrames": j["numFrames"], "seed": j["seed"], "mode": j["mode"],
                               "negative": j.get("negative")}))
     log.info("Starting %d clips for video %s on %d GPU container(s)", len(jobs), video_id, containers)
