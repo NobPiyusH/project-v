@@ -9,6 +9,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
+
+import jakarta.annotation.PostConstruct;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -73,6 +77,37 @@ public class GpuBroker {
         this.clock = clock;
     }
 
+    /**
+     * Rebuilds the open rentals from the unreleased leases after a control-plane restart, so release() still terminates
+     * the pod and books its cost, the wallet counts it, and the next acquire reuses it instead of renting a second pod.
+     */
+    @PostConstruct
+    public synchronized void recover() {
+        List<PodLeases.OpenLease> held;
+        try {
+            held = leases.openForShorts();
+        } catch (RuntimeException e) {
+            log.warn("GPU broker: could not read open leases at startup ({}); the watchdog still covers every studio pod", e.getMessage());
+            return;
+        }
+        for (PodLeases.OpenLease l : held) {
+            GpuProvider p = providers.get(l.provider());
+            if (p == null) {
+                log.warn("GPU broker: open lease {} belongs to unknown provider {}; left to the watchdog", l.podId(), l.provider());
+                continue;
+            }
+            GpuProvider.Instance inst = new GpuProvider.Instance(l.provider(), l.podId(), l.name(), l.hourlyUsd(), l.gpu(),
+                    p.endpointFor(l.podId(), config.port()));
+            open.put(l.dreamShortId(), new Rental(l.dreamShortId(), inst, l.createdAt()));
+            try {
+                leases.heartbeat(l.podId());
+            } catch (RuntimeException e) {
+                log.warn("GPU broker: heartbeat of recovered lease {} failed: {}", l.podId(), e.getMessage());
+            }
+            log.info("GPU broker: recovered open rental {} {} for Short {} after restart", l.provider(), l.podId(), l.dreamShortId());
+        }
+    }
+
     public Optional<Rental> open(UUID shortId) {
         return Optional.ofNullable(open.get(shortId));
     }
@@ -83,6 +118,7 @@ public class GpuBroker {
      * @param workerArgv the pod's job command (the Python worker); wrapped here with the self-stop guard
      * @throws NoGpuAvailableException when no provider in the chain can serve it (the step then waits for the owner)
      */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public synchronized Rental acquire(UUID shortId, String capability, String image, List<String> workerArgv,
                                        Map<String, String> env, String volumeId) {
         return acquire(shortId, capability, image, workerArgv, env, volumeId, Pick.AUTO);
@@ -174,12 +210,22 @@ public class GpuBroker {
                 .toList();
     }
 
+    /**
+     * REQUIRES_NEW: the pod, its lease and its RoutingDecision commit on their own, so a rollback of the caller's
+     * transaction (DreamService writes shots and requests inside one) cannot orphan a running pod.
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public synchronized Rental acquire(UUID shortId, String capability, String image, List<String> workerArgv,
                                        Map<String, String> env, String volumeId, Pick pick) {
         Rental existing = open.get(shortId);
         if (existing != null) {
-            leases.heartbeat(existing.instance().id());
-            return existing;
+            if (!gone(existing)) {
+                leases.heartbeat(existing.instance().id());
+                return existing;
+            }
+            log.warn("GPU broker: pod {} of Short {} is gone (self-stopped or killed); releasing and renting again",
+                    existing.instance().id(), shortId);
+            release(shortId, "pod gone before reuse (self-stopped or killed)");
         }
         GpuProvider.GpuSpec spec = new GpuProvider.GpuSpec(config.gpuPreference(), config.minVramGb(), config.minRamGb(), config.diskGb());
         List<Cand> all = candidates(spec);
@@ -214,7 +260,11 @@ public class GpuBroker {
                 how = "learned from your last picks (you keep choosing it over the cheapest)";
             }
         }
+        boolean unsafe = false;
         for (Cand e : eligible) {
+            if (unsafe) {
+                break;
+            }
             String id = e.id();
             GpuProvider p = e.p();
             GpuProvider.Quote q = e.q();
@@ -227,12 +277,28 @@ public class GpuBroker {
             try {
                 inst = p.create(new GpuProvider.CreateRequest(name, image, config.diskGb(), argv, env, config.port(), volumeId, q));
             } catch (RuntimeException ex) {
-                row.put("skipped", "create failed: " + ex.getMessage());
-                log.warn("GPU broker: {} create failed for Short {}: {}", id, shortId, ex.getMessage());
-                continue;
+                // The call may have failed after the provider created the pod (timeout on the reply): look it up by its
+                // generated name and adopt it before any other create, or it would run unleased and unbooked.
+                GpuProvider.Instance found;
+                try {
+                    found = find(p, name, q);
+                } catch (RuntimeException le) {
+                    row.put("skipped", "create failed (" + ex.getMessage() + ") and the pod list failed (" + le.getMessage()
+                            + "): not renting anywhere else until that is known");
+                    log.warn("GPU broker: {} create failed for Short {} and the pod list failed too; stopping", id, shortId);
+                    unsafe = true;
+                    continue;
+                }
+                if (found == null) {
+                    row.put("skipped", "create failed: " + ex.getMessage());
+                    log.warn("GPU broker: {} create failed for Short {}: {}", id, shortId, ex.getMessage());
+                    continue;
+                }
+                log.warn("GPU broker: {} create reported '{}' but pod {} exists; adopting it", id, ex.getMessage(), found.id());
+                inst = found;
             }
             try {
-                leases.open(id, inst.id(), inst.name(), "Dream Short " + shortId);
+                leases.open(id, inst.id(), inst.name(), "Dream Short " + shortId, shortId, inst.hourlyUsd(), inst.gpu());
             } catch (RuntimeException ex) { // never keep a pod we cannot lease
                 safeTerminate(p, inst.id());
                 row.put("skipped", "lease failed, pod terminated: " + ex.getMessage());
@@ -240,7 +306,11 @@ public class GpuBroker {
             }
             row.put("chosen", true);
             String reason = id + ": " + how + ", $%.2f/h (%d eligible)".formatted(inst.hourlyUsd(), all.stream().filter(Cand::ok).count());
-            records.decision(shortId, capability, considered, id, reason);
+            try {
+                records.decision(shortId, capability, considered, id, reason);
+            } catch (RuntimeException ex) { // the pod is rented and leased; a ledger hiccup must not strand it
+                log.warn("GPU broker: rented pod {} but its RoutingDecision failed: {}", inst.id(), ex.getMessage());
+            }
             Rental r = new Rental(shortId, inst, now);
             open.put(shortId, r);
             log.info("GPU broker: rented {} {} ({}, ${}/h live) for Short {}", id, inst.id(), inst.gpu(), inst.hourlyUsd(), shortId);
@@ -293,7 +363,34 @@ public class GpuBroker {
         return providers.get(r.instance().provider()).status(r.instance().id());
     }
 
+    /** True when the provider says the pod no longer exists. An unreadable status is not "gone". */
+    private boolean gone(Rental r) {
+        GpuProvider p = providers.get(r.instance().provider());
+        if (p == null) {
+            return false;
+        }
+        try {
+            return p.status(r.instance().id()).state() == GpuProvider.State.GONE;
+        } catch (RuntimeException e) {
+            log.warn("GPU broker: status of {} unreadable ({}); keeping the rental", r.instance().id(), e.getMessage());
+            return false;
+        }
+    }
+
+    /** The studio pod with this generated name, if the provider has it (a create whose reply was lost). */
+    private GpuProvider.Instance find(GpuProvider p, String name, GpuProvider.Quote q) {
+        for (GpuProvider.Pod pod : p.listPods()) {
+            if (name.equals(pod.name()) && !"TERMINATED".equalsIgnoreCase(pod.status())) {
+                double hourly = pod.costPerHrUsd() > 0 ? pod.costPerHrUsd() : q.hourlyUsd();
+                return new GpuProvider.Instance(p.provider(), pod.id(), name, hourly, q.gpu().split("\\|")[0],
+                        p.endpointFor(pod.id(), config.port()));
+            }
+        }
+        return null;
+    }
+
     /** Ends the rental: terminate, book the time, release the lease. Safe to call twice. */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public synchronized void release(UUID shortId, String why) {
         Rental r = open.remove(shortId);
         if (r == null) {

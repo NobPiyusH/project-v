@@ -22,6 +22,11 @@ public final class PodBoot {
 
     /** SV_BOOT_00.. (the payload), SV_BOOT_N (how many), SV_PORT, SV_ROOT (where weights and ComfyUI live). */
     public static Map<String, String> env(byte[] workerSource, int port, String root) {
+        return env(workerSource, port, root, null);
+    }
+
+    /** As above; {@code volumeMount} (where the provider mounts the persistent volume) becomes SV_VOLUME when set. */
+    public static Map<String, String> env(byte[] workerSource, int port, String root, String volumeMount) {
         Deflater d = new Deflater(Deflater.BEST_COMPRESSION);
         d.setInput(workerSource);
         d.finish();
@@ -40,6 +45,9 @@ public final class PodBoot {
         env.put("SV_BOOT_N", Integer.toString(n));
         env.put("SV_PORT", Integer.toString(port));
         env.put("SV_ROOT", root);
+        if (volumeMount != null && !volumeMount.isBlank()) {
+            env.put("SV_VOLUME", volumeMount);
+        }
         return env;
     }
 

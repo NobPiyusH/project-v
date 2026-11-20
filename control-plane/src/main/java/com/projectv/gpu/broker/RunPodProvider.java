@@ -177,6 +177,11 @@ public class RunPodProvider implements GpuProvider {
         }
     }
 
+    @Override
+    public String endpointFor(String instanceId, int port) {
+        return proxyUrl(instanceId, port);
+    }
+
     /** RunPod's HTTP proxy address for an exposed port. */
     static String proxyUrl(String podId, int port) {
         return "https://" + podId + "-" + port + ".proxy.runpod.net";

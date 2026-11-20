@@ -69,6 +69,19 @@ NEGATIVE = ("blurry, low quality, low resolution, distorted, warped, morphing, f
 STEPS, SHIFT, SAMPLER = 4, 3.0, "uni_pc_bh2"
 MAX_PIXELS = 1280 * 720
 KEEP_RESULTS = 64
+# The in-pod self-stop guard (com.projectv.gpu.PodSelfStop) terminates the pod when this file is older than the idle
+# limit and the GPU is quiet. Boot (pip, ComfyUI, ~42 GB of weights) is minutes of no GPU use, so the worker keeps it warm.
+HEARTBEAT = os.environ.get("SV_HEARTBEAT", "/tmp/projectv-heartbeat")
+BOOT_BEAT_SECONDS = 30
+
+
+def touch_heartbeat(path: str | None = None) -> None:
+    """Tells the pod's idle guard the worker is alive. Never raises (a missing /tmp must not break a request)."""
+    try:
+        p = Path(path or HEARTBEAT)
+        p.touch()
+    except OSError:
+        pass
 
 
 def log(msg: str) -> None:
@@ -249,6 +262,7 @@ def make_handler(state: State):
             self.wfile.write(data)
 
         def do_GET(self):  # noqa: N802
+            touch_heartbeat()
             path = self.path.split("?")[0].rstrip("/")
             if path in ("/health", "/ready", ""):
                 body = {"ready": state.ready, "phase": state.phase, "error": state.error}
@@ -272,6 +286,7 @@ def make_handler(state: State):
             return self._json(404, {"error": "not found"})
 
         def do_POST(self):  # noqa: N802
+            touch_heartbeat()
             path = self.path.split("?")[0].rstrip("/")
             if path not in ("/clip", "/picture"):
                 return self._json(404, {"error": "not found"})
@@ -519,6 +534,13 @@ class Gpu:
         return data, {"frames": len(frames), "fps": fps}
 
 
+def boot_heartbeat(state: State, interval: float = BOOT_BEAT_SECONDS) -> None:
+    """Keeps the idle guard quiet while booting; stops when boot ends (ready, or failed: a failed pod should die)."""
+    while not state.ready and not state.error:
+        touch_heartbeat()
+        time.sleep(interval)
+
+
 def boot(state: State) -> None:
     try:
         ROOT.mkdir(parents=True, exist_ok=True)
@@ -548,6 +570,8 @@ def main(argv=None) -> int:
         print("dry run OK")
         return 0
     state = State()
+    touch_heartbeat()
+    threading.Thread(target=boot_heartbeat, args=(state,), daemon=True, name="boot-beat").start()
     threading.Thread(target=boot, args=(state,), daemon=True, name="boot").start()
     try:
         server = DualStackServer(("::", PORT), make_handler(state))

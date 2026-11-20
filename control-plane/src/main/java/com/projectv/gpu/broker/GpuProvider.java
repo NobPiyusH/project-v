@@ -52,5 +52,10 @@ public interface GpuProvider extends PodApi {
 
     Instance create(CreateRequest req);
 
+    /** Where the worker on this pod listens (null when the provider cannot say); used to rebuild a rental after a restart. */
+    default String endpointFor(String instanceId, int port) {
+        return null;
+    }
+
     InstanceStatus status(String instanceId);
 }

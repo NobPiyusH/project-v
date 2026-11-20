@@ -9,6 +9,7 @@ import java.util.Map;
 import java.util.zip.Inflater;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class PodBootTest {
@@ -35,5 +36,7 @@ class PodBootTest {
         assertEquals("8000", env.get("SV_PORT"));
         assertEquals("/workspace/data", env.get("SV_ROOT"));
         assertEquals("python", PodBoot.command().get(0));
+        assertFalse(env.containsKey("SV_VOLUME"));
+        assertEquals("/workspace", PodBoot.env(src, 8000, "/workspace/data", "/workspace").get("SV_VOLUME"));
     }
 }
