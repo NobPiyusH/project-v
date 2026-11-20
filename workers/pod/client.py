@@ -28,7 +28,8 @@ class JobFailed(Exception):
 
 
 def _headers(extra: dict | None = None) -> dict:
-    h = {}
+    # RunPod's proxy sits behind Cloudflare, which answers 403 (error 1010) to Python's default "Python-urllib" agent.
+    h = {"User-Agent": "projectv-pod-client/1.0"}
     custom = os.environ.get("POD_AUTH_HEADER", "")
     if ":" in custom:
         k, v = custom.split(":", 1)
