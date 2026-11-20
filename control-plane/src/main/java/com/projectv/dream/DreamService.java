@@ -400,13 +400,13 @@ public class DreamService {
                 + (seed.isPresent() ? DreamIdeaPacks.forWriter(seed.get()) : "")
                 + (scouted == null ? "" : scouted.forWriter());
         java.time.Instant since = java.time.Instant.now();
-        DreamWorld w = llm.call(null, "dream.write", system, user, DreamWorld.class);
+        DreamWorld w = llm.call(null, "dream.write", system, user, DreamWorld.class, briefModel); // Claude when configured (owner 20 Nov 2026), else the Gemini list
         if (w == null || w.shots() == null || w.shots().isEmpty()) {
             throw new IllegalStateException("The writer returned no shots");
         }
         String rewrite = scouted == null ? null : tooSimilar(id, w, scouted);
         if (rewrite != null) { // one rewrite: never copy a Short that already exists
-            DreamWorld again = llm.call(null, "dream.write", system, user + "\nRewrite: " + rewrite, DreamWorld.class);
+            DreamWorld again = llm.call(null, "dream.write", system, user + "\nRewrite: " + rewrite, DreamWorld.class, briefModel);
             if (again != null && again.shots() != null && !again.shots().isEmpty()) {
                 w = again;
             }
