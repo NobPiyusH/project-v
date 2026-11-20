@@ -10,5 +10,3 @@ ALTER TABLE dream_short ADD COLUMN hook_color text;
 ALTER TABLE dream_short ADD COLUMN hook_locked boolean NOT NULL DEFAULT false;
 ALTER TABLE dream_short ADD COLUMN chain_shots boolean NOT NULL DEFAULT false;
 ALTER TABLE dream_short ADD COLUMN idea_ref text;
--- Chained shots make two candidate pictures for shot 1 (it sets the whole world); the owner can swap in the second.
-ALTER TABLE dream_shot ADD COLUMN picture_alt_asset_id uuid REFERENCES asset (id) ON DELETE SET NULL;

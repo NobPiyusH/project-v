@@ -124,6 +124,4 @@ The `architecture` look (clean photo-real city, 2.5 s shots, hard cuts, its own 
 selectable but not in `LOOK_ORDER`, so the Autopilot's daily rotation does not pick it.
 Chaining makes only shot 1's picture (it sets the whole world); the other shots start from the clip before them, so they
 have no picture of their own and no silent fallback: if a last frame can't be read the clip fails and waits for the owner
-(Retry / redo the shot before it). Shot 1 gets TWO candidate pictures (same prompt, other seed; the second is a job
-with the shot id + `~b`, so no worker change): the Shots card shows the second with "Use this one"
-(`POST /api/dream/{id}/shots/{shotId}/use-alt-picture`), which swaps it in and clears that shot's clip.
+(Retry / redo the shot before it). Not built: two candidate pictures for shot 1 (redo shot 1's picture meanwhile).
