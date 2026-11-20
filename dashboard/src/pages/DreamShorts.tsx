@@ -91,6 +91,7 @@ function DreamHome() {
   const [hookText, setHookText] = useState('')
   const [hookColor, setHookColor] = useState('red')
   const [chain, setChain] = useState(false)
+  const [chainGroup, setChainGroup] = useState(0)
   const [ideaRef, setIdeaRef] = useState<{ pack: string; id: string } | null>(null)
   const { data: packs } = usePoll(dreamApi.ideaPacks, 600000)
   const [busy, setBusy] = useState(false)
@@ -104,7 +105,7 @@ function DreamHome() {
     setBusy(true)
     try {
       const r = await dreamApi.create({ idea, look, shots, quality, defaultMode: mode, reviewMinutes: review, music, scout, ...ed,
-        ...(hook ? { hookTitle: true, hookText, hookColor } : {}), ...(chain ? { chainShots: true } : {}),
+        ...(hook ? { hookTitle: true, hookText, hookColor } : {}), ...(chain ? { chainShots: true, chainGroup } : {}),
         ...(ideaRef ? { ideaPack: ideaRef.pack, ideaId: ideaRef.id } : {}) })
       window.location.hash = `#/dream/${r.id}`
     } catch (e) {
@@ -142,7 +143,9 @@ function DreamHome() {
           {hook && <label className="small">Big word <select value={hookColor} onChange={(e) => setHookColor(e.target.value)}>
             {HOOK_COLOURS.map((c) => <option key={c} value={c}>{c}</option>)}</select></label>}
           <label className="small" title="Each clip starts from the last frame of the one before: one continuous camera move. Clips then run one at a time (off by default)">
-            <input type="checkbox" checked={chain} onChange={(e) => setChain(e.target.checked)} /> Chain shots (one continuous scene)</label>
+            <input type="checkbox" checked={chain} onChange={(e) => setChain(e.target.checked)} /> Chain shots</label>
+          {chain && <label className="small">Chain <select value={chainGroup} onChange={(e) => setChainGroup(Number(e.target.value))}>
+            <option value={0}>all shots in one scene</option><option value={2}>pairs (1+2, 3+4...)</option><option value={3}>threes (1+2+3, 4+5+6...)</option></select></label>}
           <label className="small">Music <select value={music} onChange={(e) => setMusic(e.target.value as 'bed' | 'lyria')}>
             <option value="bed">Your track (free)</option><option value="lyria">Lyria (≈₹10)</option></select></label>
           <label className="small">Clips <select value={quality} onChange={(e) => setQuality(e.target.value)}>

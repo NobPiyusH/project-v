@@ -119,3 +119,22 @@ def test_modal_chain_calls_one_clip_at_a_time_in_order(monkeypatch):
     assert not stopped and [c["gpuSeconds"] for c in clips] == [9.0, 9.0]
     assert images == [b"pic:s3://b/pic1.png", b"last:mp4-k1"]
     assert C.cold_starts(clips) == 1
+
+
+def test_chain_groups_of_two_chain_1_to_2_and_3_to_4_but_cut_between(monkeypatch):
+    assert [C.continues(n, True, 2) for n in (1, 2, 3, 4, 5)] == [False, True, False, True, False]
+    assert [C.continues(n, True, 0) for n in (1, 2, 3)] == [False, True, True]       # 0 = one chain through the Short
+    assert [C.continues(n, False, 2) for n in (1, 2)] == [False, False]
+    sent = _pod_setup(monkeypatch)
+    jobs = [_job(n) for n in (1, 2, 3, 4)]
+    clips, _ = C._pod({"gpuUrl": "https://g.example/", "chain": True, "chainGroup": 2, "jobs": jobs}, "http://x", "v")
+    assert [c["error"] for c in clips] == [None] * 4
+    assert sent == [b"pic:s3://b/pic1.png", b"last:mp4-1", b"pic:s3://b/pic3.png", b"last:mp4-3"]
+
+
+def test_a_failed_group_start_does_not_break_the_next_group(monkeypatch):
+    sent = _pod_setup(monkeypatch, fail_shot=1)
+    jobs = [_job(n) for n in (1, 2, 3, 4)]
+    clips, _ = C._pod({"gpuUrl": "https://g.example/", "chain": True, "chainGroup": 2, "jobs": jobs}, "http://x", "v")
+    assert clips[0]["uri"] is None and clips[1]["uri"] is None and "shot 1 has no clip" in clips[1]["error"]
+    assert clips[2]["uri"] and clips[3]["uri"], "shots 3+4 are a separate chain with their own picture"

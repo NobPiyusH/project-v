@@ -23,20 +23,30 @@ public class DreamStudio {
     /**
      * @param hookTitle  burn a big two-colour hook title into the first ~2 s (default off); {@code hookText} is the owner's own
      *                   (blank = the idea pack's, else the writer's); {@code hookColor} the big word's colour (default red)
-     * @param chainShots each clip starts from the last frame of the one before: one continuous camera move (default off)
+     * @param chainShots each clip starts from the last frame of the one before: one continuous camera move (default off);
+     *                   {@code chainGroup} = chains of N shots (2: shots 1+2 chained, 3+4 chained...), null/0 = one chain
      * @param ideaPack   with {@code ideaId}: start from a curated concept seed (idea pack) instead of researching; the Scout is skipped
      */
     public record NewDream(String idea, String look, Integer shots, String quality, String defaultMode,
                            Map<String, String> modes, Integer reviewMinutes, String music, Boolean scout,
                            Boolean musicEdit, Boolean ambience, Boolean pacing, Boolean producerDecides,
                            Boolean hookTitle, String hookText, String hookColor, Boolean chainShots, String ideaPack,
-                           String ideaId) {
+                           String ideaId, Integer chainGroup) {
         /** What the Autopilot passes: all of the above, and the three new options off. */
         public NewDream(String idea, String look, Integer shots, String quality, String defaultMode,
                         Map<String, String> modes, Integer reviewMinutes, String music, Boolean scout,
                         Boolean musicEdit, Boolean ambience, Boolean pacing, Boolean producerDecides) {
             this(idea, look, shots, quality, defaultMode, modes, reviewMinutes, music, scout, musicEdit, ambience, pacing,
-                    producerDecides, null, null, null, null, null, null);
+                    producerDecides, null, null, null, null, null, null, null);
+        }
+
+        public NewDream(String idea, String look, Integer shots, String quality, String defaultMode,
+                        Map<String, String> modes, Integer reviewMinutes, String music, Boolean scout,
+                        Boolean musicEdit, Boolean ambience, Boolean pacing, Boolean producerDecides,
+                        Boolean hookTitle, String hookText, String hookColor, Boolean chainShots, String ideaPack,
+                        String ideaId) {
+            this(idea, look, shots, quality, defaultMode, modes, reviewMinutes, music, scout, musicEdit, ambience, pacing,
+                    producerDecides, hookTitle, hookText, hookColor, chainShots, ideaPack, ideaId, null);
         }
 
         /** The dashboard's form (the Producer follows the global trust switch). */
@@ -97,10 +107,12 @@ public class DreamStudio {
         jdbc.sql("""
                         INSERT INTO dream_short (id, idea, look, shot_count, quality, modes_json, review_minutes, status, step, workflow_id,
                                                  music_source, scout, edit_music, edit_ambience, edit_pacing, producer_decides,
-                                                 hook_title, hook_text, hook_color, hook_locked, chain_shots, idea_ref)
+                                                 hook_title, hook_text, hook_color, hook_locked, chain_shots, idea_ref,
+                                                 chain_group)
                         VALUES (:id, :idea, :look, :n, :q, CAST(:modes AS jsonb), :r, 'RUNNING', 'SCOUT', :wf, :music, :scout,
-                                :em, :ea, :ep, :pd, :ht, :htext, :hcol, :hlock, :chain, :iref)
+                                :em, :ea, :ep, :pd, :ht, :htext, :hcol, :hlock, :chain, :iref, :cgroup)
                         """)
+                .param("cgroup", req.chainGroup() == null ? 0 : Math.max(0, Math.min(8, req.chainGroup())))
                 .param("ht", hookTitle).param("htext", hookText)
                 .param("hcol", req.hookColor() == null || req.hookColor().isBlank() ? null : req.hookColor().strip())
                 .param("hlock", hookText != null).param("chain", Boolean.TRUE.equals(req.chainShots()))

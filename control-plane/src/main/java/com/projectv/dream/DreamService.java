@@ -134,6 +134,13 @@ public class DreamService {
             + "to another place or time of day. In each shot's scene describe what the camera sees at the END of that "
             + "shot; in its motion describe the same continuous movement (direction and speed) carrying on.";
 
+    /** Writer structure for chains of N shots: inside a group one unbroken take, between groups a new view of the same world. */
+    static final String CHAIN_GROUP_STRUCTURE = "Invent %d shots in the same world, in scenes of %d shots each. The %d shots of a scene "
+            + "are ONE continuous camera move: each starts exactly where the previous one ended (its first frame IS the previous "
+            + "shot's last frame) and the camera keeps travelling the same way. A new scene (the next group) begins as a fresh view "
+            + "of the same world: another angle, place or moment, with a cut from the scene before. In each shot's scene "
+            + "describe what the camera sees at the END of that shot; in its motion the same continuous movement carrying on.";
+
     /** Asked of the writer only when the Short has a hook title (setting off = the prompt is unchanged). */
     static final String HOOK_FIELD = ", \"hook\": a 3 to 6 word hook title for the first two seconds, upper case, written to make "
             + "a viewer curious about THIS Short (a surprising claim about the place, not a description), with exactly ONE key "
@@ -371,6 +378,7 @@ public class DreamService {
         int count = ((Number) d.get("shot_count")).intValue();
         Scouted scouted = scouted(d);
         boolean chain = Boolean.TRUE.equals(d.get("chain_shots"));
+        int group = ((Number) d.get("chain_group")).intValue();
         boolean hook = Boolean.TRUE.equals(d.get("hook_title"));
         var seed = DreamIdeaPacks.resolve((String) d.get("idea_ref"));
         // The owner's chosen Scout angle replaces the look's shot structure (19 Nov: as a user-message note it lost
@@ -379,7 +387,8 @@ public class DreamService {
         String structure = scouted != null && scouted.chosen() != null
                 ? ("Invent %d shots that are consecutive moments of ONE idea the owner chose, in the same place, flowing "
                 + "into each other: %s - %s").formatted(count, scouted.chosen().title(), scouted.chosen().idea())
-                : chain ? CHAIN_STRUCTURE.formatted(count) : look.structure().formatted(count);
+                : chain ? (group > 0 ? CHAIN_GROUP_STRUCTURE.formatted(count, group, group) : CHAIN_STRUCTURE.formatted(count))
+                : look.structure().formatted(count);
         String system = """
                 You are the writer of a short, wordless, music-led vertical video (YouTube Shorts / Reels) for a channel
                 about dreams and impossible places. %s Every shot must be a fresh, specific image (not generic).
@@ -655,10 +664,11 @@ public class DreamService {
         List<KeyframeJob> jobs = new ArrayList<>();
         Set<String> wanted = only == null ? null : new HashSet<>(only);
         boolean chain = chained(id);
+        int group = chain ? chainGroup(id) : 0;
         for (Map<String, Object> s : shots(id)) {
             String shotId = s.get("id").toString();
-            if (chain && ((Number) s.get("ord")).intValue() > 0) {
-                continue; // chained: every clip starts from the last frame of the one before, so only shot 1 needs a picture
+            if (continues(chain, group, ((Number) s.get("ord")).intValue())) {
+                continue; // chained: this clip starts from the last frame of the one before, so it needs no picture
             }
             if (wanted == null ? s.get("picture_asset_id") != null : !wanted.contains(shotId)) {
                 continue;
@@ -763,7 +773,7 @@ public class DreamService {
             route(id, "DREAM_CLIPS", "video.i2v.dream", POD, inr);
             var session = this.gpu.session(id);
             return new ClipRequest(storageId(id), wanApp, wanClass, publicUrl, jobs, 1, sec, inr, "pod", null, null, 0,
-                    session.url(), session.readyTimeoutSeconds(), chained(id));
+                    session.url(), session.readyTimeoutSeconds(), chained(id), chainGroup(id));
         }
         double gpu = gpuSeconds(jobs, (String) dream(id).get("quality"));
         BigDecimal inr = pricing.modalGpuInr("H100", gpu);
@@ -772,12 +782,22 @@ public class DreamService {
         // One GPU, clips in turn: the ~2 min start-up + model load is paid once for the whole Short. When the AI
         // Producer runs this Short by itself, the GPU stays warm a little after each batch so its redo skips a start-up.
         return new ClipRequest(storageId(id), wanApp, wanClass, publicUrl, jobs, 1, gpu, inr.setScale(2, RoundingMode.HALF_UP),
-                "wan", null, null, holdSeconds(id), null, 0, chained(id));
+                "wan", null, null, holdSeconds(id), null, 0, chained(id), chainGroup(id));
     }
 
     /** Whether this Short chains its shots (each clip starts from the last frame of the one before). Off by default. */
     boolean chained(UUID id) {
         return Boolean.TRUE.equals(dream(id).get("chain_shots"));
+    }
+
+    /** Chain length: 0 = one chain through the whole Short, N = chains of N shots (2: shots 1+2 and 3+4 chained). */
+    int chainGroup(UUID id) {
+        return ((Number) dream(id).get("chain_group")).intValue();
+    }
+
+    /** Whether shot {@code ord} (0-based) continues from the clip before it, instead of starting from a picture of its own. */
+    static boolean continues(boolean chain, int group, int ord) {
+        return chain && ord > 0 && (group <= 0 || ord % group != 0);
     }
 
     /** Warm-redo hold for this Short's clip batches: only when the AI Producer decides on it by itself (autopilot). */
@@ -803,13 +823,15 @@ public class DreamService {
         String negative = fixes.isEmpty() ? null
                 : fixes.stream().map(RedoStopRule.Cause::negative).collect(java.util.stream.Collectors.joining(", "));
         boolean chain = Boolean.TRUE.equals(d.get("chain_shots"));
+        int group = chain ? ((Number) d.get("chain_group")).intValue() : 0;
         String before = null; // the clip of the shot before this one, when it already exists (chained shots)
         for (Map<String, Object> s : shots(id)) {
             String shotId = s.get("id").toString();
             String clipBefore = before;
             before = (String) s.get("clip_uri");
             int ord = ((Number) s.get("ord")).intValue();
-            if (s.get("picture_uri") == null && !(chain && ord > 0)) {
+            boolean continues = continues(chain, group, ord);
+            if (s.get("picture_uri") == null && !continues) {
                 continue; // (a chained shot after the first has no picture of its own: it starts from the clip before)
             }
             if (wanted == null ? s.get("clip_asset_id") != null : !wanted.contains(shotId)) {
@@ -818,7 +840,7 @@ public class DreamService {
             int take = ((Number) s.get("clip_takes")).intValue() + 1;
             jobs.add(new ClipJob(shotId, ((Number) s.get("ord")).intValue() + 1, take, "dream", "fast",
                     (String) s.get("picture_uri"), fixPrompt.isEmpty() ? (String) s.get("motion_prompt") : s.get("motion_prompt") + fixPrompt, size[0], size[1], frames,
-                    Math.abs((long) shotId.hashCode()) + take, negative, chain ? clipBefore : null));
+                    Math.abs((long) shotId.hashCode()) + take, negative, continues ? clipBefore : null));
         }
         return jobs;
     }

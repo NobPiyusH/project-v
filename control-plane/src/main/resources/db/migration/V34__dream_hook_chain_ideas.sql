@@ -9,4 +9,6 @@ ALTER TABLE dream_short ADD COLUMN hook_text text;
 ALTER TABLE dream_short ADD COLUMN hook_color text;
 ALTER TABLE dream_short ADD COLUMN hook_locked boolean NOT NULL DEFAULT false;
 ALTER TABLE dream_short ADD COLUMN chain_shots boolean NOT NULL DEFAULT false;
+--  chain_group: 0 = one chain through the whole Short; N = chains of N shots (2 = shots 1+2 chained, 3+4 chained, ...).
+ALTER TABLE dream_short ADD COLUMN chain_group int NOT NULL DEFAULT 0;
 ALTER TABLE dream_short ADD COLUMN idea_ref text;

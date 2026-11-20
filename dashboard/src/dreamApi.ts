@@ -43,7 +43,7 @@ export interface NewDream {
   scout: boolean
   musicEdit: boolean; ambience: boolean; pacing: boolean
   // optional, all off by default: hook title card, chained shots, and a concept seed from an idea pack (skips the Scout)
-  hookTitle?: boolean; hookText?: string; hookColor?: string; chainShots?: boolean; ideaPack?: string; ideaId?: string
+  hookTitle?: boolean; hookText?: string; hookColor?: string; chainShots?: boolean; chainGroup?: number; ideaPack?: string; ideaId?: string
 }
 
 export interface IdeaPackIdea { id: string; title: string; concept: string; hook: string; camera: string; palette: string }

@@ -238,6 +238,25 @@ class DreamHookChainIdeasTest {
     }
 
     @Test
+    void chainsOfTwoPairShotsOneWithTwoAndThreeWithFourAndEachPairStartsFromAPicture() {
+        assertEquals(List.of(false, true, false, true, false),
+                List.of(0, 1, 2, 3, 4).stream().map(o -> DreamService.continues(true, 2, o)).toList());
+        assertEquals(List.of(false, true, true), List.of(0, 1, 2).stream().map(o -> DreamService.continues(true, 0, o)).toList());
+        assertFalse(DreamService.continues(false, 2, 1));
+
+        UUID s4 = shot(dream, 3);
+        jdbc.sql("UPDATE dream_short SET chain_shots = true, chain_group = 2 WHERE id = :d").param("d", dream).update();
+        media(shot1, "s3://b/p1.png", "s3://b/c1.mp4");
+        media(shot3, "s3://b/p3.png", null); // shots 2 and 4 have no picture: they continue from the clip before
+        var jobs = dreams.clipJobs(dream, null);
+        assertEquals(List.of(2, 3, 4), jobs.stream().map(j -> j.shotNumber()).toList());
+        assertEquals("s3://b/c1.mp4", jobs.get(0).chainFromUri());
+        assertNull(jobs.get(1).chainFromUri(), "shot 3 starts a new pair, from its own picture");
+        assertEquals("s3://b/p3.png", jobs.get(1).imageUri());
+        assertNull(jobs.get(2).chainFromUri(), "shot 4 continues from shot 3, made in this batch");
+    }
+
+    @Test
     void eachChainedClipKeepsItsOwnCostEntryAndAFailedOneIsReportedForTheOwner() {
         jdbc.sql("UPDATE dream_short SET chain_shots = true WHERE id = :d").param("d", dream).update();
         for (UUID s : List.of(shot1, shot2, shot3)) {
