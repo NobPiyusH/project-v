@@ -108,6 +108,39 @@ def _report(base: str, video_id: str, waiting: list, clips: list[dict], progress
     _beat({"done": len(clips), "total": total})
 
 
+class ChainBroken(RuntimeError):
+    """A chained clip can't start because the shot before it failed in this batch."""
+
+
+def last_frame_png(mp4: bytes) -> bytes:
+    """The last frame of a clip as a PNG: the start image of the next chained clip (one continuous camera move)."""
+    with workdir("lastframe") as d:
+        src, out = Path(d) / "prev.mp4", Path(d) / "last.png"
+        src.write_bytes(mp4)
+        # -update 1 overwrites the one output file with every frame, so the file left is the last frame
+        run_ffmpeg(["-sseof", "-1", "-i", str(src), "-update", "1", "-frames:v", "100000", "-q:v", "1", str(out)])
+        return out.read_bytes()
+
+
+def start_image(j: dict, chain: bool, made: dict[int, bytes], failed: set[int]) -> bytes:
+    """The image clip `j` starts from. Chained: the last frame of the shot before it (made in this batch, or the clip
+    the control plane named in chainFromUri when that shot is not part of the batch); the shot's own picture otherwise,
+    and for the first shot. A shot whose predecessor failed in this batch can't be chained: ChainBroken."""
+    if chain and j["shotNumber"] > 1:
+        before = j["shotNumber"] - 1
+        if before in failed:
+            raise ChainBroken(f"shot {before} has no clip, so shot {j['shotNumber']} can't continue from it; redo shot {before} first")
+        mp4 = made.get(before)
+        if mp4 is None and j.get("chainFromUri"):
+            mp4 = get_bytes(j["chainFromUri"])
+        if mp4 is not None:
+            try:
+                return last_frame_png(mp4)
+            except Exception as e:  # noqa: BLE001 - fall back to the shot's own picture rather than lose the clip
+                log.warning("Last frame of shot %s unavailable (%s); using the shot's own picture", before, e)
+    return get_bytes(j["imageUri"])
+
+
 def _parallel(wan, progress, base: str, video_id: str, jobs: list) -> tuple[list[dict], bool]:
     """One Modal call per clip on up to 4 GPUs."""
     pending = {key: (j, key, wan.generate_one.spawn(payload)) for j, key, payload in jobs}  # one entry per take
@@ -196,6 +229,29 @@ def _sequential(wan, progress, base: str, video_id: str, jobs: list) -> tuple[li
     return clips, stopped
 
 
+def _chained(wan, progress, base: str, video_id: str, jobs: list, chain_flag: bool = True) -> tuple[list[dict], bool]:
+    """Chained clips on Modal: one call per clip, in order, each starting from the last frame of the one before. The
+    GPU container stays warm between the calls (a cold start is reported per clip, so the ledger books it right)."""
+    clips: list[dict] = []
+    made: dict[int, bytes] = {}
+    failed: set[int] = set()
+    for i, (j, key, payload) in enumerate(jobs):
+        if _stop_requested(base, video_id):
+            clips += [_stopped(x) for x, _, _ in jobs[i:]]
+            return clips, True
+        _report(base, video_id, [(x, k) for x, k, _ in jobs[i:]], clips, progress, len(jobs))
+        try:
+            payload = {**payload, "image": start_image(j, chain_flag, made, failed)}
+            r = wan.generate_one.remote(payload)
+        except Exception as e:  # noqa: BLE001 - one failed clip never fails the batch
+            r = {"mp4": None, "seconds": 0, "error": f"{type(e).__name__}: {e}"[:600]}
+        made = {j["shotNumber"]: r["mp4"]} if r.get("mp4") else {}
+        if not r.get("mp4"):
+            failed.add(j["shotNumber"])
+        clips.append(_clip(video_id, j, r))
+    return clips, False
+
+
 OMNI_WORKERS = 3  # clips in flight at once on Gemini Omni (each ~40 s)
 
 
@@ -272,13 +328,22 @@ def _pod(req: dict, base: str, video_id: str) -> tuple[list[dict], bool]:
     beat = podc.lease_beat(base, video_id, _beat)
     clips: list[dict] = []
     jobs = [(j, f"{j['shotId'][:8]}-{j['kind']}{j['take']}") for j in req["jobs"]]
+    chain = bool(req.get("chain"))  # clips already run in turn on the pod; chaining feeds each one's last frame to the next
+    made: dict[int, bytes] = {}
+    failed: set[int] = set()
     for i, (j, _) in enumerate(jobs):
         if _stop_requested(base, video_id):
             clips += [_stopped(x) for x, _ in jobs[i:]]
             return clips, True
         _report(base, video_id, jobs[i:], clips, {}, len(jobs))
         fps = 16
-        payload = {"image": base64.b64encode(get_bytes(j["imageUri"])).decode(), "prompt": j["prompt"],
+        try:
+            image = start_image(j, chain, made, failed)
+        except Exception as e:  # noqa: BLE001 - ChainBroken or an unreadable picture fails this clip only
+            failed.add(j["shotNumber"])
+            clips.append(_clip(video_id, j, {"mp4": None, "seconds": 0, "error": f"{type(e).__name__}: {e}"[:600]}))
+            continue
+        payload = {"image": base64.b64encode(image).decode(), "prompt": j["prompt"],
                    "negative": j.get("negative"), "seed": int(j["seed"]), "frames": int(j["numFrames"]), "fps": fps,
                    "width": int(j["width"]), "height": int(j["height"])}
         try:
@@ -287,6 +352,10 @@ def _pod(req: dict, base: str, video_id: str) -> tuple[list[dict], bool]:
                  "mode": j["mode"], "coldStart": i == 0}
         except Exception as e:  # noqa: BLE001 - one failed clip never fails the batch
             r = {"mp4": None, "seconds": 0, "error": f"{type(e).__name__}: {e}"[:600]}
+        if chain:
+            made = {j["shotNumber"]: r["mp4"]} if r.get("mp4") else {}
+            if not r.get("mp4"):
+                failed.add(j["shotNumber"])
         clips.append(_clip(video_id, j, r))
     return clips, False
 
@@ -329,7 +398,8 @@ def generate_clips(req: dict) -> dict:
         _post(f"{base}/api/internal/clips/progress", {"videoId": video_id, "clips": [], "finished": True})
         return {"clips": clips, "containers": 1, "stopped": stopped, "coldStarts": 0}
     progress = modal.Dict.from_name("projectv-progress", create_if_missing=True)
-    containers = max(1, min(4, int(req.get("containers") or 4), len(req["jobs"]) or 1))
+    chain = bool(req.get("chain"))
+    containers = 1 if chain else max(1, min(4, int(req.get("containers") or 4), len(req["jobs"]) or 1))
     wan = _wan(req, containers)
     jobs = []
     for j in req["jobs"]:
@@ -338,7 +408,7 @@ def generate_clips(req: dict) -> dict:
                               "height": j["height"], "numFrames": j["numFrames"], "seed": j["seed"], "mode": j["mode"],
                               "negative": j.get("negative")}))
     log.info("Starting %d clips for video %s on %d GPU container(s)", len(jobs), video_id, containers)
-    run = _sequential if containers == 1 else _parallel
+    run = _chained if chain else _sequential if containers == 1 else _parallel
     clips, stopped = run(wan, progress, base, video_id, jobs)
     _post(f"{base}/api/internal/clips/progress", {"videoId": video_id, "clips": [], "finished": True})
     return {"clips": clips, "containers": containers if jobs else 0, "stopped": stopped, "coldStarts": cold_starts(clips)}

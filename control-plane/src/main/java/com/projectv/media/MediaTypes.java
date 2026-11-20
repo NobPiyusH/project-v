@@ -181,10 +181,15 @@ public final class MediaTypes {
      * @param negative  extra Wan negative-prompt terms (the Producer's stop-rule fix for a recurring cause), or null
      */
     public record ClipJob(String shotId, int shotNumber, int take, String kind, String mode, String imageUri, String prompt,
-                          int width, int height, int numFrames, long seed, String negative) {
+                          int width, int height, int numFrames, long seed, String negative, String chainFromUri) {
+        public ClipJob(String shotId, int shotNumber, int take, String kind, String mode, String imageUri, String prompt,
+                       int width, int height, int numFrames, long seed, String negative) {
+            this(shotId, shotNumber, take, kind, mode, imageUri, prompt, width, height, numFrames, seed, negative, null);
+        }
+
         public ClipJob(String shotId, int shotNumber, int take, String kind, String mode, String imageUri, String prompt,
                        int width, int height, int numFrames, long seed) {
-            this(shotId, shotNumber, take, kind, mode, imageUri, prompt, width, height, numFrames, seed, null);
+            this(shotId, shotNumber, take, kind, mode, imageUri, prompt, width, height, numFrames, seed, null, null);
         }
     }
 
@@ -194,7 +199,16 @@ public final class MediaTypes {
     public record ClipRequest(String videoId, String modalApp, String modalClass, String progressUrl, List<ClipJob> jobs,
                               int containers, double estimateGpuSeconds, java.math.BigDecimal estimateInr,
                               String provider, String resolution, String omniModel, int holdSeconds,
-                              String gpuUrl, int readyTimeoutSeconds) {
+                              String gpuUrl, int readyTimeoutSeconds, boolean chain) {
+        /** {@code chain}: clips run one at a time, each starting from the last frame of the shot before it (Dream Shorts). */
+        public ClipRequest(String videoId, String modalApp, String modalClass, String progressUrl, List<ClipJob> jobs,
+                           int containers, double estimateGpuSeconds, java.math.BigDecimal estimateInr,
+                           String provider, String resolution, String omniModel, int holdSeconds,
+                           String gpuUrl, int readyTimeoutSeconds) {
+            this(videoId, modalApp, modalClass, progressUrl, jobs, containers, estimateGpuSeconds, estimateInr, provider,
+                    resolution, omniModel, holdSeconds, gpuUrl, readyTimeoutSeconds, false);
+        }
+
         public ClipRequest(String videoId, String modalApp, String modalClass, String progressUrl, List<ClipJob> jobs,
                            int containers, double estimateGpuSeconds, java.math.BigDecimal estimateInr,
                            String provider, String resolution, String omniModel, int holdSeconds) {
