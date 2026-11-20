@@ -14,6 +14,7 @@ from temporalio import activity
 from workers.common import MEDIA_TIMEOUT_MS, gemini, log, put_bytes, usage_dict, with_models
 
 MODAL_BATCH = 8  # images per Modal call; heartbeat between batches
+POD_PROVIDER = "gpu_pod"  # same value as DreamService.POD (Java); the job provider for pictures made on the rented GPU pod
 
 
 def _references(query: str) -> tuple[list, list[str]]:
@@ -107,7 +108,7 @@ def generate_keyframes(req: dict) -> dict:
                                     "seconds": round(r["seconds"], 2), "usage": {}, "error": None})
                 activity.heartbeat(len(results))
 
-        pod_seconds = _pod_pictures(req, [j for j in jobs if j["provider"] == "pod"], results)
+        pod_seconds = _pod_pictures(req, [j for j in jobs if j["provider"] == POD_PROVIDER], results)
 
         for f in concurrent.futures.as_completed(gem_futures):
             results.append(f.result())
@@ -136,10 +137,10 @@ def _pod_pictures(req: dict, jobs: list[dict], results: list[dict]) -> float:
             uri = put_bytes(f"videos/{req['videoId']}/keyframes/{j['shotId']}-{j['attempt']}.png", png, "image/png")
             s = float(info.get("seconds") or 0)
             seconds += s
-            results.append({"shotId": j["shotId"], "uri": uri, "provider": "pod", "model": "Tongyi-MAI/Z-Image-Turbo",
+            results.append({"shotId": j["shotId"], "uri": uri, "provider": POD_PROVIDER, "model": "Tongyi-MAI/Z-Image-Turbo",
                             "seed": int(j.get("seed") or 0), "seconds": round(s, 2), "usage": {}, "error": None})
         except Exception as e:  # noqa: BLE001 - one bad shot must not lose the batch
-            results.append({"shotId": j["shotId"], "uri": None, "provider": "pod", "error": f"{type(e).__name__}: {e}"[:500]})
+            results.append({"shotId": j["shotId"], "uri": None, "provider": POD_PROVIDER, "error": f"{type(e).__name__}: {e}"[:500]})
         activity_beat(len(results))
     return seconds
 

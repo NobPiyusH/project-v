@@ -17,6 +17,7 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -35,6 +36,11 @@ class GpuBrokerTest {
         final List<String> created = new ArrayList<>();
         final List<String> terminated = new ArrayList<>();
         List<String> lastArgv;
+        State state = State.RUNNING;
+        boolean createThenFail = false;
+        boolean listFails = false;
+        boolean listFailsAfterCreate = false;
+        final List<Pod> pods = new ArrayList<>();
 
         Fake(String id) {
             this.id = id;
@@ -43,7 +49,13 @@ class GpuBrokerTest {
         public String provider() { return id; }
         public boolean configured() { return configured; }
         public boolean enabledByDefault() { return true; }
-        public List<Pod> listPods() { return List.of(); }
+        public List<Pod> listPods() {
+            if (listFails) {
+                throw new IllegalStateException("list down");
+            }
+            return pods;
+        }
+        public String endpointFor(String instanceId, int port) { return "https://" + instanceId + ":" + port; }
         public void terminate(String podId) { terminated.add(podId); }
         public Quote quote(GpuSpec spec) {
             return stock ? new Quote(id, true, "HIGH", "NVIDIA GeForce RTX 4090|SECURE", hourly, "")
@@ -55,9 +67,15 @@ class GpuBrokerTest {
             }
             created.add(req.name());
             lastArgv = req.bootArgv();
-            return new Instance(id, id + "-pod-" + created.size(), req.name(), hourly, "4090", "https://x");
+            String podId = id + "-pod-" + created.size();
+            if (createThenFail) { // the provider made the pod, the reply timed out
+                pods.add(new Pod(podId, req.name(), "RUNNING", hourly, NOW, NOW));
+                listFails = listFailsAfterCreate;
+                throw new IllegalStateException("read timed out");
+            }
+            return new Instance(id, podId, req.name(), hourly, "4090", "https://x");
         }
-        public InstanceStatus status(String instanceId) { return new InstanceStatus(State.RUNNING, null, "RUNNING"); }
+        public InstanceStatus status(String instanceId) { return new InstanceStatus(state, null, state.name()); }
     }
 
     static class Leases implements PodLeases {
@@ -66,6 +84,12 @@ class GpuBrokerTest {
         public void open(String provider, String podId, String name, String purpose) {
             map.put(podId, new Lease(podId, purpose, NOW, null));
         }
+        final List<OpenLease> shorts = new ArrayList<>();
+        public void open(String provider, String podId, String name, String purpose, UUID short_, double hourly, String gpu) {
+            open(provider, podId, name, purpose);
+            shorts.add(new OpenLease(podId, provider, name, short_, hourly, gpu, NOW));
+        }
+        public List<OpenLease> openForShorts() { return shorts.stream().filter(l -> !released.contains(l.podId())).toList(); }
         public void heartbeat(String podId) { }
         public void release(String podId) { released.add(podId); }
         public Optional<Lease> find(String podId) { return Optional.ofNullable(map.get(podId)); }
@@ -182,6 +206,67 @@ class GpuBrokerTest {
         GpuBroker.Rental again = acquire(b);
         assertEquals(a.instance().id(), again.instance().id());
         assertEquals(1, runpod.created.size());
+    }
+
+    @Test
+    void gonePodIsReleasedAndRentedAgainInsteadOfReused() {
+        GpuBroker b = broker(Clock.fixed(NOW, ZoneOffset.UTC));
+        GpuBroker.Rental first = acquire(b);
+        runpod.state = GpuProvider.State.GONE; // the pod self-stopped (idle guard) or was killed
+        GpuBroker.Rental second = acquire(b);
+        assertNotEquals(first.instance().id(), second.instance().id());
+        assertEquals(2, runpod.created.size());
+        assertEquals(List.of(first.instance().id()), leases.released, "the dead rental is closed and booked");
+        assertEquals(1, records.costs.size());
+    }
+
+    @Test
+    void unreadableStatusKeepsTheRental() {
+        runpod = new Fake("runpod") {
+            @Override
+            public InstanceStatus status(String id) {
+                throw new IllegalStateException("api blip");
+            }
+        };
+        GpuBroker b = broker(Clock.fixed(NOW, ZoneOffset.UTC));
+        GpuBroker.Rental first = acquire(b);
+        assertEquals(first.instance().id(), acquire(b).instance().id());
+        assertEquals(1, runpod.created.size());
+    }
+
+    @Test
+    void rentalsComeBackAfterARestartSoReleaseStillTerminatesAndBooks() {
+        GpuBroker b = broker(Clock.fixed(NOW, ZoneOffset.UTC));
+        GpuBroker.Rental r = acquire(b);
+        GpuBroker restarted = broker(Clock.fixed(NOW.plusSeconds(3600), ZoneOffset.UTC)); // same leases, empty memory
+        assertFalse(restarted.open(shortId).isPresent());
+        restarted.recover();
+        assertEquals(r.instance().id(), restarted.open(shortId).orElseThrow().instance().id());
+        assertEquals(r.instance().id(), acquire(restarted).instance().id(), "reused, not a second pod");
+        assertEquals(1, runpod.created.size());
+        restarted.release(shortId, "Short done");
+        assertEquals(List.of(r.instance().id()), runpod.terminated);
+        assertEquals(List.of("runpod|1.0|0.5"), records.costs, "one hour at the live rate, from the lease's creation time");
+    }
+
+    @Test
+    void createTimeoutAdoptsThePodTheProviderMadeInsteadOfRentingAnother() {
+        runpod.createThenFail = true;
+        GpuBroker b = broker(Clock.fixed(NOW, ZoneOffset.UTC));
+        GpuBroker.Rental r = acquire(b);
+        assertEquals("runpod-pod-1", r.instance().id());
+        assertTrue(jarvis.created.isEmpty(), "no second pod anywhere");
+        assertEquals(1, runpod.created.size());
+        assertNotNull(leases.map.get("runpod-pod-1"), "adopted pod is leased");
+    }
+
+    @Test
+    void createFailureWithUnreadablePodListStopsInsteadOfRentingElsewhere() {
+        runpod.createThenFail = true;
+        runpod.listFailsAfterCreate = true;
+        GpuBroker b = broker(Clock.fixed(NOW, ZoneOffset.UTC));
+        assertThrows(GpuBroker.NoGpuAvailableException.class, () -> acquire(b));
+        assertTrue(jarvis.created.isEmpty() && modal.created.isEmpty());
     }
 
     static class Tick extends Clock {

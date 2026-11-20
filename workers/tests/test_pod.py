@@ -146,3 +146,68 @@ def test_copy_tree_plain_copies_contents_and_follows_links(tmp_path):
     S.copy_tree_plain(src, tmp_path / "out")
     assert (tmp_path / "out" / "a.txt").read_text() == "a"
     assert (tmp_path / "out" / "sub" / "link.txt").read_text() == "blob"
+
+
+def test_keyframes_activity_pod_picture_job(monkeypatch):
+    """Java marks pod picture jobs provider 'gpu_pod' (DreamService.POD): they must reach the pod, not be dropped."""
+    from workers.activities import keyframes as K
+
+    monkeypatch.setattr(K, "put_bytes", lambda key, data, ct: f"s3://b/{key}")
+    monkeypatch.setattr(K, "activity_beat", lambda d: None)
+    monkeypatch.setattr(client, "lease_beat", lambda *a, **k: None)
+    sent = []
+    monkeypatch.setattr(client, "run", lambda url, kind, payload, ready, beat=None: (sent.append((url, kind, payload)) or (b"png", {"seconds": 9})))
+    job = {"shotId": "s1", "attempt": 1, "provider": "gpu_pod", "prompt": "a dream", "width": 768, "height": 1344, "seed": 4}
+    out = K.generate_keyframes.__wrapped__({"videoId": "v", "gpuUrl": "https://g.example/", "jobs": [job]}) \
+        if hasattr(K.generate_keyframes, "__wrapped__") else None
+    if out is None:
+        results: list = []
+        secs = K._pod_pictures({"videoId": "v", "gpuUrl": "https://g.example/"}, [job], results)
+        out = {"results": results, "podGpuSeconds": secs}
+    assert K.POD_PROVIDER == "gpu_pod"
+    assert sent and sent[0][0] == "https://g.example" and sent[0][1] == "picture"
+    r = out["results"][0]
+    assert r["uri"].endswith("s1-1.png") and r["provider"] == "gpu_pod" and r["error"] is None
+    assert out["podGpuSeconds"] == 9
+
+
+def test_activity_filter_keeps_gpu_pod_jobs(monkeypatch):
+    from workers.activities import keyframes as K
+
+    seen = []
+    monkeypatch.setattr(K, "_pod_pictures", lambda req, jobs, results: (seen.extend(jobs) or 0.0))
+    fn = getattr(K.generate_keyframes, "__wrapped__", K.generate_keyframes)
+    fn({"videoId": "v", "jobs": [{"shotId": "a", "provider": "gpu_pod"}, {"shotId": "b", "provider": "pod"}]})
+    assert [j["shotId"] for j in seen] == ["a"]
+
+
+def test_worker_touches_heartbeat_on_requests_and_boot(tmp_path, monkeypatch, live_worker):
+    hb = tmp_path / "hb"
+    monkeypatch.setattr(S, "HEARTBEAT", str(hb))
+    state, base = live_worker
+    state.ready = True
+    assert not hb.exists()
+    urllib.request.urlopen(base + "/health", timeout=5).read()
+    assert hb.exists()
+    hb.unlink()
+    S.touch_heartbeat()
+    assert hb.exists()
+    hb.unlink()
+    st = S.State()
+    st.ready = True  # boot finished: the loop must exit without touching
+    S.boot_heartbeat(st, interval=0)
+    assert not hb.exists()
+    st2 = S.State()
+    t = threading.Thread(target=S.boot_heartbeat, args=(st2, 0.01), daemon=True)
+    t.start()
+    import time
+    time.sleep(0.1)
+    assert hb.exists()
+    st2.error = "x"
+    t.join(2)
+    assert not t.is_alive()
+
+
+def test_heartbeat_path_matches_java_guard():
+    java = (__import__("pathlib").Path(__file__).parents[2] / "control-plane/src/main/java/com/projectv/gpu/PodSelfStop.java").read_text()
+    assert f'HEARTBEAT = "{S.HEARTBEAT}"' in java

@@ -29,6 +29,8 @@ public class PodWatchdog {
                          List<Action> actions, List<String> warnings, String error) {
     }
 
+    static final long ORPHAN_BOOK_MIN_SECONDS = 600;
+
     private final PodApi api;
     private final PodLeases leases;
     private final PodEvents events;
@@ -128,6 +130,7 @@ public class PodWatchdog {
     private Action act(PodApi.Pod pod, String reason, Instant now) {
         if (limits.dryRun()) {
             log.warn("GPU watchdog DRY RUN: would terminate {} pod {} ({}): {}", api.provider(), pod.id(), pod.name(), reason);
+            bookOrphan(pod, reason, now);
             return new Action(pod.id(), pod.name(), reason, false, null);
         }
         try {
@@ -140,6 +143,10 @@ public class PodWatchdog {
         log.warn("GPU watchdog: terminated {} pod {} ({}): {}", api.provider(), pod.id(), pod.name(), reason);
         try {
             Instant billedFrom = pod.startedAt() != null ? pod.startedAt() : pod.createdAt();
+            Instant booked = events.lastOrphanBooking(pod.id()).orElse(null); // dry-run sweeps already booked up to here
+            if (booked != null && (billedFrom == null || booked.isAfter(billedFrom))) {
+                billedFrom = booked;
+            }
             double hours = billedFrom == null ? 0 : Math.max(0, Duration.between(billedFrom, now).toSeconds() / 3600.0);
             events.terminated(api.provider(), pod, reason, hours, hours * pod.costPerHrUsd());
             leases.release(pod.id());
@@ -147,6 +154,24 @@ public class PodWatchdog {
             log.warn("GPU watchdog: pod {} terminated but its ledger/evidence row failed: {}", pod.id(), e.getMessage());
         }
         return new Action(pod.id(), pod.name(), reason, true, null);
+    }
+
+    /** Dry-run leaves the pod running, so its cost would never reach the ledger: book it in steps (rule 6). */
+    private void bookOrphan(PodApi.Pod pod, String reason, Instant now) {
+        try {
+            Instant from = events.lastOrphanBooking(pod.id()).orElse(pod.startedAt() != null ? pod.startedAt() : pod.createdAt());
+            if (from == null) {
+                return;
+            }
+            long seconds = Duration.between(from, now).toSeconds();
+            if (seconds < ORPHAN_BOOK_MIN_SECONDS) {
+                return;
+            }
+            double hours = seconds / 3600.0;
+            events.orphanBilled(api.provider(), pod, reason, hours, hours * pod.costPerHrUsd());
+        } catch (RuntimeException e) {
+            log.warn("GPU watchdog: could not book the running cost of orphan pod {}: {}", pod.id(), e.getMessage());
+        }
     }
 
     /**

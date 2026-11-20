@@ -32,6 +32,9 @@ public class DreamGpu {
     public record Session(String url, int readyTimeoutSeconds) {
     }
 
+    /** Where RunPod mounts a network/global volume by default (not yet confirmed on a live pod: see the runbook). */
+    static final String VOLUME_MOUNT = "/workspace";
+
     private final GpuBroker broker;
     private final org.springframework.jdbc.core.simple.JdbcClient jdbc;
     private final PreferenceStore prefs;
@@ -100,7 +103,7 @@ public class DreamGpu {
     /** Opens (or returns) the Short's pod. Throws when no provider can serve (the step then waits for the owner). */
     public Session session(UUID dreamId) {
         GpuBroker.Rental r = broker.acquire(dreamId, "video.i2v.dream", image, PodBoot.command(),
-                PodBoot.env(worker(), port, "/workspace/data"), volumeId, pick(dreamId));
+                PodBoot.env(worker(), port, "/workspace/data", volumeId == null ? null : VOLUME_MOUNT), volumeId, pick(dreamId));
         return new Session(r.instance().endpoint(), readyTimeoutMinutes * 60);
     }
 
@@ -123,6 +126,9 @@ public class DreamGpu {
         boolean manual = "manual".equalsIgnoreCase(mode);
         if (!manual && !"auto".equalsIgnoreCase(mode)) {
             throw new IllegalArgumentException("mode must be auto or manual");
+        }
+        if (manual && (choice == null || choice.isBlank())) {
+            throw new IllegalArgumentException("manual mode needs a choice (an option key from the list)");
         }
         if (isOpen(dreamId) && (manual != pick(dreamId).manual() || (manual && !choice.equals(pick(dreamId).choice())))) {
             throw new IllegalStateException("This Short already has a rented GPU; the choice applies to the next rental (after Retry)");

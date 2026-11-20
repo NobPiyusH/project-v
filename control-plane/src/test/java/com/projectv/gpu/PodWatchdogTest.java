@@ -203,6 +203,31 @@ class PodWatchdogTest {
         assertDoesNotThrow(() -> w.checkCanStart(0.7));
     }
 
+    @Test
+    void dryRunStillBooksTheRunningCostOfAnOrphanInStepsAndTheRealKillBooksOnlyTheRest() {
+        List<String> booked = new ArrayList<>();
+        java.util.concurrent.atomic.AtomicReference<Instant> last = new java.util.concurrent.atomic.AtomicReference<>();
+        PodEvents ev = new PodEvents() {
+            public void terminated(String p, PodApi.Pod pod, String reason, double hours, double usd) {
+                booked.add("kill|" + hours);
+            }
+            public java.util.Optional<Instant> lastOrphanBooking(String id) { return java.util.Optional.ofNullable(last.get()); }
+            public void orphanBilled(String p, PodApi.Pod pod, String reason, double hours, double usd) {
+                booked.add("orphan|" + hours);
+                last.set(NOW);
+            }
+        };
+        pods(pod("orphan", "projectv-orphan", 60, 0.6)); // no lease, 60 min old: past the grace period
+        GpuPodLimits dry = new GpuPodLimits("projectv-", 120, 15, 10, 2, 2.0, true);
+        new PodWatchdog(api("k"), leases, ev, dry, CLOCK).sweep();
+        assertEquals(List.of("orphan|1.0"), booked);
+        assertTrue(deleted.isEmpty(), "dry-run kills nothing");
+        new PodWatchdog(api("k"), leases, ev, dry, CLOCK).sweep();
+        assertEquals(List.of("orphan|1.0"), booked, "the same instant is not booked twice");
+        new PodWatchdog(api("k"), leases, ev, new GpuPodLimits("projectv-", 120, 15, 10, 2, 2.0, false), CLOCK).sweep();
+        assertEquals(List.of("orphan|1.0", "kill|0.0"), booked, "the real kill books only what dry-run had not");
+    }
+
     /** In-memory leases. */
     static class FakeLeases implements PodLeases {
         final Map<String, Instant> beats = new HashMap<>();

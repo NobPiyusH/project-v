@@ -50,5 +50,13 @@ each with a TODO naming what it needs (key, API shape).
 3. When the step reaches MUSIC / FINISH, or the Short completes / is cancelled / fails to "waiting for owner": `GpuBroker.release`
    terminates the pod and books ONE CostEntry (lifetime x live rate, provider id e.g. `runpod`). No per-job entries.
 4. The worker pings `/api/internal/gpu/{shortId}/heartbeat` so an active pod is never idle to the watchdog.
-Known limits: open rentals are in memory (a control-plane restart forgets the pod; the watchdog ends it after the idle limit);
-the control plane must run where `../workers/pod/server.py` resolves (`POD_WORKER_FILE` overrides).
+After a control-plane restart the broker rebuilds its open rentals from `gpu_pod_lease` (V33 stores the Short, live rate and GPU), so release still terminates and books; a pod found GONE on reuse is released and rented again.
+The control plane must run where `../workers/pod/server.py` resolves (`POD_WORKER_FILE` overrides).
+
+## Review-fix follow-ups (documented, not built)
+- Live check of the RunPod create body (`createBody`, `SV_VOLUME` mount `/workspace`, `cmd` exec form): needs a real pod and the owner's yes. Not run.
+- Warm-up (`DreamGpu.warm`) rents the pod before the owner approves the clip/picture cost.
+- The wallet counts finished rentals only, not pods still open.
+- The pod's HTTP proxy port is unauthenticated (anyone with the pod URL can submit jobs); add a token header before wider use.
+- A pod idle >15 min (e.g. a long Review/Manual wait) self-terminates by design; the next `acquire` notices (status GONE), books it, and rents again (boot ~15 min).
+- The dry-run watchdog books an orphan pod's running cost every ~10 min (`gpu_pod_event.kind = orphan_billed`); the real kill books only the remainder.
