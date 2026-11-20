@@ -54,8 +54,8 @@ class DreamServicePersistenceTest {
         var json = JsonMapper.builder().build();
         Router router = new Router(jdbc, json, budget, pricing);
         dreams = new DreamService(jdbc, json, null, new AssetStore(jdbc), pricing, budget, router, new ClipProgress(),
-                "projectv-zimage", "ZImage", "projectv-wan", "Wan", "http://127.0.0.1:8080", BigDecimal.ZERO, 3.5, "", "lyria-3.5",
-                "s3://projectv/music-beds/my track.m4a", "gemini-3.6-flash", "claude:claude-sonnet-5-5", true);
+                new DreamSettings("projectv-zimage", "ZImage", "projectv-wan", "Wan", "http://127.0.0.1:8080", BigDecimal.ZERO, 3.5, "", "lyria-3.5",
+                "s3://projectv/music-beds/my track.m4a", "gemini-3.6-flash", "claude:claude-sonnet-5-5", true));
         jdbc.sql("""
                         INSERT INTO provider (id, name, kind, capabilities_json, config_json, enabled)
                         VALUES ('local_laptop', 'Laptop', 'local', CAST('["ffmpeg"]' AS jsonb), CAST('{}' AS jsonb), true)

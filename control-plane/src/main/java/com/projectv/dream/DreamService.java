@@ -269,31 +269,13 @@ public class DreamService {
 
     /** Modal route (the default): what every existing caller and test uses. */
     public DreamService(JdbcClient jdbc, ObjectMapper json, Llm llm, AssetStore assets, Pricing pricing, BudgetGuard budget,
-                        Router router, com.projectv.video.ClipProgress clipProgress, String zimageApp, String zimageClass,
-                        String wanApp, String wanClass, String publicUrl, BigDecimal autoApproveInr, double shotSeconds,
-                        String musicDir, String musicModel, String musicBed, String listenModel, String briefModel,
-                        boolean qualityCheck) {
-        this(jdbc, json, llm, assets, pricing, budget, router, clipProgress, zimageApp, zimageClass, wanApp, wanClass,
-                publicUrl, autoApproveInr, shotSeconds, musicDir, musicModel, musicBed, listenModel, briefModel,
-                qualityCheck, null);
+                        Router router, com.projectv.video.ClipProgress clipProgress, DreamSettings settings) {
+        this(jdbc, json, llm, assets, pricing, budget, router, clipProgress, settings, null);
     }
 
     @org.springframework.beans.factory.annotation.Autowired
     public DreamService(JdbcClient jdbc, ObjectMapper json, Llm llm, AssetStore assets, Pricing pricing, BudgetGuard budget,
-                        Router router, com.projectv.video.ClipProgress clipProgress,
-                        @Value("${projectv.modal.zimage-app:projectv-zimage}") String zimageApp,
-                        @Value("${projectv.modal.zimage-class:ZImage}") String zimageClass,
-                        @Value("${projectv.video.modal-app:projectv-wan}") String wanApp,
-                        @Value("${projectv.video.modal-class:Wan}") String wanClass,
-                        @Value("${projectv.public-url:http://127.0.0.1:8080}") String publicUrl,
-                        @Value("${projectv.dream.auto-approve-inr:0}") BigDecimal autoApproveInr,
-                        @Value("${projectv.dream.shot-seconds:3.5}") double shotSeconds,
-                        @Value("${projectv.dream.music-dir:}") String musicDir,
-                        @Value("${projectv.models.music:lyria-3.5}") String musicModel,
-                        @Value("${projectv.dream.music-bed:}") String musicBed,
-                        @Value("${projectv.models.vision:gemini-3.6-flash}") String listenModel,
-                        @Value("${projectv.models.story:claude:claude-sonnet-5-5}") String briefModel,
-                        @Value("${projectv.dream.quality-check:true}") boolean qualityCheck,
+                        Router router, com.projectv.video.ClipProgress clipProgress, DreamSettings settings,
                         DreamGpu gpu) {
         this.jdbc = jdbc;
         this.json = json;
@@ -303,20 +285,20 @@ public class DreamService {
         this.budget = budget;
         this.router = router;
         this.clipProgress = clipProgress;
-        this.zimageApp = zimageApp;
-        this.zimageClass = zimageClass;
-        this.wanApp = wanApp;
-        this.wanClass = wanClass;
-        this.publicUrl = publicUrl;
-        this.autoApproveInr = autoApproveInr;
-        this.shotSeconds = shotSeconds;
-        this.musicDir = musicDir;
-        this.musicModel = musicModel;
-        this.musicBed = musicBed;
-        this.listenModel = listenModel;
+        this.zimageApp = settings.zimageApp();
+        this.zimageClass = settings.zimageClass();
+        this.wanApp = settings.wanApp();
+        this.wanClass = settings.wanClass();
+        this.publicUrl = settings.publicUrl();
+        this.autoApproveInr = settings.autoApproveInr();
+        this.shotSeconds = settings.shotSeconds();
+        this.musicDir = settings.musicDir();
+        this.musicModel = settings.musicModel();
+        this.musicBed = settings.musicBed();
+        this.listenModel = settings.listenModel();
         this.evidence = new DreamEvidence(jdbc, json);
-        this.briefModel = briefModel;
-        this.qualityCheck = qualityCheck;
+        this.briefModel = settings.briefModel();
+        this.qualityCheck = settings.qualityCheck();
         this.gpu = gpu != null && gpu.enabled() ? gpu : null;
     }
 
