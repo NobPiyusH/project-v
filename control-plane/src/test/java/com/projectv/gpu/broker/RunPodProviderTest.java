@@ -108,7 +108,10 @@ class RunPodProviderTest {
         assertTrue(createdBody.contains("\"name\":\"projectv-runpod-abc\""));
         assertTrue(createdBody.contains("\"cloud\":\"SECURE\""));
         assertTrue(createdBody.contains("\"cmd\":[\"bash\",\"-c\",\"guard\"]"));
+        assertTrue(createdBody.contains("\"mounts\":{\"global\":[{"));
         assertTrue(createdBody.contains("\"volumeId\":\"vol1\""));
+        assertTrue(createdBody.contains("\"path\":\"/workspace\""));
+        assertEquals(createdBody.indexOf("\"volumeId\""), createdBody.lastIndexOf("\"volumeId\""), "volumeId appears once, inside mounts");
         assertThrows(IllegalArgumentException.class, () -> p.create(new GpuProvider.CreateRequest("other-pod", "img", 80,
                 List.of("x"), Map.of(), 8000, null, q)));
     }
