@@ -650,6 +650,23 @@ public class DreamService {
 
     // ------------------------------------------------------------------------------------------- PICTURES
 
+    /** A picture job whose shot id ends with this is the second candidate of that shot (chained Shorts; no worker change needed). */
+    static final String ALT_SUFFIX = "~b";
+
+    /** The owner prefers the second candidate of a shot's picture: it becomes the picture (its old clip is stale). */
+    @Transactional
+    public void useAltPicture(UUID id, UUID shotId) {
+        int n = jdbc.sql("""
+                        UPDATE dream_shot SET picture_asset_id = picture_alt_asset_id, picture_alt_asset_id = picture_asset_id,
+                               clip_asset_id = NULL, updated_at = now()
+                        WHERE id = :s AND dream_short_id = :d AND picture_alt_asset_id IS NOT NULL
+                        """).param("s", shotId).param("d", id).update();
+        if (n == 0) {
+            throw new IllegalStateException("This shot has no second picture to use");
+        }
+        staleFinal(id);
+    }
+
     @Transactional
     public KeyframeRequest pictureRequest(UUID id, List<String> only, String notes) {
         List<KeyframeJob> jobs = new ArrayList<>();
@@ -671,6 +688,10 @@ public class DreamService {
             // One seed for the whole Short (owner, 19 Nov: the shelter changed shape every shot); a redo moves it on.
             jobs.add(new KeyframeJob(shotId, attempt, gpu != null ? POD : ZIMAGE, prompt, 768, 1344, "9:16", "1K", null,
                     Math.abs((long) id.hashCode()) + attempt - 1));
+            if (chain) { // second candidate for the picture that sets the whole world (same prompt, other seed)
+                jobs.add(new KeyframeJob(shotId + ALT_SUFFIX, attempt, gpu != null ? POD : ZIMAGE, prompt, 768, 1344, "9:16", "1K",
+                        null, Math.abs((long) id.hashCode()) + attempt - 1 + 7919));
+            }
         }
         if (gpu != null) {
             if (jobs.isEmpty()) {
@@ -700,7 +721,18 @@ public class DreamService {
             if (job == null) {
                 continue;
             }
-            UUID shotId = UUID.fromString(o.shotId());
+            boolean alt = o.shotId().endsWith(ALT_SUFFIX);
+            UUID shotId = UUID.fromString(alt ? o.shotId().substring(0, o.shotId().length() - ALT_SUFFIX.length()) : o.shotId());
+            if (alt) { // the second candidate never fails the step: it is only offered next to the first
+                if (o.uri() != null) {
+                    UUID altAsset = assets.create(new NewAsset(null, "image", o.uri(), "image/png", job.width(), job.height(), null,
+                            job.provider(), Objects.toString(o.model(), "Tongyi-MAI/Z-Image-Turbo"), job.prompt(), o.seed(),
+                            AssetStore.LICENCE_ZIMAGE, true));
+                    jdbc.sql("UPDATE asset SET dream_short_id = :d WHERE id = :a").param("d", id).param("a", altAsset).update();
+                    jdbc.sql("UPDATE dream_shot SET picture_alt_asset_id = :a WHERE id = :s").param("a", altAsset).param("s", shotId).update();
+                }
+                continue;
+            }
             if (o.uri() == null) {
                 errors.add(o.error());
                 jdbc.sql("UPDATE dream_shot SET error = :e, updated_at = now() WHERE id = :s").param("e", o.error()).param("s", shotId).update();
@@ -726,7 +758,8 @@ public class DreamService {
             throw new IllegalStateException("No pictures were made: " + String.join(" | ", errors.stream().filter(Objects::nonNull).toList()));
         }
         staleFinal(id);
-        return "%d/%d pictures made (Z-Image%s)%s.".formatted(ok, req.jobs().size(), gpu != null ? " on a rented pod" : "",
+        return "%d/%d pictures made (Z-Image%s)%s.".formatted(ok, req.jobs().stream().filter(j -> !j.shotId().endsWith(ALT_SUFFIX)).count(),
+                gpu != null ? " on a rented pod" : "",
                 errors.isEmpty() ? "" : "; " + errors.size() + " failed: " + errors.getFirst());
     }
 

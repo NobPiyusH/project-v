@@ -297,6 +297,12 @@ function DreamView({ id }: { id: string }) {
                 : s.picture_asset_id
                   ? <img src={assetUrl(s.picture_asset_id)} alt={s.scene} style={{ width: '100%', borderRadius: 6 }} />
                   : <div className="muted small" style={{ aspectRatio: '9/16', display: 'grid', placeItems: 'center', background: 'var(--surface-2)', borderRadius: 6 }}>No picture yet</div>}
+              {s.picture_alt_asset_id && (
+                <div className="small" style={{ marginTop: 6 }}>
+                  <img src={assetUrl(s.picture_alt_asset_id)} alt="Second picture" style={{ width: '50%', borderRadius: 6, display: 'block' }} />
+                  <button className="small" style={{ marginTop: 4 }} title="Use the second picture instead (the clips are made again from it)"
+                    onClick={() => void act(() => dreamApi.useAltPicture(d.id, s.id))}>Use this one</button>
+                </div>)}
               {progress.get(s.id) && progress.get(s.id) !== 'done' && <span className="badge b-info">{progress.get(s.id)}</span>}
               <p className="small" style={{ margin: '6px 0 0' }}>{s.scene}</p>
               {s.error && <p className="error small">{s.error}</p>}

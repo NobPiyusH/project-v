@@ -73,6 +73,12 @@ public class DreamController {
         return DreamIdeaPacks.packs();
     }
 
+    /** Use the second candidate picture of a shot (chained Shorts make two for shot 1). */
+    @PostMapping("/{id}/shots/{shotId}/use-alt-picture")
+    public void useAltPicture(@PathVariable UUID id, @PathVariable UUID shotId) {
+        studio.useAltPicture(id, shotId);
+    }
+
     public record HookBody(String text, String color) {
     }
 

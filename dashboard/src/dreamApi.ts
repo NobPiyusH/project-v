@@ -12,7 +12,7 @@ export interface DreamSummary {
 
 export interface DreamShot {
   id: string; ord: number; scene: string; picture_prompt: string; motion_prompt: string
-  picture_asset_id: string | null; clip_asset_id: string | null; picture_takes: number; clip_takes: number
+  picture_asset_id: string | null; picture_alt_asset_id?: string | null; clip_asset_id: string | null; picture_takes: number; clip_takes: number
   error: string | null
 }
 
@@ -84,6 +84,7 @@ export const dreamApi = {
   list: () => call<DreamSummary[]>('GET', ''),
   get: (id: string) => call<DreamDetail>('GET', `/${id}`),
   ideaPacks: () => call<IdeaPack[]>('GET', '/idea-packs'),
+  useAltPicture: (id: string, shotId: string) => call<void>('POST', `/${id}/shots/${shotId}/use-alt-picture`),
   setHook: (id: string, text: string, color?: string) => call<void>('POST', `/${id}/hook`, { text, color }),
   create: (d: NewDream) => call<{ id: string }>('POST', '', d),
   approve: (id: string, step: DreamStep) => call<void>('POST', `/${id}/steps/${step}/approve`),

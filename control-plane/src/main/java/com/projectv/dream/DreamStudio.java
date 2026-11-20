@@ -170,7 +170,7 @@ public class DreamStudio {
         out.put("check_json", out.get("check_json") == null ? null : out.get("check_json").toString());
         out.put("picture_check_json", out.get("picture_check_json") == null ? null : out.get("picture_check_json").toString());
         out.put("shots", jdbc.sql("""
-                        SELECT id, ord, scene, picture_prompt, motion_prompt, picture_asset_id, clip_asset_id, picture_takes,
+                        SELECT id, ord, scene, picture_prompt, motion_prompt, picture_asset_id, picture_alt_asset_id, clip_asset_id, picture_takes,
                                clip_takes, error FROM dream_shot WHERE dream_short_id = :d ORDER BY ord
                         """).param("d", id).query().listOfRows());
         out.put("costs", jdbc.sql("""
@@ -250,6 +250,12 @@ public class DreamStudio {
     public void stopClips(UUID id) {
         clipProgress.requestStop(id);
         dreams.evidence().event(id, "CLIPS", "stop", null, null, null);
+    }
+
+    /** Swap in the second candidate picture of a shot (chained Shorts); its clip must be made again. */
+    public void useAltPicture(UUID id, UUID shotId) {
+        dreams.useAltPicture(id, shotId);
+        dreams.evidence().event(id, "PICTURES", "alt-picture", List.of(shotId.toString()), null, null);
     }
 
     /** The owner edits the hook title (and its colour); it shows at the next finish and the writer never replaces it. */

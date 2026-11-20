@@ -238,6 +238,28 @@ class DreamHookChainIdeasTest {
     }
 
     @Test
+    void shotOneGetsTwoCandidatePicturesAndTheOwnerCanSwapInTheSecond() {
+        var job = new com.projectv.media.MediaTypes.KeyframeJob(shot1.toString(), 1, "modal_zimage", "p", 768, 1344, "9:16", "1K", null, 1L);
+        var altJob = new com.projectv.media.MediaTypes.KeyframeJob(shot1 + DreamService.ALT_SUFFIX, 1, "modal_zimage", "p", 768, 1344,
+                "9:16", "1K", null, 2L);
+        var req = new com.projectv.media.MediaTypes.KeyframeRequest(dream.toString(), null, "a", "b", List.of(job, altJob));
+        String said = dreams.savePictures(dream, req, new com.projectv.media.MediaTypes.KeyframeResult(List.of(
+                new com.projectv.media.MediaTypes.KeyframeOutput(shot1.toString(), "s3://b/first.png", "modal_zimage", "z", 1L, 5.0, null, null, List.of()),
+                new com.projectv.media.MediaTypes.KeyframeOutput(shot1 + DreamService.ALT_SUFFIX, "s3://b/second.png", "modal_zimage", "z", 2L, 5.0, null, null, List.of())), 10));
+        assertTrue(said.startsWith("1/1 pictures made"), said);
+        assertEquals("s3://b/first.png", dreams.shots(dream).getFirst().get("picture_uri"));
+        assertEquals(1, jdbc.sql("SELECT count(*) FROM dream_shot WHERE id = :d AND picture_alt_asset_id IS NOT NULL").param("d", shot1)
+                .query(Integer.class).single());
+        jdbc.sql("UPDATE dream_shot SET clip_asset_id = :a WHERE id = :s").param("a", asset("s3://b/c.mp4")).param("s", shot1).update();
+
+        dreams.useAltPicture(dream, shot1);
+        var row = dreams.shots(dream).getFirst();
+        assertEquals("s3://b/second.png", row.get("picture_uri"));
+        assertNull(row.get("clip_asset_id"), "the old clip came from the other picture: it must be made again");
+        assertThrows(IllegalStateException.class, () -> dreams.useAltPicture(dream, shot2), "no second picture on shot 2");
+    }
+
+    @Test
     void eachChainedClipKeepsItsOwnCostEntryAndAFailedOneIsReportedForTheOwner() {
         jdbc.sql("UPDATE dream_short SET chain_shots = true WHERE id = :d").param("d", dream).update();
         for (UUID s : List.of(shot1, shot2, shot3)) {
