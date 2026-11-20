@@ -51,6 +51,8 @@ public class DreamService {
 
     static final String ZIMAGE = "modal_zimage";
     static final String WAN = "modal_wan";
+    /** The rented-pod route's provider id (pictures and clips): config/providers.yaml, docs/plans/m3-gpu-router.md. */
+    static final String POD = "gpu_pod";
     static final String LYRIA = "gemini_lyria";
     /** Provenance provider for pieces of the owner's music bed (cut free on the laptop). */
     static final String BED = "owner_music_bed";
@@ -205,7 +207,20 @@ public class DreamService {
     private final DreamEvidence evidence;
     private final String briefModel;
     private final boolean qualityCheck;
+    private final DreamGpu gpu; // null on the Modal route (the default)
 
+    /** Modal route (the default): what every existing caller and test uses. */
+    public DreamService(JdbcClient jdbc, ObjectMapper json, Llm llm, AssetStore assets, Pricing pricing, BudgetGuard budget,
+                        Router router, com.projectv.video.ClipProgress clipProgress, String zimageApp, String zimageClass,
+                        String wanApp, String wanClass, String publicUrl, BigDecimal autoApproveInr, double shotSeconds,
+                        String musicDir, String musicModel, String musicBed, String listenModel, String briefModel,
+                        boolean qualityCheck) {
+        this(jdbc, json, llm, assets, pricing, budget, router, clipProgress, zimageApp, zimageClass, wanApp, wanClass,
+                publicUrl, autoApproveInr, shotSeconds, musicDir, musicModel, musicBed, listenModel, briefModel,
+                qualityCheck, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
     public DreamService(JdbcClient jdbc, ObjectMapper json, Llm llm, AssetStore assets, Pricing pricing, BudgetGuard budget,
                         Router router, com.projectv.video.ClipProgress clipProgress,
                         @Value("${projectv.modal.zimage-app:projectv-zimage}") String zimageApp,
@@ -220,7 +235,8 @@ public class DreamService {
                         @Value("${projectv.dream.music-bed:}") String musicBed,
                         @Value("${projectv.models.vision:gemini-3.6-flash}") String listenModel,
                         @Value("${projectv.models.story:claude:claude-sonnet-5-5}") String briefModel,
-                        @Value("${projectv.dream.quality-check:true}") boolean qualityCheck) {
+                        @Value("${projectv.dream.quality-check:true}") boolean qualityCheck,
+                        DreamGpu gpu) {
         this.jdbc = jdbc;
         this.json = json;
         this.llm = llm;
@@ -243,6 +259,34 @@ public class DreamService {
         this.evidence = new DreamEvidence(jdbc, json);
         this.briefModel = briefModel;
         this.qualityCheck = qualityCheck;
+        this.gpu = gpu != null && gpu.enabled() ? gpu : null;
+    }
+
+    /** True when this control plane sends Dream Short pictures and clips to a rented pod instead of Modal. */
+    public boolean usesGpuBroker() {
+        return gpu != null;
+    }
+
+    /** Start the Short's pod while the writer works, so the weight download overlaps the writing. Best effort. */
+    private void warmGpu(UUID id) {
+        if (gpu != null) {
+            gpu.warm(id);
+        }
+    }
+
+    /** Keeps the Short's pod lease warm; called through the control plane by the worker waiting on / running jobs. */
+    public void gpuHeartbeat(UUID id) {
+        if (gpu != null) {
+            gpu.heartbeat(id);
+        }
+    }
+
+    /** The pod is released as soon as it cannot be needed soon: GPU steps over, Short ended, or a step failed (Retry rents afresh). */
+    private void releaseGpuIfDone(UUID id, String step, String status) {
+        if (gpu != null && (List.of("COMPLETED", "CANCELLED", "FAILED_WAITING").contains(status)
+                || "MUSIC".equals(step) || "FINISH".equals(step))) {
+            gpu.release(id, step + " " + status);
+        }
     }
 
     public DreamEvidence evidence() {
@@ -280,6 +324,7 @@ public class DreamService {
 
     @Transactional
     public String writeShots(UUID id, String notes) {
+        warmGpu(id);
         Map<String, Object> d = dream(id);
         Look look = look((String) d.get("look"));
         int count = ((Number) d.get("shot_count")).intValue();
@@ -569,8 +614,17 @@ public class DreamService {
             }
             int attempt = ((Number) s.get("picture_takes")).intValue() + 1;
             // One seed for the whole Short (owner, 19 Nov: the shelter changed shape every shot); a redo moves it on.
-            jobs.add(new KeyframeJob(shotId, attempt, ZIMAGE, prompt, 768, 1344, "9:16", "1K", null,
+            jobs.add(new KeyframeJob(shotId, attempt, gpu != null ? POD : ZIMAGE, prompt, 768, 1344, "9:16", "1K", null,
                     Math.abs((long) id.hashCode()) + attempt - 1));
+        }
+        if (gpu != null) {
+            if (jobs.isEmpty()) {
+                return new KeyframeRequest(storageId(id), null, zimageApp, zimageClass, jobs);
+            }
+            BigDecimal inr = gpu.inr(gpu.pictureSeconds(id, jobs.size()));
+            route(id, "DREAM_PICTURES", "image.dream", POD, inr);
+            var session = gpu.session(id);
+            return new KeyframeRequest(storageId(id), null, zimageApp, zimageClass, jobs, session.url(), session.readyTimeoutSeconds());
         }
         if (!jobs.isEmpty()) {
             BigDecimal inr = pricing.zimageInr(jobs.size());
@@ -598,7 +652,7 @@ public class DreamService {
                 continue;
             }
             UUID asset = assets.create(new NewAsset(null, "image", o.uri(), "image/png", job.width(), job.height(), null,
-                    ZIMAGE, Objects.toString(o.model(), "Tongyi-MAI/Z-Image-Turbo"), job.prompt(), o.seed(),
+                    job.provider(), Objects.toString(o.model(), "Tongyi-MAI/Z-Image-Turbo"), job.prompt(), o.seed(),
                     AssetStore.LICENCE_ZIMAGE, true));
             jdbc.sql("UPDATE asset SET dream_short_id = :d WHERE id = :a").param("d", id).param("a", asset).update();
             // A new picture makes the old clip stale: it must be made again from this picture.
@@ -612,12 +666,12 @@ public class DreamService {
             cost(id, "modal_l40s", pricing.modalGpuInr("L40S", r.modalGpuSeconds()), r.modalGpuSeconds(), "gpu_seconds", true,
                     "Dream Short pictures (Z-Image, %d)".formatted(ok));
         }
-        router.reportBatch(ZIMAGE, ok, errors.size(), errors.isEmpty() ? null : errors.getFirst());
+        router.reportBatch(gpu != null ? POD : ZIMAGE, ok, errors.size(), errors.isEmpty() ? null : errors.getFirst());
         if (ok == 0) {
             throw new IllegalStateException("No pictures were made: " + String.join(" | ", errors.stream().filter(Objects::nonNull).toList()));
         }
         staleFinal(id);
-        return "%d/%d pictures made (Z-Image)%s.".formatted(ok, req.jobs().size(),
+        return "%d/%d pictures made (Z-Image%s)%s.".formatted(ok, req.jobs().size(), gpu != null ? " on a rented pod" : "",
                 errors.isEmpty() ? "" : "; " + errors.size() + " failed: " + errors.getFirst());
     }
 
@@ -625,6 +679,13 @@ public class DreamService {
 
     public DreamEstimate clipEstimate(UUID id, List<String> only) {
         List<ClipJob> jobs = clipJobs(id, only);
+        if (this.gpu != null && !jobs.isEmpty()) {
+            double sec = this.gpu.clipSeconds(id, jobs.stream().mapToInt(ClipJob::numFrames).sum());
+            BigDecimal inr = this.gpu.inr(sec);
+            return new DreamEstimate(DreamStep.CLIPS, inr, sec / 60, inr.compareTo(autoApproveInr) > 0,
+                    "%d clips on a rented GPU pod (Wan fp8, %s): about ₹%s and %.0f min at the cheapest live price."
+                            .formatted(jobs.size(), dream(id).get("quality"), inr.setScale(0, RoundingMode.HALF_UP), Math.ceil(sec / 60)));
+        }
         double gpu = gpuSeconds(jobs, (String) dream(id).get("quality"));
         BigDecimal inr = pricing.modalGpuInr("H100", gpu).setScale(2, RoundingMode.HALF_UP);
         boolean ask = !jobs.isEmpty() && inr.compareTo(autoApproveInr) > 0;
@@ -640,6 +701,14 @@ public class DreamService {
         List<ClipJob> jobs = clipJobs(id, only);
         if (jobs.isEmpty()) {
             throw new IllegalStateException("No shots with a picture need a clip");
+        }
+        if (this.gpu != null) {
+            double sec = this.gpu.clipSeconds(id, jobs.stream().mapToInt(ClipJob::numFrames).sum());
+            BigDecimal inr = this.gpu.inr(sec);
+            route(id, "DREAM_CLIPS", "video.i2v.dream", POD, inr);
+            var session = this.gpu.session(id);
+            return new ClipRequest(storageId(id), wanApp, wanClass, publicUrl, jobs, 1, sec, inr, "pod", null, null, 0,
+                    session.url(), session.readyTimeoutSeconds());
         }
         double gpu = gpuSeconds(jobs, (String) dream(id).get("quality"));
         BigDecimal inr = pricing.modalGpuInr("H100", gpu);
@@ -719,6 +788,7 @@ public class DreamService {
         BigDecimal spent = BigDecimal.ZERO;
         String kind = clipKind((String) dream(id).get("quality"));
         boolean first = r.startUps() > 0;
+        boolean onPod = "pod".equals(req.provider());
         List<String> errors = new ArrayList<>();
         for (ClipOutput o : r.clips()) {
             ClipJob job = jobs.get(o.shotId() + ":" + o.take());
@@ -726,12 +796,12 @@ public class DreamService {
                 continue;
             }
             gpu += o.gpuSeconds();
-            if (o.gpuSeconds() > 0) {
+            if (!onPod && o.gpuSeconds() > 0) {
                 evidence.gpuTiming(id, kind, o.frames() > 0 ? o.frames() : job.numFrames(), o.gpuSeconds(), first);
                 first = false;
                 spent = spent.add(pricing.modalGpuInr("H100", o.gpuSeconds()));
             }
-            if (o.gpuSeconds() > 0) {
+            if (!onPod && o.gpuSeconds() > 0) {
                 cost(id, "modal_h100", pricing.modalGpuInr("H100", o.gpuSeconds()), o.gpuSeconds(), "gpu_seconds", true,
                         "Dream Short clip, shot %d take %d (Wan fast)".formatted(job.shotNumber(), job.take()));
             }
@@ -747,14 +817,15 @@ public class DreamService {
             }
             int fps = o.fps() > 0 ? o.fps() : FPS;
             UUID asset = assets.create(new NewAsset(null, "video", o.uri(), "video/mp4", job.width(), job.height(),
-                    o.frames() > 0 ? (double) o.frames() / fps : null, WAN, "wan2.2-i2v-a14b " + o.mode(), job.prompt(),
+                    o.frames() > 0 ? (double) o.frames() / fps : null, onPod ? POD : WAN,
+                    (onPod ? "wan2.2-i2v-a14b-fp8 " : "wan2.2-i2v-a14b ") + o.mode(), job.prompt(),
                     job.seed(), AssetStore.LICENCE_WAN, true));
             jdbc.sql("UPDATE asset SET dream_short_id = :d, fps = :f WHERE id = :a").param("d", id).param("f", fps).param("a", asset).update();
             jdbc.sql("UPDATE dream_shot SET clip_asset_id = :a, clip_takes = clip_takes + 1, error = NULL, updated_at = now() WHERE id = :s")
                     .param("a", asset).param("s", shotId).update();
             ok++;
         }
-        if (r.startUps() > 0) { // observed cold starts: a redo on a warm GPU pays none
+        if (!onPod && r.startUps() > 0) { // observed cold starts: a redo on a warm GPU pays none
             double start = r.startUps() * pricing.gpuContainerStartSeconds();
             cost(id, "modal_h100", pricing.modalGpuInr("H100", start), start, "gpu_seconds", true,
                     "Dream Short: Wan GPU start-up + model load (estimated)");
@@ -763,13 +834,15 @@ public class DreamService {
         if (req.estimateInr() != null && gpu > 0) {
             evidence.costCheck(id, "CLIPS", req.estimateInr().doubleValue(), spent.doubleValue());
         }
-        evidence.recalibrate(kind).forEach(c -> log.info("Clip estimate recalibrated: {}", c));
-        router.reportBatch(WAN, ok, errors.size(), errors.isEmpty() ? null : errors.getFirst());
+        if (!onPod) {
+            evidence.recalibrate(kind).forEach(c -> log.info("Clip estimate recalibrated: {}", c));
+        }
+        router.reportBatch(onPod ? POD : WAN, ok, errors.size(), errors.isEmpty() ? null : errors.getFirst());
         if (ok == 0 && stopped == 0) {
             throw new IllegalStateException("No clips were made: " + String.join(" | ", errors));
         }
         staleFinal(id);
-        return "%d/%d clips made (Wan fast, %s)%s%s%s.".formatted(ok, req.jobs().size(), dream(id).get("quality"),
+        return "%d/%d clips made (Wan %s, %s)%s%s%s.".formatted(ok, req.jobs().size(), onPod ? "fp8 on a rented pod" : "fast", dream(id).get("quality"),
                 gpu > 0 ? " in %.0f s of GPU time".formatted(gpu) : "",
                 stopped > 0 ? "; stopped before " + stopped + " finished" : "",
                 errors.isEmpty() ? "" : "; " + errors.size() + " failed: " + errors.getFirst());
@@ -1079,6 +1152,7 @@ public class DreamService {
         if ("FAILED_WAITING".equals(status)) {
             evidence.event(id, step, "failure", null, message, null);
         }
+        releaseGpuIfDone(id, step, status);
     }
 
     public void startClipBatch(UUID id) {

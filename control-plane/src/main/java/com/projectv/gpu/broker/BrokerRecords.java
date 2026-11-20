@@ -46,9 +46,13 @@ public interface BrokerRecords {
         @Override
         public void cost(UUID dreamShortId, String provider, double hours, double hourlyUsd, String note) {
             BigDecimal inr = BigDecimal.valueOf(hours * hourlyUsd * pricing.fx()).setScale(4, RoundingMode.HALF_UP);
-            // video_id stays null: the Short is named in the note (Dream Shorts have their own id space).
-            ledger.record(null, provider, inr, BigDecimal.valueOf(hours).setScale(4, RoundingMode.HALF_UP), "gpu_hour", true,
-                    "%s (Dream Short %s, $%.4f/h live)".formatted(note, dreamShortId, hourlyUsd));
+            jdbc.sql("""
+                            INSERT INTO cost_entry (id, video_id, dream_short_id, provider_id, amount_inr, units, unit_type, estimated, note)
+                            VALUES (:id, NULL, :d, :p, :amt, :u, 'gpu_hour', true, :note)
+                            """)
+                    .param("id", UUID.randomUUID()).param("d", dreamShortId).param("p", provider).param("amt", inr)
+                    .param("u", BigDecimal.valueOf(hours).setScale(4, RoundingMode.HALF_UP))
+                    .param("note", "%s ($%.4f/h live)".formatted(note, hourlyUsd)).update();
         }
     }
 }

@@ -77,7 +77,7 @@ control plane. Google Drive never.
 ## 7. Flag and rollout
 `projectv.dream.gpu-provider=modal|broker` (env `DREAM_GPU_PROVIDER`, default **`modal`**). With `modal` nothing
 changes (same requests, same code paths). `broker` makes DreamService ask the broker for pictures/clips; this wiring
-is **not built in this step** (needs the pod worker from the Salad branch adapted to RunPod; separate step after the
+was built on 20 Nov 2026 (DreamGpu, workers/pod) and is tested with fakes only; before that it was **not built** (needs the pod worker from the Salad branch adapted to RunPod; separate step after the
 owner approves a first paid test, est. well under US$1).
 
 ## 8. Build plan

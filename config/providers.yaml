@@ -19,6 +19,17 @@ providers:
     budget: gpu
     enabled: true
 
+  # M3 GPU broker (docs/plans/m3-gpu-router.md): Dream Short pictures + clips on a rented pod (RunPod, Jarvislabs, ...).
+  # The broker picks the cheapest provider and enforces pricing.gpuBroker caps itself, so no router budget bucket here.
+  # Only used when projectv.dream.gpu-provider=broker.
+  - id: gpu_pod
+    name: Rented GPU pod (Wan 2.2 fp8 + Z-Image Turbo, via the GPU broker)
+    kind: gpu_pod
+    capabilities: [image.dream, video.i2v.dream]
+    quality: 6                     # fp8 Wan accepted by the owner as equal to Modal (20 Nov 2026)
+    budget: none
+    enabled: true
+
   - id: gemini_image
     name: Gemini image (Nano Banana, keyframes)
     kind: api

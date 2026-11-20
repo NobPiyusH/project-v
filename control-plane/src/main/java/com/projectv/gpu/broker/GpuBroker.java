@@ -169,6 +169,36 @@ public class GpuBroker {
         throw new NoGpuAvailableException(reason);
     }
 
+    /** Cheapest live quote that could be rented right now (configured, in stock, inside its wallet); read-only. For estimates. */
+    public Optional<GpuProvider.Quote> cheapestQuote() {
+        GpuProvider.GpuSpec spec = new GpuProvider.GpuSpec(config.gpuPreference(), config.minVramGb(), config.minRamGb(), config.diskGb());
+        GpuProvider.Quote best = null;
+        for (String id : config.order()) {
+            GpuProvider p = providers.get(id);
+            if (p == null || !p.configured()) {
+                continue;
+            }
+            try {
+                GpuProvider.Quote q = p.quote(spec);
+                if (q.available() && wallet.refusal(id, q.hourlyUsd() * config.expectedHours()) == null
+                        && (best == null || q.hourlyUsd() < best.hourlyUsd())) {
+                    best = q;
+                }
+            } catch (RuntimeException e) {
+                log.warn("GPU broker: quote from {} failed: {}", id, e.getMessage());
+            }
+        }
+        return Optional.ofNullable(best);
+    }
+
+    /** Keeps the lease warm without any provider call (the worker pings this while it waits or runs jobs). */
+    public void heartbeat(UUID shortId) {
+        Rental r = open.get(shortId);
+        if (r != null) {
+            leases.heartbeat(r.instance().id());
+        }
+    }
+
     /** Readiness of the Short's pod (the worker's own /health is the final truth); also keeps the lease warm. */
     public GpuProvider.InstanceStatus status(UUID shortId) {
         Rental r = open.get(shortId);

@@ -259,6 +259,38 @@ def _omni(req: dict, base: str, video_id: str) -> tuple[list[dict], bool]:
     return clips, stopped
 
 
+def _pod(req: dict, base: str, video_id: str) -> tuple[list[dict], bool]:
+    """Clips on the Short's rented GPU pod (control plane created it; gpuUrl is its gateway). One clip at a
+    time on one GPU; a lost instance is waited for and the clip resubmitted (workers/pod/client.py). The owner's
+    Stop is honoured between clips; the group itself is deleted by the control plane, never left running here."""
+    from workers.pod import client as podc
+
+    url = (req.get("gpuUrl") or "").rstrip("/")
+    if not url:
+        raise RuntimeError("GPU pod route: the control plane sent no container group URL")
+    ready_s = float(req.get("readyTimeoutSeconds") or 1800)
+    beat = podc.lease_beat(base, video_id, _beat)
+    clips: list[dict] = []
+    jobs = [(j, f"{j['shotId'][:8]}-{j['kind']}{j['take']}") for j in req["jobs"]]
+    for i, (j, _) in enumerate(jobs):
+        if _stop_requested(base, video_id):
+            clips += [_stopped(x) for x, _ in jobs[i:]]
+            return clips, True
+        _report(base, video_id, jobs[i:], clips, {}, len(jobs))
+        fps = 16
+        payload = {"image": base64.b64encode(get_bytes(j["imageUri"])).decode(), "prompt": j["prompt"],
+                   "negative": j.get("negative"), "seed": int(j["seed"]), "frames": int(j["numFrames"]), "fps": fps,
+                   "width": int(j["width"]), "height": int(j["height"])}
+        try:
+            mp4, info = podc.run(url, "clip", payload, ready_s, beat=beat)
+            r = {"mp4": mp4, "seconds": info.get("seconds") or 0, "frames": info.get("frames"), "fps": info.get("fps"),
+                 "mode": j["mode"], "coldStart": i == 0}
+        except Exception as e:  # noqa: BLE001 - one failed clip never fails the batch
+            r = {"mp4": None, "seconds": 0, "error": f"{type(e).__name__}: {e}"[:600]}
+        clips.append(_clip(video_id, j, r))
+    return clips, False
+
+
 HOLD_MAX_SECONDS = 300  # a held GPU stays warm for minutes, never hours (rule 8)
 
 
@@ -291,6 +323,11 @@ def generate_clips(req: dict) -> dict:
         clips, stopped = _omni(req, base, video_id)
         _post(f"{base}/api/internal/clips/progress", {"videoId": video_id, "clips": [], "finished": True})
         return {"clips": clips, "containers": 0, "stopped": stopped}
+    if req.get("provider") == "pod":
+        log.info("Starting %d clips for video %s on a rented pod", len(req["jobs"]), video_id)
+        clips, stopped = _pod(req, base, video_id)
+        _post(f"{base}/api/internal/clips/progress", {"videoId": video_id, "clips": [], "finished": True})
+        return {"clips": clips, "containers": 1, "stopped": stopped, "coldStarts": 0}
     progress = modal.Dict.from_name("projectv-progress", create_if_missing=True)
     containers = max(1, min(4, int(req.get("containers") or 4), len(req["jobs"]) or 1))
     wan = _wan(req, containers)
