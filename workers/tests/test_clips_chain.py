@@ -42,7 +42,10 @@ def test_start_image_chains_from_the_previous_clip_and_falls_back_to_the_picture
     assert C.start_image(_job(2), False, {1: clip}, set()) == b"s3://b/pic2.png"            # chaining off: unchanged
     assert C.start_image(_job(2), True, {1: clip}, set())[:4] == b"\x89PNG"                 # chained: previous last frame
     monkeypatch.setattr(C, "last_frame_png", lambda mp4: (_ for _ in ()).throw(RuntimeError("bad file")))
-    assert C.start_image(_job(2), True, {1: clip}, set()) == b"s3://b/pic2.png"             # extraction failed: own picture
+    with pytest.raises(C.ChainBroken, match="could not be read"):                          # extraction failed: no silent
+        C.start_image(_job(2), True, {1: clip}, set())                                      # fallback to another picture
+    with pytest.raises(C.ChainBroken, match="no clip yet"):
+        C.start_image(_job(2, imageUri=None), True, {}, set())
     with pytest.raises(C.ChainBroken):
         C.start_image(_job(3), True, {}, {2})
 

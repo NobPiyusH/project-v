@@ -227,6 +227,17 @@ class DreamHookChainIdeasTest {
     }
 
     @Test
+    void chainedShotsAfterTheFirstNeedNoPictureOfTheirOwn() {
+        media(shot1, "s3://b/p1.png", null); // only the first shot has a picture
+        assertEquals(1, dreams.clipJobs(dream, null).size(), "unchained: a shot without a picture waits for it");
+        jdbc.sql("UPDATE dream_short SET chain_shots = true WHERE id = :d").param("d", dream).update();
+        var jobs = dreams.clipJobs(dream, null);
+        assertEquals(List.of(1, 2, 3), jobs.stream().map(j -> j.shotNumber()).toList());
+        assertEquals("s3://b/p1.png", jobs.getFirst().imageUri());
+        assertNull(jobs.get(1).imageUri(), "no picture to fall back on: the worker continues from the clip before or fails");
+    }
+
+    @Test
     void eachChainedClipKeepsItsOwnCostEntryAndAFailedOneIsReportedForTheOwner() {
         jdbc.sql("UPDATE dream_short SET chain_shots = true WHERE id = :d").param("d", dream).update();
         for (UUID s : List.of(shot1, shot2, shot3)) {

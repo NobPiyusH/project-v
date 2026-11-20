@@ -123,9 +123,10 @@ def last_frame_png(mp4: bytes) -> bytes:
 
 
 def start_image(j: dict, chain: bool, made: dict[int, bytes], failed: set[int]) -> bytes:
-    """The image clip `j` starts from. Chained: the last frame of the shot before it (made in this batch, or the clip
-    the control plane named in chainFromUri when that shot is not part of the batch); the shot's own picture otherwise,
-    and for the first shot. A shot whose predecessor failed in this batch can't be chained: ChainBroken."""
+    """The image clip `j` starts from. The first shot (and any unchained clip): its own picture. A chained shot after the
+    first: the last frame of the shot before it (made in this batch, or the clip the control plane named in chainFromUri
+    when that shot is not part of the batch). Never a silent fallback to an unrelated picture (it would show as a jump):
+    when the last frame can't be had the clip fails and waits for the owner (ChainBroken)."""
     if chain and j["shotNumber"] > 1:
         before = j["shotNumber"] - 1
         if before in failed:
@@ -133,11 +134,12 @@ def start_image(j: dict, chain: bool, made: dict[int, bytes], failed: set[int]) 
         mp4 = made.get(before)
         if mp4 is None and j.get("chainFromUri"):
             mp4 = get_bytes(j["chainFromUri"])
-        if mp4 is not None:
-            try:
-                return last_frame_png(mp4)
-            except Exception as e:  # noqa: BLE001 - fall back to the shot's own picture rather than lose the clip
-                log.warning("Last frame of shot %s unavailable (%s); using the shot's own picture", before, e)
+        if mp4 is None:
+            raise ChainBroken(f"shot {before} has no clip yet, so shot {j['shotNumber']} can't continue from it")
+        try:
+            return last_frame_png(mp4)
+        except Exception as e:  # noqa: BLE001
+            raise ChainBroken(f"the last frame of shot {before} could not be read ({e}); retry or redo shot {before}") from e
     return get_bytes(j["imageUri"])
 
 
@@ -404,7 +406,7 @@ def generate_clips(req: dict) -> dict:
     jobs = []
     for j in req["jobs"]:
         key = f"{video_id[:8]}-{j['shotId'][:8]}-{j['kind']}{j['take']}"
-        jobs.append((j, key, {"id": key, "image": get_bytes(j["imageUri"]), "prompt": j["prompt"], "width": j["width"],
+        jobs.append((j, key, {"id": key, "image": get_bytes(j["imageUri"]) if j.get("imageUri") else None, "prompt": j["prompt"], "width": j["width"],
                               "height": j["height"], "numFrames": j["numFrames"], "seed": j["seed"], "mode": j["mode"],
                               "negative": j.get("negative")}))
     log.info("Starting %d clips for video %s on %d GPU container(s)", len(jobs), video_id, containers)

@@ -654,8 +654,12 @@ public class DreamService {
     public KeyframeRequest pictureRequest(UUID id, List<String> only, String notes) {
         List<KeyframeJob> jobs = new ArrayList<>();
         Set<String> wanted = only == null ? null : new HashSet<>(only);
+        boolean chain = chained(id);
         for (Map<String, Object> s : shots(id)) {
             String shotId = s.get("id").toString();
+            if (chain && ((Number) s.get("ord")).intValue() > 0) {
+                continue; // chained: every clip starts from the last frame of the one before, so only shot 1 needs a picture
+            }
             if (wanted == null ? s.get("picture_asset_id") != null : !wanted.contains(shotId)) {
                 continue;
             }
@@ -804,8 +808,9 @@ public class DreamService {
             String shotId = s.get("id").toString();
             String clipBefore = before;
             before = (String) s.get("clip_uri");
-            if (s.get("picture_uri") == null) {
-                continue;
+            int ord = ((Number) s.get("ord")).intValue();
+            if (s.get("picture_uri") == null && !(chain && ord > 0)) {
+                continue; // (a chained shot after the first has no picture of its own: it starts from the clip before)
             }
             if (wanted == null ? s.get("clip_asset_id") != null : !wanted.contains(shotId)) {
                 continue;

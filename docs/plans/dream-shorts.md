@@ -122,5 +122,6 @@ that does not ask for them is unchanged (migration V34 adds the columns with def
 
 The `architecture` look (clean photo-real city, 2.5 s shots, hard cuts, its own camera rule: slow continuous glide) is
 selectable but not in `LOOK_ORDER`, so the Autopilot's daily rotation does not pick it.
-Chaining with the idea pack: the pictures step still makes a picture for every shot (shot 1 starts the chain; the others
-are the fallback if a last frame cannot be read). Skipping those pictures is a possible later saving.
+Chaining makes only shot 1's picture (it sets the whole world); the other shots start from the clip before them, so they
+have no picture of their own and no silent fallback: if a last frame can't be read the clip fails and waits for the owner
+(Retry / redo the shot before it). Not built: two candidate pictures for shot 1 (redo shot 1's picture meanwhile).
