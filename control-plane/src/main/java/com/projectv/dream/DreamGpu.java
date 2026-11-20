@@ -176,10 +176,19 @@ public class DreamGpu {
     }
 
     private byte[] worker() {
-        try {
-            return Files.readAllBytes(Path.of(workerFile));
-        } catch (IOException e) {
-            throw new IllegalStateException("GPU pod worker file not found: " + workerFile + " (projectv.gpu.pod-worker-file)", e);
+        // The backend runs from the repo root (scripts\start.ps1) but tests run from control-plane/: try the configured
+        // path, then the same file relative to either folder, so the default works in both.
+        java.util.List<Path> tries = java.util.List.of(Path.of(workerFile), Path.of("workers/pod/server.py"),
+                Path.of("../workers/pod/server.py"));
+        for (Path p : tries) {
+            if (Files.isRegularFile(p)) {
+                try {
+                    return Files.readAllBytes(p);
+                } catch (IOException e) {
+                    throw new IllegalStateException("GPU pod worker file unreadable: " + p, e);
+                }
+            }
         }
+        throw new IllegalStateException("GPU pod worker file not found: " + workerFile + " (projectv.gpu.pod-worker-file)");
     }
 }
