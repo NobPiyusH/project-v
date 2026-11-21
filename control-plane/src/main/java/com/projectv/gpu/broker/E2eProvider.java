@@ -1,11 +1,13 @@
 package com.projectv.gpu.broker;
 
+import static com.projectv.gpu.broker.ProviderHttp.abbreviate;
+import static com.projectv.gpu.broker.ProviderHttp.str;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
-import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
@@ -51,7 +53,6 @@ public class E2eProvider implements GpuProvider {
 
     private static final Logger log = LoggerFactory.getLogger(E2eProvider.class);
     static final String LABEL_PREFIX = "projectv-";
-    private static final Pattern SAFE_ENV = Pattern.compile("[A-Za-z0-9+/=._:@-]*");
     private static final Pattern PRICE = Pattern.compile("([0-9]+(?:\\.[0-9]+)?)\\s*/\\s*hour", Pattern.CASE_INSENSITIVE);
     /** Start scripts are limited to 16 KB each: stay well below. */
     static final int SCRIPT_BYTES = 14_000;
@@ -75,7 +76,7 @@ public class E2eProvider implements GpuProvider {
     public E2eProvider(E2eConfig cfg, @Value("${projectv.e2e.base-url:https://api.e2enetworks.com/myaccount/api/v1}") String baseUrl,
                        @Value("${projectv.e2e.api-key:}") String apiKey, @Value("${projectv.e2e.auth-token:}") String authToken,
                        @Value("${projectv.e2e.project-id:}") String projectId) {
-        this(cfg, baseUrl, apiKey, authToken, projectId, client(), cfg.pollSeconds() * 1000L);
+        this(cfg, baseUrl, apiKey, authToken, projectId, ProviderHttp.client(60_000, ProviderHttp.USER_AGENT), cfg.pollSeconds() * 1000L);
     }
 
     E2eProvider(E2eConfig cfg, String baseUrl, String apiKey, String authToken, String projectId, RestClient http, long pollMillis) {
@@ -87,13 +88,6 @@ public class E2eProvider implements GpuProvider {
         this.http = http;
         this.pollMillis = pollMillis;
         this.throwawayPublicKey = throwawayKey();
-    }
-
-    private static RestClient client() {
-        SimpleClientHttpRequestFactory f = new SimpleClientHttpRequestFactory();
-        f.setConnectTimeout(10_000);
-        f.setReadTimeout(60_000);
-        return RestClient.builder().requestFactory(f).defaultHeader("User-Agent", "projectv-studio/1.0").build();
     }
 
     @Override
@@ -243,7 +237,7 @@ public class E2eProvider implements GpuProvider {
         List<String> lines = new ArrayList<>();
         if (req.env() != null) {
             for (Map.Entry<String, String> e : req.env().entrySet()) {
-                if (e.getKey().isEmpty() || !SAFE_ENV.matcher(e.getKey()).matches() || !SAFE_ENV.matcher(e.getValue()).matches()) {
+                if (!ProviderHttp.safeEnv(e.getKey(), e.getValue())) {
                     throw new IllegalArgumentException("env " + e.getKey() + " has characters that cannot go into the E2E start script");
                 }
                 lines.add(e.getKey() + "=" + e.getValue());
@@ -506,15 +500,7 @@ public class E2eProvider implements GpuProvider {
         }
     }
 
-    private static String abbreviate(String s) {
-        return s == null ? "" : s.length() > 200 ? s.substring(0, 200) : s;
-    }
-
     private static double num(Object o) {
         return o instanceof Number n ? n.doubleValue() : o instanceof String s && s.matches("[0-9.]+") ? Double.parseDouble(s) : 0;
-    }
-
-    private static String str(Object o) {
-        return o == null ? "" : o.toString();
     }
 }

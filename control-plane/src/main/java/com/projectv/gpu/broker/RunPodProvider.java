@@ -4,7 +4,6 @@ import com.projectv.gpu.RunPodApi;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
-import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
@@ -31,7 +30,7 @@ public class RunPodProvider implements GpuProvider {
     @Autowired
     public RunPodProvider(RunPodApi base, @Value("${projectv.runpod.base-url:https://api.runpod.io/v2}") String baseUrl,
                           @Value("${projectv.runpod.api-key:}") String apiKey) {
-        this(base, baseUrl, apiKey, client());
+        this(base, baseUrl, apiKey, ProviderHttp.client(30_000, null));
     }
 
     RunPodProvider(RunPodApi base, String baseUrl, String apiKey, RestClient http) {
@@ -39,13 +38,6 @@ public class RunPodProvider implements GpuProvider {
         this.baseUrl = baseUrl.replaceAll("/+$", "");
         this.apiKey = apiKey == null ? "" : apiKey.strip();
         this.http = http;
-    }
-
-    private static RestClient client() {
-        SimpleClientHttpRequestFactory f = new SimpleClientHttpRequestFactory();
-        f.setConnectTimeout(10_000);
-        f.setReadTimeout(30_000);
-        return RestClient.builder().requestFactory(f).build();
     }
 
     @Override
