@@ -179,9 +179,9 @@ class DreamBrokerRouteTest {
             assertEquals(ended, terminated.size());
             dreams.status(b, "PICTURES", "WAITING_REVIEW", null); // goes on to clips by itself: keep the pod
             assertEquals(ended, terminated.size());
-            dreams.status(b, "CLIPS", "WAITING_COST", null); // the owner's cost OK: the pod waits up to 3 min
+            dreams.status(b, "CLIPS", "WAITING_COST", null); // the owner's cost OK: the pod waits up to 1 min
             assertEquals(ended, terminated.size());
-            jdbc.sql("UPDATE dream_short SET updated_at = now() - interval '4 minutes' WHERE id = :id").param("id", b).update();
+            jdbc.sql("UPDATE dream_short SET updated_at = now() - interval '2 minutes' WHERE id = :id").param("id", b).update();
             dreams.releaseGpuIfNobodyWaits(); // the 30 s check after the grace
             assertEquals(ended + 1, terminated.size());
             assertEquals(0, jdbc.sql("SELECT count(*) FROM gpu_pod_lease WHERE released_at IS NULL")

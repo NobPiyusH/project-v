@@ -1362,7 +1362,7 @@ public class DreamService {
      * free steps before the pictures, or in a review window that goes on to a GPU step by itself. Anything waiting for
      * the owner (Manual, cost OK, Retry) or past the clips is not: the pod is not kept on for it.
      */
-    static final java.time.Duration COST_OK_GRACE = java.time.Duration.ofMinutes(3);
+    static final java.time.Duration COST_OK_GRACE = java.time.Duration.ofMinutes(1);
 
     /** Every 30 s: a cost OK that has waited past its grace ends the pod even when no status changes. */
     @org.springframework.scheduling.annotation.Scheduled(initialDelay = 60_000, fixedDelay = 30_000)
@@ -1387,7 +1387,7 @@ public class DreamService {
         if (gpu == null || gpu.usersOnPod() == 0) {
             return;
         }
-        // Clips waiting for the owner's cost OK keep the pod on for COST_OK_GRACE (owner, 21 Nov 2026: 3 min max).
+        // Clips waiting for the owner's cost OK keep the pod on for COST_OK_GRACE (owner, 21 Nov 2026: 1 min max).
         int soon = jdbc.sql("""
                         SELECT count(*) FROM dream_short
                         WHERE ((step || ':' || status) IN (:k) AND updated_at > now() - interval '2 hours')
