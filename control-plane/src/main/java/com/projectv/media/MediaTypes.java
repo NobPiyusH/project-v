@@ -182,7 +182,15 @@ public final class MediaTypes {
      */
     public record ClipJob(String shotId, int shotNumber, int take, String kind, String mode, String imageUri, String prompt,
                           int width, int height, int numFrames, long seed, String negative, String chainFromUri,
-                          String endImageUri) {
+                          String endImageUri, int scene, int beat) {
+        /** {@code scene}/{@code beat}: SVI scenes (1-based), 0 = not an SVI beat. */
+        public ClipJob(String shotId, int shotNumber, int take, String kind, String mode, String imageUri, String prompt,
+                       int width, int height, int numFrames, long seed, String negative, String chainFromUri,
+                       String endImageUri) {
+            this(shotId, shotNumber, take, kind, mode, imageUri, prompt, width, height, numFrames, seed, negative, chainFromUri,
+                    endImageUri, 0, 0);
+        }
+
         /** {@code endImageUri}: first-last frame chaining, the picture the clip must end on (the next shot's); null = ends freely. */
         public ClipJob(String shotId, int shotNumber, int take, String kind, String mode, String imageUri, String prompt,
                        int width, int height, int numFrames, long seed, String negative, String chainFromUri) {
@@ -206,7 +214,17 @@ public final class MediaTypes {
     public record ClipRequest(String videoId, String modalApp, String modalClass, String progressUrl, List<ClipJob> jobs,
                               int containers, double estimateGpuSeconds, java.math.BigDecimal estimateInr,
                               String provider, String resolution, String omniModel, int holdSeconds,
-                              String gpuUrl, int readyTimeoutSeconds, boolean chain, int chainGroup, boolean locked) {
+                              String gpuUrl, int readyTimeoutSeconds, boolean chain, int chainGroup, boolean locked,
+                              boolean svi) {
+        /** {@code svi}: SVI scenes, the jobs are beats rendered one scene per pod job (pod route only). */
+        public ClipRequest(String videoId, String modalApp, String modalClass, String progressUrl, List<ClipJob> jobs,
+                           int containers, double estimateGpuSeconds, java.math.BigDecimal estimateInr,
+                           String provider, String resolution, String omniModel, int holdSeconds,
+                           String gpuUrl, int readyTimeoutSeconds, boolean chain, int chainGroup, boolean locked) {
+            this(videoId, modalApp, modalClass, progressUrl, jobs, containers, estimateGpuSeconds, estimateInr, provider,
+                    resolution, omniModel, holdSeconds, gpuUrl, readyTimeoutSeconds, chain, chainGroup, locked, false);
+        }
+
         /**
          * {@code chain}: clips run one at a time, each starting from the last frame of the shot before it (Dream Shorts).
          * {@code chainGroup}: 0 = one chain through the whole Short; N = chains of N shots (2: shots 1+2, then 3+4, ...).

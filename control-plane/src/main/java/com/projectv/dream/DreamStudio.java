@@ -33,13 +33,27 @@ public class DreamStudio {
      *                   until the owner turns it off, or {@code gpuIdleMinutes} (5-30, default 10) pass with no GPU work)
      * @param chainBridge first-last frame chaining: every shot keeps its picture and clip N runs from picture N to
      *                   picture N+1 (default off; wins over {@code chainShots}, the two never run together)
+     * @param sviScenes  SVI scenes (default off = null/0): 1-3 continuous SVI shots of {@code sviSceneSeconds} (10/15/20,
+     *                   default 20) made of 5 s beats, one picture per scene; {@code sviBetween} "cut" (default) or
+     *                   "dissolve" between scenes. Wins over both chain styles (the Short has one clip method).
      */
     public record NewDream(String idea, String look, Integer shots, String quality, String defaultMode,
                            Map<String, String> modes, Integer reviewMinutes, String music, Boolean scout,
                            Boolean musicEdit, Boolean ambience, Boolean pacing, Boolean producerDecides,
                            Boolean hookTitle, String hookText, String hookColor, Boolean chainShots, String ideaPack,
                            String ideaId, Integer chainGroup, Boolean chainLocked, Boolean pathChoice, Boolean chainBridge,
-                           String gpuHold, Integer gpuIdleMinutes) {
+                           String gpuHold, Integer gpuIdleMinutes, Integer sviScenes, Integer sviSceneSeconds, String sviBetween) {
+        public NewDream(String idea, String look, Integer shots, String quality, String defaultMode,
+                        Map<String, String> modes, Integer reviewMinutes, String music, Boolean scout,
+                        Boolean musicEdit, Boolean ambience, Boolean pacing, Boolean producerDecides,
+                        Boolean hookTitle, String hookText, String hookColor, Boolean chainShots, String ideaPack,
+                        String ideaId, Integer chainGroup, Boolean chainLocked, Boolean pathChoice, Boolean chainBridge,
+                        String gpuHold, Integer gpuIdleMinutes) {
+            this(idea, look, shots, quality, defaultMode, modes, reviewMinutes, music, scout, musicEdit, ambience, pacing,
+                    producerDecides, hookTitle, hookText, hookColor, chainShots, ideaPack, ideaId, chainGroup, chainLocked,
+                    pathChoice, chainBridge, gpuHold, gpuIdleMinutes, null, null, null);
+        }
+
         public NewDream(String idea, String look, Integer shots, String quality, String defaultMode,
                         Map<String, String> modes, Integer reviewMinutes, String music, Boolean scout,
                         Boolean musicEdit, Boolean ambience, Boolean pacing, Boolean producerDecides,
@@ -148,15 +162,18 @@ public class DreamStudio {
         String hookText = !hookTitle ? null : req.hookText() != null && !req.hookText().isBlank() ? req.hookText().strip()
                 : seed.map(DreamIdeaPacks.Idea::hook).orElse(null);
         // Unfiltered: one shot per non-empty line of the prompt (the writing step sets the real count).
-        int shots = raw ? (int) Math.max(1, Math.min(8, ideaText.lines().filter(l -> !l.isBlank()).count()))
+        int sviScenes = req.sviScenes() == null ? 0 : Math.max(0, Math.min(DreamSvi.MAX_SCENES, req.sviScenes()));
+        int sviSeconds = DreamSvi.cleanSeconds(req.sviSceneSeconds());
+        int shots = sviScenes > 0 ? (raw ? Math.max(1, DreamSvi.unfiltered(ideaText).size()) : sviScenes * DreamSvi.beatsFor(sviSeconds))
+                : raw ? (int) Math.max(1, Math.min(8, ideaText.lines().filter(l -> !l.isBlank()).count()))
                 : req.shots() == null ? 5 : Math.max(2, Math.min(8, req.shots()));
         String gpuHold = "manual".equalsIgnoreCase(req.gpuHold()) ? "manual" : "auto";
         int gpuIdle = req.gpuIdleMinutes() == null ? 10 : Math.max(5, Math.min(30, req.gpuIdleMinutes()));
         String quality = "720p".equals(req.quality()) ? "720p" : "480p";
         int review = req.reviewMinutes() == null ? 10 : Math.max(1, Math.min(240, req.reviewMinutes()));
         // One chain style per Short: first-last frame wins over last-frame chaining (the two need different pictures).
-        boolean bridge = Boolean.TRUE.equals(req.chainBridge());
-        boolean lastFrame = !bridge && Boolean.TRUE.equals(req.chainShots());
+        boolean bridge = sviScenes == 0 && Boolean.TRUE.equals(req.chainBridge());
+        boolean lastFrame = sviScenes == 0 && !bridge && Boolean.TRUE.equals(req.chainShots());
         StageMode defaultMode = StageMode.parse(req.defaultMode() == null ? "REVIEW" : req.defaultMode());
         Map<DreamStep, StageMode> modes = new EnumMap<>(DreamStep.class);
         if (req.modes() != null) {
@@ -173,11 +190,13 @@ public class DreamStudio {
                                                  music_source, scout, edit_music, edit_ambience, edit_pacing, producer_decides,
                                                  hook_title, hook_text, hook_color, hook_locked, chain_shots, idea_ref,
                                                  chain_group, chain_locked, path_choice, parent_id, episode, chosen_path,
-                                                 pick_source, start_clip_asset_id, scene_seed, chain_bridge, gpu_hold, gpu_idle_minutes)
+                                                 pick_source, start_clip_asset_id, scene_seed, chain_bridge, gpu_hold, gpu_idle_minutes,
+                                                 svi_scenes, svi_scene_seconds, svi_between)
                         VALUES (:id, :idea, :look, :n, :q, CAST(:modes AS jsonb), :r, 'RUNNING', 'SCOUT', :wf, :music, :scout,
                                 :em, :ea, :ep, :pd, :ht, :htext, :hcol, :hlock, :chain, :iref, :cgroup, :clocked, :pc, :parent,
-                                :episode, :cpath, :psrc, :sclip, :seed, :bridge, :ghold, :gidle)
+                                :episode, :cpath, :psrc, :sclip, :seed, :bridge, :ghold, :gidle, :svi, :svisec, :svibetween)
                         """)
+                .param("svi", sviScenes).param("svisec", sviSeconds).param("svibetween", DreamSvi.cleanBetween(req.sviBetween()))
                 .param("bridge", bridge).param("ghold", gpuHold).param("gidle", gpuIdle)
                 .param("pc", !raw && Boolean.TRUE.equals(req.pathChoice()))
                 .param("parent", cont == null ? null : cont.parentId()).param("episode", cont == null ? 1 : cont.episode())
@@ -206,6 +225,8 @@ public class DreamStudio {
         if (hookTitle) created.put("hookTitle", true);
         if (lastFrame) created.put("chainShots", true);
         if (bridge) created.put("chainBridge", true);
+        if (sviScenes > 0) created.putAll(Map.of("sviScenes", sviScenes, "sviSceneSeconds", sviSeconds,
+                "sviBetween", DreamSvi.cleanBetween(req.sviBetween())));
         if (seeded) created.put("idea", DreamIdeaPacks.ref(req.ideaPack(), req.ideaId()));
         if (Boolean.TRUE.equals(req.pathChoice())) created.put("pathChoice", true);
         if (cont != null) created.putAll(Map.of("parent", cont.parentId().toString(), "episode", cont.episode(),

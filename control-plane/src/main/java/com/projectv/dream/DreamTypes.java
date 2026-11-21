@@ -35,8 +35,18 @@ public final class DreamTypes {
     /** {@code cameraPath}: locked scene only, the one camera path of the whole Short that the shots are segments of. */
     /** {@code hook}: the 3-6 word hook title (the starred word is the big coloured one); only written when the Short asks for it. */
     /** {@code paths}: "Choose the path" only, the two 2-4 word options shown on the end card (e.g. "the door", "the stairs"). */
+    /** One SVI scene as the writer plans it: what its one picture shows, and one motion line per 5 s beat. */
+    public record PlannedScene(String scene, List<String> beats) {
+    }
+
+    /** {@code style}/{@code scenes}: SVI scenes only, one style line shared by every scene, and the scenes with their beats. */
     public record DreamWorld(String title, String world, String palette, String light, String hero, List<PlannedDreamShot> shots,
-                             String hook, String cameraPath, List<String> paths) {
+                             String hook, String cameraPath, List<String> paths, String style, List<PlannedScene> scenes) {
+        public DreamWorld(String title, String world, String palette, String light, String hero, List<PlannedDreamShot> shots,
+                          String hook, String cameraPath, List<String> paths) {
+            this(title, world, palette, light, hero, shots, hook, cameraPath, paths, null, null);
+        }
+
         public DreamWorld(String title, String world, String palette, String light, String hero, List<PlannedDreamShot> shots,
                           String hook, String cameraPath) {
             this(title, world, palette, light, hero, shots, hook, cameraPath, null);
@@ -69,7 +79,20 @@ public final class DreamTypes {
                                      int fps, double dissolveSec, String musicDir, String progressUrl, String musicUri,
                                      String musicName, double speed, String handheld, boolean musicEdit,
                                      boolean ambience, boolean pacing, boolean keepOrder, String hookText, String hookColor,
-                                     String pathA, String pathB) {
+                                     String pathA, String pathB, List<Integer> sviScenes, List<Integer> sviSceneFrames) {
+        /**
+         * {@code sviScenes}: SVI scenes, beats per scene in clip order (the worker cross-fades them into one shot per scene
+         * first); {@code sviSceneFrames}: each scene's length in frames at 16 fps (0 = all). Both null = not SVI.
+         */
+        public DreamFinishRequest(String dreamId, String look, List<DreamFinishClip> clips, int width, int height,
+                                  int fps, double dissolveSec, String musicDir, String progressUrl, String musicUri,
+                                  String musicName, double speed, String handheld, boolean musicEdit,
+                                  boolean ambience, boolean pacing, boolean keepOrder, String hookText, String hookColor,
+                                  String pathA, String pathB) {
+            this(dreamId, look, clips, width, height, fps, dissolveSec, musicDir, progressUrl, musicUri, musicName, speed,
+                    handheld, musicEdit, ambience, pacing, keepOrder, hookText, hookColor, pathA, pathB, null, null);
+        }
+
         /** {@code hookText}: the hook title burned into the first ~2 s (null = none, the default); {@code hookColor}: its big word's colour. */
         /** {@code pathA}/{@code pathB}: "Choose the path" end card over the last ~2 s (both null = none, the default). */
         public DreamFinishRequest(String dreamId, String look, List<DreamFinishClip> clips, int width, int height,

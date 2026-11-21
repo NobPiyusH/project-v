@@ -192,4 +192,68 @@ class DreamBrokerRouteTest {
             }
         }
     }
+
+    @Test
+    void sviScenesRenderBeatsOnThePodAndRedoFromABeatKeepsTheEarlierOnes() {
+        UUID dream = UUID.randomUUID();
+        jdbc.sql("""
+                        INSERT INTO dream_short (id, idea, look, status, svi_scenes, svi_scene_seconds, svi_between)
+                        VALUES (:id, :idea, 'unfiltered', 'RUNNING', 2, 10, 'cut')
+                        """).param("id", dream).param("idea", "pink pier at dawn\nwalk to the end\n\na red door opens").update();
+        assertTrue(dreams.writeShots(dream, null).contains("2 scenes, 3 beats"));
+        List<Map<String, Object>> shots = dreams.shots(dream);
+        assertEquals(List.of(1, 1, 2), shots.stream().map(DreamSvi::sceneOf).toList());
+        assertEquals(List.of(1, 2, 1), shots.stream().map(DreamSvi::beatOf).toList());
+        assertEquals("walk to the end", shots.get(1).get("motion_prompt"), "Unfiltered: the words exactly");
+        String b11 = shots.get(0).get("id").toString(), b12 = shots.get(1).get("id").toString(), b21 = shots.get(2).get("id").toString();
+
+        var pics = dreams.pictureRequest(dream, null, null);
+        assertEquals(List.of(b11, b21), pics.jobs().stream().map(j -> j.shotId()).toList(), "one picture per scene");
+        dreams.savePictures(dream, pics, new KeyframeResult(List.of(
+                new KeyframeOutput(b11, "s3://b/s1.png", "gpu_pod", "z", 1L, 5.0, null, null, List.of()),
+                new KeyframeOutput(b21, "s3://b/s2.png", "gpu_pod", "z", 2L, 5.0, null, null, List.of())), 0, 10));
+
+        var est = dreams.clipEstimate(dream, null);
+        assertTrue(est.summary().contains("3 SVI beats in 2 scene(s)"), est.summary());
+        var req = dreams.clipRequest(dream, null);
+        assertTrue(req.svi() && !req.chain());
+        assertEquals(List.of(1, 2, 1), req.jobs().stream().map(j -> j.beat()).toList());
+        assertEquals(List.of("s3://b/s1.png", "s3://b/s1.png", "s3://b/s2.png"), req.jobs().stream().map(j -> j.imageUri()).toList(),
+                "every beat is anchored on its scene's picture");
+        assertTrue(req.jobs().stream().allMatch(j -> j.numFrames() == 81 && j.width() == 480 && j.height() == 832));
+        assertEquals(1, jdbc.sql("SELECT count(*) FROM routing_decision WHERE dream_short_id = :d AND stage = 'DREAM_CLIPS_SVI'")
+                .param("d", dream).query(Integer.class).single(), "rule 6: the routing decision records the method");
+        dreams.saveClips(dream, req, new ClipResult(List.of(
+                new ClipOutput(b11, 1, "dream", "s3://b/c11.mp4", 40, 81, 16, "fast", null, 0),
+                new ClipOutput(b12, 1, "dream", "s3://b/c12.mp4", 40, 81, 16, "fast", null, 0),
+                new ClipOutput(b21, 1, "dream", null, 0, 0, 0, "fast", "ComfyUI error", 0)), 1, false));
+        assertEquals(2, jdbc.sql("""
+                        SELECT count(*) FROM asset a JOIN provenance p ON p.id = a.provenance_id
+                        WHERE a.dream_short_id = :d AND p.model LIKE '%svi2.0-pro scene%'
+                        """).param("d", dream).query(Integer.class).single(), "provenance per beat (two made, one failed)");
+
+        var retry = dreams.clipRequest(dream, null);
+        assertEquals(List.of(b21), retry.jobs().stream().map(j -> j.shotId()).toList(), "Retry: only the failed scene");
+        var redo = dreams.clipRequest(dream, List.of(b12));
+        assertEquals(List.of(b12), redo.jobs().stream().map(j -> j.shotId()).toList(), "redo beat 2: beat 1 is kept");
+        assertEquals("s3://b/c11.mp4", redo.jobs().getFirst().chainFromUri(), "it continues from beat 1");
+        assertEquals(2, redo.jobs().getFirst().take());
+        var redoFirst = dreams.clipRequest(dream, List.of(b11));
+        assertEquals(List.of(b11, b12), redoFirst.jobs().stream().map(j -> j.shotId()).toList(), "redo beat 1: later beats follow");
+
+        dreams.saveClips(dream, retry, new ClipResult(List.of(
+                new ClipOutput(b21, 1, "dream", "s3://b/c21.mp4", 40, 81, 16, "fast", null, 0)), 0, false));
+        var fin = dreams.finishRequest(dream);
+        assertEquals(List.of(2, 1), fin.sviScenes());
+        assertEquals(List.of(0, 0), fin.sviSceneFrames(), "Unfiltered keeps every frame");
+        assertEquals(0.0, fin.dissolveSec(), "hard cut between scenes by default");
+        assertTrue(fin.keepOrder(), "scene order is the story");
+
+        var again = dreams.pictureRequest(dream, List.of(b11), "warmer");
+        dreams.savePictures(dream, again, new KeyframeResult(List.of(
+                new KeyframeOutput(b11, "s3://b/s1b.png", "gpu_pod", "z", 3L, 5.0, null, null, List.of())), 0, 10));
+        assertEquals(List.of(b11, b12), dreams.clipRequest(dream, null).jobs().stream().map(j -> j.shotId()).toList(),
+                "a new scene picture makes every beat of that scene stale");
+        dreams.status(dream, "MUSIC", "RUNNING", null);
+    }
 }

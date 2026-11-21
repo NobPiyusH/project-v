@@ -441,4 +441,55 @@ class DreamHookChainIdeasTest {
         assertThrows(IllegalArgumentException.class, () -> studio.create(new NewDream("x", "lonely", 5, "480p", "AUTO", null, 10, "bed",
                 true, true, true, true, null, null, null, null, null, "impossible-architecture", "nope")));
     }
+
+    // ---------------------------------------------------------------------------------------------------- SVI scenes
+
+    @Test
+    void plainShortsKeepTheirWriterPromptWordForWord() {
+        var p = write(dream, null);
+        assertTrue(p[0].contains("\"shots\": [{\"scene\": what this shot shows (one or two sentences, concrete), \"motion\": the camera move and\n"
+                + "the small motion inside the scene}]} with exactly 3 shots."), p[0]);
+        assertFalse(p[0].contains("\"scenes\""));
+    }
+
+    @Test
+    void sviScenesAreWrittenAsScenesOfBeatsWithOneSharedStyle() {
+        jdbc.sql("UPDATE dream_short SET svi_scenes = 2, svi_scene_seconds = 10, look = 'architecture' WHERE id = :d").param("d", dream).update();
+        when(llm.call(any(), eq("dream.write"), any(), any(), eq(DreamWorld.class), any())).thenReturn(new DreamWorld("T", "w", "p", "l", "",
+                null, null, null, null, "35 mm, soft teal haze",
+                List.of(new DreamTypes.PlannedScene("a folding street", List.of("glide forward", "tilt up", "keep rising")),
+                        new DreamTypes.PlannedScene("a stair to the sky", List.of("climb")))));
+        ArgumentCaptor<String> sys = ArgumentCaptor.forClass(String.class);
+        String said = dreams.writeShots(dream, null);
+        verify(llm, atLeastOnce()).call(any(), eq("dream.write"), sys.capture(), any(), eq(DreamWorld.class), any());
+        assertTrue(sys.getValue().contains("Invent 2 scenes") && sys.getValue().contains("\"style\": ONE line"), sys.getValue());
+        assertTrue(sys.getValue().contains("with exactly 2 scenes") && !sys.getValue().contains("shots."),
+                "no shot count: the scenes set the shape");
+        assertTrue(said.contains("2 SVI scenes, 6 beats"), said);
+        var rows = dreams.shots(dream);
+        assertEquals(List.of(1, 1, 1, 2, 2, 2), rows.stream().map(DreamSvi::sceneOf).toList());
+        assertTrue(rows.stream().allMatch(r -> r.get("motion_prompt").toString().contains("Style: 35 mm, soft teal haze.")),
+                "one style line for every beat");
+        assertTrue(rows.get(0).get("picture_prompt").toString().startsWith("a folding street")
+                && rows.get(0).get("picture_prompt").toString().contains("Style: 35 mm, soft teal haze."));
+        assertTrue(rows.get(1).get("motion_prompt").toString().startsWith("tilt up."), "each beat has its own motion");
+        assertEquals("climb", rows.get(5).get("motion_prompt").toString().split("[.]")[0], "a missing beat repeats the last motion");
+        assertEquals(6, ((Number) dreams.dream(dream).get("shot_count")).intValue());
+    }
+
+    @Test
+    void sviOnTheFormWinsOverChainingAndSetsTheShape() {
+        UUID id = studio.create(new NewDream("a pink pier", "lonely", 4, "480p", "AUTO", null, 10, "bed", false, true, true, true,
+                null, null, null, null, true, null, null, 2, true, null, true, null, null, 3, 15, "dissolve"));
+        var row = jdbc.sql("SELECT * FROM dream_short WHERE id = :d").param("d", id).query().singleRow();
+        assertEquals(3, ((Number) row.get("svi_scenes")).intValue());
+        assertEquals(15, ((Number) row.get("svi_scene_seconds")).intValue());
+        assertEquals("dissolve", row.get("svi_between"));
+        assertEquals(12, ((Number) row.get("shot_count")).intValue(), "3 scenes x 4 beats");
+        assertEquals(false, row.get("chain_shots"));
+        assertEquals(false, row.get("chain_bridge"));
+        UUID off = studio.create(new NewDream("a pink pier", "lonely", 4, "480p", "AUTO", null, 10, "bed", false, true, true, true, null));
+        assertEquals(0, ((Number) jdbc.sql("SELECT svi_scenes FROM dream_short WHERE id = :d").param("d", off).query().singleRow()
+                .get("svi_scenes")).intValue(), "off by default");
+    }
 }
