@@ -3,14 +3,9 @@ package com.projectv.gpu.broker;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-/** Thin placeholders for the later adapters (owner: Jarvislabs, CloudRift next; Shadeform, Modal later; Vast.ai is built, see VastProvider). */
+/** Thin placeholders for the later adapters (owner: CloudRift next; Jarvislabs is built, see JarvislabsProvider; Shadeform, Modal later; Vast.ai is built, see VastProvider). */
 @Configuration
 class BrokerStubs {
-
-    @Bean
-    GpuProvider jarvislabsProvider() {
-        return new StubProvider("jarvislabs", "wrap the `jl` CLI / JL_API_KEY; A100 40GB Rs84/h seen");
-    }
 
     @Bean
     GpuProvider cloudriftProvider() {

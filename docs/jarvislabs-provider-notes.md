@@ -1,7 +1,10 @@
 # JarvisLabs provider notes (22 Nov 2026)
 
-Status: **adapter NOT built.** Research found no documented REST API for instance control, so any adapter would be written against guessed
-wire shapes. That is exactly how the untested adapters wasted hours (E2E, Vast). `jarvislabs` stays a stub in `BrokerStubs`, `proven=false`.
+Status: **adapter built on the Python SDK (owner chose "wrap jl SDK", 22 Nov 2026), unproven.** JarvisLabs documents no REST API, so
+`JarvislabsProvider` calls `workers/jarvislabs_helper.py` (one JSON command per process: gpus, list, get, create, destroy; the key is passed
+only in that process's `JL_API_KEY`). Run needs `uv` (the default command is `uv run --with jarvislabs python`, override with
+`JARVISLABS_COMMAND`). `proven=false`, monthly cap 0 in `config/providers.yaml`: raise the cap only when the owner approves the canary.
+The adapter and helper were written from the SDK docs and `client.py`/`instances.py` source and tested against a fake helper only.
 
 Sources read (docs.jarvislabs.ai overview, CLI, Python SDK, getting started, FAQs, legacy API; jarvislabs.ai/pricing; the GitHub README of
 jarvislabsai/jarvislabs). Nothing was called against the live API (no key was used).
@@ -41,7 +44,7 @@ Per-rental bearer token in `SV_TOKEN`; no account key on the node (startup scrip
 `listPods()` filtered by the `projectv-` name prefix (watchdog); `monthlyCapUsd` in `config/providers.yaml` (now 0); `JARVISLABS_API_KEY` in `.env`.
 Resume changing the machine id means a paused instance could be lost to the watchdog: never pause, only destroy.
 
-## Options for the owner
+## Options considered (option 1 was chosen)
 1. **Wrap the `jl` CLI / Python SDK** (recommended if Jarvislabs is wanted): a small Python helper called by the control plane (or a tiny
    Python sidecar with the same list/create/destroy contract). Cost: one more process on the laptop, but the SDK is the supported surface.
 2. **Get the REST contract** from JarvisLabs support (or capture it from the `jarvislabs` package source, which is on GitHub), then write
