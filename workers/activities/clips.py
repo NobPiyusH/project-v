@@ -402,6 +402,77 @@ def _pod(req: dict, base: str, video_id: str) -> tuple[list[dict], bool]:
     return clips, False
 
 
+def latent_key(video_id: str, j: dict) -> str:
+    """Where a beat's SVI latent is kept, next to its clip: a later redo resumes the scene from it."""
+    return clip_key(video_id, j)[:-4] + ".latent"
+
+
+def scene_groups(jobs: list[dict]) -> list[list[dict]]:
+    """SVI jobs grouped by scene, in order (each group: consecutive beats of one scene)."""
+    groups: list[list[dict]] = []
+    for j in jobs:
+        if groups and groups[-1][0]["scene"] == j["scene"]:
+            groups[-1].append(j)
+        else:
+            groups.append([j])
+    return groups
+
+
+def _svi(req: dict, base: str, video_id: str) -> tuple[list[dict], bool]:
+    """SVI scenes on the Short's rented pod: one pod job per scene renders its beats back to back in one graph.
+    A scene resumed at beat k > 1 (redo or retry) sends the saved latent of beat k-1, so earlier beats are kept and
+    the new ones continue seamlessly. Beats already saved by an earlier try of this take are reused (0 GPU s).
+    Every beat is saved (MP4 + latent) as soon as its scene is back; a failed scene fails only its own beats."""
+    from workers.pod import client as podc
+    import io
+    import zipfile
+
+    url = (req.get("gpuUrl") or "").rstrip("/")
+    if not url:
+        raise RuntimeError("GPU pod route: the control plane sent no container group URL")
+    pod = podc.Rented(base, video_id, url, float(req.get("readyTimeoutSeconds") or 1800), _beat)
+    clips: list[dict] = []
+    groups = scene_groups(req["jobs"])
+    for gi, group in enumerate(groups):
+        if _stop_requested(base, video_id):
+            clips += [_stopped(x) for g in groups[gi:] for x in g]
+            return clips, True
+        _report(base, video_id, [(x, None) for g in groups[gi:] for x in g], clips, {}, len(req["jobs"]))
+        first = group[0]
+        prev_latent = (first["chainFromUri"][:-4] + ".latent") if first["beat"] > 1 and first.get("chainFromUri") else None
+        rest = list(group)
+        while rest and exists(clip_key(video_id, rest[0])) and exists(latent_key(video_id, rest[0])):
+            j = rest.pop(0)  # a Retry after a lost save: this beat is rendered already
+            clips.append(_clip(video_id, j, {"uri": f"s3://{BUCKET}/{clip_key(video_id, j)}", "seconds": 0,
+                                             "mode": j["mode"], "fps": 16, "frames": 81}))
+            prev_latent = f"s3://{BUCKET}/{latent_key(video_id, j)}"
+        if not rest:
+            continue
+        try:
+            if rest[0]["beat"] > 1 and not prev_latent:
+                raise RuntimeError(f"beat {rest[0]['beat']} has no earlier beat to continue from")
+            payload = {"image": base64.b64encode(get_bytes(rest[0]["imageUri"])).decode(),
+                       "beats": [{"prompt": j["prompt"], "seed": int(j["seed"])} for j in rest],
+                       "startBeat": int(rest[0]["beat"]), "negative": rest[0].get("negative"), "frames": 81, "fps": 16,
+                       "width": int(rest[0]["width"]), "height": int(rest[0]["height"])}
+            if prev_latent:
+                payload["prevLatent"] = base64.b64encode(get_bytes(prev_latent)).decode()
+            data, info = pod.run("scene", payload)
+            per = float(info.get("seconds") or 0) / len(rest)  # one graph: its GPU time is shared by its beats
+            with zipfile.ZipFile(io.BytesIO(data)) as z:
+                made = {j["beat"]: (z.read(f"beat{j['beat']}.mp4"), z.read(f"beat{j['beat']}.latent")) for j in rest}
+        except Exception as e:  # noqa: BLE001 - one failed scene never fails the other scenes
+            err = f"{type(e).__name__}: {e}"[:600]
+            clips += [_clip(video_id, j, {"mp4": None, "seconds": 0, "error": err}) for j in rest]
+            continue
+        for k, j in enumerate(rest):
+            mp4, latent = made[j["beat"]]
+            put_bytes(latent_key(video_id, j), latent, "application/octet-stream")  # before the MP4: reuse needs both
+            clips.append(_clip(video_id, j, {"mp4": mp4, "seconds": per, "frames": 81, "fps": 16, "mode": j["mode"],
+                                             "coldStart": gi == 0 and k == 0}))
+    return clips, False
+
+
 HOLD_MAX_SECONDS = 300  # a held GPU stays warm for minutes, never hours (rule 8)
 
 
@@ -435,10 +506,13 @@ def generate_clips(req: dict) -> dict:
         _post(f"{base}/api/internal/clips/progress", {"videoId": video_id, "clips": [], "finished": True})
         return {"clips": clips, "containers": 0, "stopped": stopped}
     if req.get("provider") == "pod":
-        log.info("Starting %d clips for video %s on a rented pod", len(req["jobs"]), video_id)
-        clips, stopped = _pod(req, base, video_id)
+        log.info("Starting %d %s for video %s on a rented pod", len(req["jobs"]),
+                 "SVI beats" if req.get("svi") else "clips", video_id)
+        clips, stopped = (_svi if req.get("svi") else _pod)(req, base, video_id)
         _post(f"{base}/api/internal/clips/progress", {"videoId": video_id, "clips": [], "finished": True})
         return {"clips": clips, "containers": 1, "stopped": stopped, "coldStarts": 0}
+    if req.get("svi"):
+        raise RuntimeError("SVI scenes run on the rented GPU pod only (the Modal Wan app has no SVI LoRAs)")
     if any(j.get("endImageUri") for j in req["jobs"]):
         log.warning("First-last frame chaining runs on the rented pod only; on Modal these %d clips end freely",
                     len(req["jobs"]))

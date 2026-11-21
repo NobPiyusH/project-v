@@ -19,7 +19,8 @@ RETRIES = 2
 POLL = 3.0
 # How long ONE job may run once the pod has started it. Time spent queued behind other Shorts' jobs never counts
 # (21 Nov 2026: six Shorts on one pod timed out while waiting in the queue). The Temporal StartToClose is only the outer cap.
-RUN_LIMIT_S = {"picture": 10 * 60, "clip": 45 * 60}
+# A scene renders up to 5 beats in one job (and the first one also fetches the SVI LoRAs and restarts ComfyUI).
+RUN_LIMIT_S = {"picture": 10 * 60, "clip": 45 * 60, "scene": 90 * 60}
 
 
 class NotReady(Exception):

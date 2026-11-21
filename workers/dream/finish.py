@@ -16,7 +16,7 @@ from pathlib import Path
 from temporalio import activity
 
 from workers.common import ffmpeg_bin, get_bytes, log, media_duration, put_file, run_ffmpeg, workdir
-from workers.dream import edit, hook
+from workers.dream import edit, hook, scenes
 
 MUSIC_EXTENSIONS = {".mp3", ".wav", ".m4a", ".flac", ".ogg", ".aac"}
 
@@ -248,6 +248,8 @@ def finish(req: dict, tmp: Path) -> dict:
         src = tmp / f"in{n}.mp4"
         src.write_bytes(get_bytes(clip["uri"]))
         srcs.append(src)
+    if req.get("sviScenes"):  # SVI scenes: beats -> one continuous shot per scene, then the Finish as always
+        srcs, clips = scenes.assemble(srcs, clips, [int(n) for n in req["sviScenes"]], req.get("sviSceneFrames"), tmp)
     track, music_name = None, None
     if req.get("musicUri"):  # the Short's own music: a piece of the owner's track, or a Lyria score
         track = tmp / "score.wav"

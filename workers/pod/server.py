@@ -10,6 +10,10 @@ onto the container disk, start ComfyUI on 127.0.0.1. Serves on [::]:PORT (IPv6, 
   GET  /health              200 {"ready": true} once ready, else 503 {"ready": false, "phase": ...}
   POST /picture             {prompt, seed, width, height}                         -> 202 {"id": job}
   POST /clip                {image: b64 PNG, prompt, negative, seed, frames, fps, width, height} -> 202 {"id": job}
+  POST /scene               SVI scene {image: b64 PNG (the anchor), beats: [{prompt, seed}], startBeat, prevLatent: b64
+                            .latent (startBeat > 1), negative, frames, fps, width, height} -> 202 {"id": job}; result: a
+                            zip of beatK.mp4 + beatK.latent for each beat rendered. The first scene job installs
+                            KJNodes and fetches the SVI LoRAs (~2.5 GB), so normal Shorts never pay for them.
   GET  /jobs/<id>           {"state": queued|running|done|failed, "seconds", "error", ...}
   GET  /jobs/<id>/result    the PNG or MP4 bytes (404 until done)
 Jobs are async: the gateway's timeouts are capped and a first clip can take minutes. One GPU job at a time.
@@ -21,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import zipfile
 import io
 import json
 import os
@@ -60,6 +65,19 @@ FILES = {  # name: (repo, path in repo, ComfyUI models subfolder, size)
     LORA_HIGH: (LORA_REPO, LORA_HIGH, "loras", 634645944),
     LORA_LOW: (LORA_REPO, LORA_LOW, "loras", 739472104),
 }
+# SVI 2.0 Pro (paid bench 21 Nov 2026, docs/svi-scenes.md): KJNodes' WanImageToVideoSVIPro on the native loaders, the
+# two SVI LoRAs stacked at 1.0 on top of LightX2V. Only fetched by the first scene job (see Gpu.ensure_svi).
+KJ_SHA = "aa2b5ea5e7f61b51f5d26d726f23c1d74e951016"
+KJ_TARBALL = f"https://github.com/kijai/ComfyUI-KJNodes/archive/{KJ_SHA}.tar.gz"
+SVI_REPO = "Kijai/WanVideo_comfy"
+SVI_HIGH = "SVI_v2_PRO_Wan2.2-I2V-A14B_HIGH_lora_rank_128_fp16.safetensors"
+SVI_LOW = "SVI_v2_PRO_Wan2.2-I2V-A14B_LOW_lora_rank_128_fp16.safetensors"
+SVI_FILES = {
+    SVI_HIGH: (SVI_REPO, f"LoRAs/Stable-Video-Infinity/v2.0/{SVI_HIGH}", "loras", 1226934120),
+    SVI_LOW: (SVI_REPO, f"LoRAs/Stable-Video-Infinity/v2.0/{SVI_LOW}", "loras", 1226934120),
+}
+SVI_MOTION_LATENTS = 3   # ~12 frames carried into the next beat; 5 (20 frames) measured WORSE on 21 Nov
+SVI_MAX_BEATS = 5        # 20 s: content drifts after that (bench)
 ZIMAGE_REPO = "Tongyi-MAI/Z-Image-Turbo"
 PIP = ["huggingface_hub>=0.34", "diffusers>=0.36.0", "transformers>=4.57.0", "accelerate>=1.10", "safetensors",
        "sentencepiece", "pillow", "imageio-ffmpeg"]
@@ -180,6 +198,72 @@ def _clip_graph(c: dict, image_name: str, prefix: str, split: int, seed: int, ne
     }
 
 
+def validate_scene(c: dict) -> list[str]:
+    beats = c.get("beats")
+    if not isinstance(beats, list) or not beats:
+        return ["no beats"]
+    start = c.get("startBeat", 1)
+    errors = validate_clip({**c, "prompt": "x", "seed": 0})
+    if not isinstance(start, int) or start < 1 or start + len(beats) - 1 > SVI_MAX_BEATS:
+        errors.append(f"beats must stay within 1..{SVI_MAX_BEATS}")
+    if c.get("frames", 81) != 81:
+        errors.append("SVI beats are 81 frames")
+    if isinstance(start, int) and start > 1 and not c.get("prevLatent"):
+        errors.append("a scene resumed after beat 1 needs prevLatent")
+    for k, b in enumerate(beats, 1):
+        if not isinstance(b, dict) or not (b.get("prompt") or "").strip():
+            errors.append(f"beat {k}: empty prompt")
+        elif not isinstance(b.get("seed"), int) or b["seed"] < 0:
+            errors.append(f"beat {k}: seed must be a non-negative integer")
+    return errors
+
+
+def scene_graph(c: dict, image_name: str, prefix: str, prev_latent: str | None = None) -> dict:
+    """ComfyUI API graph for one SVI scene: every beat in ONE prompt (the bench's graph_b). The start picture is the
+    anchor of every beat; beat k > 1 continues from the previous beat's sampler latent (3 motion latents). A scene
+    resumed at beat s > 1 (a redo or a retry) starts from the saved latent of beat s-1 (LoadLatent). Each beat's frames
+    go to SaveImage "{prefix}_b{k}" and its latent to SaveLatent "{prefix}_b{k}", so a later redo can resume there."""
+    split = expert_split(STEPS)
+    neg = NEGATIVE + (", " + c["negative"] if c.get("negative") else "")
+    g = _clip_graph({**c, "prompt": c["beats"][0]["prompt"]}, image_name, prefix, split, 0, neg)
+    for n in ("12", "13", "14", "15", "16"):  # the plain I2V conditioning and its samplers are replaced below
+        g.pop(n)
+    g["30"] = {"class_type": "LoraLoaderModelOnly", "inputs": {"model": ["3", 0], "lora_name": SVI_HIGH, "strength_model": 1.0}}
+    g["31"] = {"class_type": "LoraLoaderModelOnly", "inputs": {"model": ["4", 0], "lora_name": SVI_LOW, "strength_model": 1.0}}
+    g["5"]["inputs"]["model"] = ["30", 0]
+    g["6"]["inputs"]["model"] = ["31", 0]
+    g["21"] = {"class_type": "VAEEncode", "inputs": {"pixels": ["11", 0], "vae": ["10", 0]}}
+    prev = None
+    if prev_latent:
+        g["22"] = {"class_type": "LoadLatent", "inputs": {"latent": prev_latent}}
+        prev = "22"
+    start = int(c.get("startBeat", 1))
+    for i, b in enumerate(c["beats"]):
+        k = start + i
+        pos = "8" if i == 0 else f"p{k}"
+        if i > 0:  # each beat may have its own motion prompt
+            g[pos] = {"class_type": "CLIPTextEncode", "inputs": {"text": b["prompt"], "clip": ["7", 0]}}
+        inp = {"positive": [pos, 0], "negative": ["9", 0], "length": int(c.get("frames", 81)),
+               "anchor_samples": ["21", 0], "motion_latent_count": SVI_MOTION_LATENTS}
+        if prev:
+            inp["prev_samples"] = [prev, 0]
+        seed = int(b["seed"]) & 0xFFFFFFFFFFFFFFFF
+        common = {"noise_seed": seed, "steps": STEPS, "cfg": 1.0, "sampler_name": SAMPLER, "scheduler": "simple",
+                  "positive": [f"c{k}", 0], "negative": [f"c{k}", 1]}
+        g[f"c{k}"] = {"class_type": "WanImageToVideoSVIPro", "inputs": inp}
+        g[f"k{k}a"] = {"class_type": "KSamplerAdvanced", "inputs": {
+            **common, "model": ["5", 0], "add_noise": "enable", "latent_image": [f"c{k}", 2], "start_at_step": 0,
+            "end_at_step": split, "return_with_leftover_noise": "enable"}}
+        g[f"k{k}b"] = {"class_type": "KSamplerAdvanced", "inputs": {
+            **common, "model": ["6", 0], "add_noise": "disable", "latent_image": [f"k{k}a", 0], "start_at_step": split,
+            "end_at_step": 10000, "return_with_leftover_noise": "disable"}}
+        g[f"d{k}"] = {"class_type": "VAEDecode", "inputs": {"samples": [f"k{k}b", 0], "vae": ["10", 0]}}
+        g[f"s{k}"] = {"class_type": "SaveImage", "inputs": {"images": [f"d{k}", 0], "filename_prefix": f"{prefix}_b{k}"}}
+        g[f"l{k}"] = {"class_type": "SaveLatent", "inputs": {"samples": [f"k{k}b", 0], "filename_prefix": f"{prefix}_b{k}"}}
+        prev = f"k{k}b"
+    return g
+
+
 def plan() -> dict:
     return {"comfy": COMFY_TAG, "files": sorted(FILES), "zimage": ZIMAGE_REPO,
             "download_gb": round(sum(f[3] for f in FILES.values()) / 1e9, 1), "root": str(ROOT), "port": PORT,
@@ -187,6 +271,11 @@ def plan() -> dict:
 
 
 # ------------------------------------------------------------------------------------------- jobs
+
+def model_of(kind: str) -> str:
+    """The model a job kind keeps in VRAM: clips and SVI scenes both run on the Wan experts."""
+    return "zimage" if kind == "picture" else "wan"
+
 
 class Jobs:
     """Async job table + one GPU thread. `runner(kind, payload) -> (bytes, extra)` does the work.
@@ -225,9 +314,9 @@ class Jobs:
         """The next job by the batch order above (called with self.cv held)."""
         if not self.pending:
             return None
-        loaded = self.last_kind or "picture"
-        same = [p for p in self.pending if p[1] == loaded]
-        other = [p for p in self.pending if p[1] != loaded]
+        loaded = model_of(self.last_kind or "picture")
+        same = [p for p in self.pending if model_of(p[1]) == loaded]
+        other = [p for p in self.pending if model_of(p[1]) != loaded]
         if same and not (other and self.clock() - other[0][3] >= self.SWITCH_AFTER_S):
             chosen = same[0]
         else:
@@ -245,7 +334,7 @@ class Jobs:
             j = self.jobs.get(jid)
             if not j or j["state"] != "done":
                 return None
-            return j["result"], ("video/mp4" if j["kind"] == "clip" else "image/png")
+            return j["result"], {"clip": "video/mp4", "scene": "application/zip"}.get(j["kind"], "image/png")
 
     def work_one(self, block: bool = True) -> bool:
         with self.cv:
@@ -327,7 +416,7 @@ def make_handler(state: State):
         def do_POST(self):  # noqa: N802
             touch_heartbeat()
             path = self.path.split("?")[0].rstrip("/")
-            if path not in ("/clip", "/picture"):
+            if path not in ("/clip", "/picture", "/scene"):
                 return self._json(404, {"error": "not found"})
             if not state.ready or not state.jobs:
                 return self._json(503, {"error": "not ready", "phase": state.phase})
@@ -336,7 +425,8 @@ def make_handler(state: State):
             except ValueError:
                 return self._json(400, {"error": "bad json"})
             kind = path[1:]
-            errors = validate_clip(body) if kind == "clip" else validate_picture(body)
+            errors = (validate_clip(body) if kind == "clip" else validate_scene(body) if kind == "scene"
+                      else validate_picture(body))
             if errors:
                 return self._json(400, {"error": "; ".join(errors)})
             return self._json(202, {"id": state.jobs.submit(kind, body)})
@@ -423,6 +513,48 @@ def copy_tree_plain(src: Path, dst: Path) -> None:
             shutil.copyfile(Path(root) / f, out / f)
 
 
+def fetch_file(name: str, spec: tuple, comfy: Path, weights: Path) -> str:
+    """One weight file into ComfyUI's models folder: the volume copy when complete, else Hugging Face (size-checked)."""
+    from huggingface_hub import hf_hub_download
+
+    repo, path, sub, size = spec
+    cached = volume_file(VOLUME, name, size)
+    if cached is not None:
+        local, how = cached, "volume"
+    else:
+        local = Path(hf_hub_download(repo, path, local_dir=str(weights)))
+        if local.stat().st_size != size:
+            raise RuntimeError(f"{name}: size {local.stat().st_size} != expected {size}")
+        how = "huggingface"
+        if VOLUME:
+            copy_to_volume(VOLUME, name, local)
+    dest = comfy / "models" / sub / name
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if dest.is_symlink() or dest.exists():
+        dest.unlink()
+    dest.symlink_to(local)
+    return how
+
+
+def fetch_kjnodes(comfy: Path) -> None:
+    """ComfyUI-KJNodes at the pinned commit (the bench's), with its requirements (the image's torch is kept)."""
+    dest = comfy / "custom_nodes" / "ComfyUI-KJNodes"
+    if (dest / "__init__.py").exists():
+        return
+    with tempfile.TemporaryDirectory(dir=ROOT) as tmp:
+        tgz = Path(tmp) / "kj.tgz"
+        urllib.request.urlretrieve(KJ_TARBALL, tgz)
+        with tarfile.open(tgz) as t:
+            t.extractall(tmp, filter="data")
+        src = next(p for p in Path(tmp).iterdir() if p.is_dir())
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(src), dest)
+    req = dest / "requirements.txt"
+    if req.exists():
+        subprocess.run([sys.executable, "-m", "pip", "install", "-q", "--retries", "10", "--timeout", "60", "-r", str(req)],
+                       check=True)
+
+
 def download(comfy: Path, state: State) -> None:
     global ZIMAGE_PATH
     from huggingface_hub import hf_hub_download, snapshot_download
@@ -503,8 +635,32 @@ def ffmpeg() -> str:
 class Gpu:
     """Runs one job at a time. Z-Image (diffusers) and the Wan experts (ComfyUI) never share the VRAM."""
 
-    def __init__(self):
+    def __init__(self, comfy: Path | None = None, proc: subprocess.Popen | None = None):
         self.zimage = None
+        self.comfy, self.proc = comfy, proc
+        self.svi_ready = False
+
+    def ensure_svi(self) -> None:
+        """First scene job only: KJNodes + the two SVI LoRAs, then a ComfyUI restart (custom nodes load at start).
+        Normal Shorts never reach this, so their boot stays as it was."""
+        if self.svi_ready:
+            return
+        t = time.time()
+        fetch_kjnodes(self.comfy)
+        for name, spec in SVI_FILES.items():
+            log(f"SVI {name} from {fetch_file(name, spec, self.comfy, ROOT / 'weights')}")
+        if self.proc is not None:
+            self.proc.terminate()
+            try:
+                self.proc.wait(timeout=60)
+            except subprocess.TimeoutExpired:
+                self.proc.kill()
+        self.proc = start_comfy(self.comfy)
+        info = http_json(f"http://127.0.0.1:{COMFY_PORT}/object_info/WanImageToVideoSVIPro")
+        if "WanImageToVideoSVIPro" not in (info or {}):
+            raise RuntimeError("KJNodes loaded without WanImageToVideoSVIPro")
+        self.svi_ready = True
+        log(f"SVI ready in {time.time() - t:.0f} s")
 
     def _free_comfy(self):
         try:
@@ -520,6 +676,8 @@ class Gpu:
             torch.cuda.empty_cache()
 
     def run(self, kind: str, p: dict) -> tuple[bytes, dict]:
+        if kind == "scene":
+            return self.scene(p)
         return self.picture(p) if kind == "picture" else self.clip(p)
 
     def picture(self, p: dict) -> tuple[bytes, dict]:
@@ -552,31 +710,78 @@ class Gpu:
             end_name = f"{jid}-end.png"
             Image.open(io.BytesIO(base64.b64decode(c["endImage"]))).convert("RGB") \
                 .resize((c["width"], c["height"]), Image.LANCZOS).save(ROOT / "comfy" / "in" / end_name)
-        pid = http_json(f"http://127.0.0.1:{COMFY_PORT}/prompt",
-                        {"prompt": clip_graph(c, name, f"clip/{jid}", end_name)})["prompt_id"]
-        while True:
-            hist = http_json(f"http://127.0.0.1:{COMFY_PORT}/history/{pid}").get(pid)
-            status = (hist or {}).get("status", {})
-            if status.get("status_str") == "error":
-                msgs = [m for m in status.get("messages", []) if m and m[0] == "execution_error"]
-                raise RuntimeError(msgs[0][1].get("exception_message", "ComfyUI error") if msgs else "ComfyUI error")
-            if hist and hist.get("outputs"):
-                break
-            time.sleep(1)
-        images = hist["outputs"]["16"]["images"]
-        frames = [ROOT / "comfy" / "out" / im.get("subfolder", "") / im["filename"] for im in images]
+        hist = run_prompt(clip_graph(c, name, f"clip/{jid}", end_name))
+        frames = frames_of(hist, "16")
         fps = int(c.get("fps", 16))
-        with tempfile.TemporaryDirectory() as tmp:
-            for i, f in enumerate(frames):
-                os.symlink(f, Path(tmp) / f"{i:05d}.png")
-            mp4 = Path(tmp) / "clip.mp4"
-            subprocess.run([ffmpeg(), "-y", "-loglevel", "error", "-framerate", str(fps), "-i", f"{tmp}/%05d.png",
-                            "-c:v", "libx264", "-crf", "12", "-preset", "slow", "-pix_fmt", "yuv420p", str(mp4)], check=True)
-            data = mp4.read_bytes()
-        for f in frames:
-            f.unlink(missing_ok=True)
+        data = encode_frames(frames, fps)
         (ROOT / "comfy" / "in" / name).unlink(missing_ok=True)
         return data, {"frames": len(frames), "fps": fps}
+
+    def scene(self, c: dict) -> tuple[bytes, dict]:
+        """One SVI scene (or the rest of it, from startBeat): all beats in one ComfyUI prompt. Returns a zip with each
+        beat's MP4 (81 frames; the laptop does the 12-frame cross-fade) and its latent (for a later resume)."""
+        from PIL import Image
+
+        self._free_zimage()
+        self.ensure_svi()
+        jid = uuid.uuid4().hex[:12]
+        name = f"{jid}.png"
+        Image.open(io.BytesIO(base64.b64decode(c["image"]))).convert("RGB") \
+            .resize((c["width"], c["height"]), Image.LANCZOS).save(ROOT / "comfy" / "in" / name)
+        prev = None
+        if c.get("prevLatent"):
+            prev = f"{jid}-prev.latent"
+            (ROOT / "comfy" / "in" / prev).write_bytes(base64.b64decode(c["prevLatent"]))
+        start = int(c.get("startBeat", 1))
+        prefix = f"scene/{jid}"
+        hist = run_prompt(scene_graph(c, name, prefix, prev))
+        fps = int(c.get("fps", 16))
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as z:
+            for k in range(start, start + len(c["beats"])):
+                z.writestr(f"beat{k}.mp4", encode_frames(frames_of(hist, f"s{k}"), fps))
+                lat = sorted((ROOT / "comfy" / "out" / "scene").glob(f"{jid}_b{k}_*.latent"))
+                if not lat:
+                    raise RuntimeError(f"beat {k}: no latent saved")
+                z.writestr(f"beat{k}.latent", lat[-1].read_bytes())
+                for f in lat:
+                    f.unlink(missing_ok=True)
+        for f in (name, prev):
+            if f:
+                (ROOT / "comfy" / "in" / f).unlink(missing_ok=True)
+        return buf.getvalue(), {"beats": len(c["beats"]), "startBeat": start, "fps": fps}
+
+
+def run_prompt(graph: dict) -> dict:
+    """Queue a graph on ComfyUI and wait for its history entry; a ComfyUI error is raised with its message."""
+    pid = http_json(f"http://127.0.0.1:{COMFY_PORT}/prompt", {"prompt": graph})["prompt_id"]
+    while True:
+        hist = http_json(f"http://127.0.0.1:{COMFY_PORT}/history/{pid}").get(pid)
+        status = (hist or {}).get("status", {})
+        if status.get("status_str") == "error":
+            msgs = [m for m in status.get("messages", []) if m and m[0] == "execution_error"]
+            raise RuntimeError(msgs[0][1].get("exception_message", "ComfyUI error") if msgs else "ComfyUI error")
+        if hist and hist.get("outputs") and status.get("completed", True):
+            return hist
+        time.sleep(1)
+
+
+def frames_of(hist: dict, node: str) -> list[Path]:
+    return [ROOT / "comfy" / "out" / im.get("subfolder", "") / im["filename"] for im in hist["outputs"][node]["images"]]
+
+
+def encode_frames(frames: list[Path], fps: int) -> bytes:
+    """PNG frames -> H.264 MP4 (CRF 12, as every studio clip) and the PNGs deleted."""
+    with tempfile.TemporaryDirectory() as tmp:
+        for i, f in enumerate(frames):
+            os.symlink(f, Path(tmp) / f"{i:05d}.png")
+        mp4 = Path(tmp) / "clip.mp4"
+        subprocess.run([ffmpeg(), "-y", "-loglevel", "error", "-framerate", str(fps), "-i", f"{tmp}/%05d.png",
+                        "-c:v", "libx264", "-crf", "12", "-preset", "slow", "-pix_fmt", "yuv420p", str(mp4)], check=True)
+        data = mp4.read_bytes()
+    for f in frames:
+        f.unlink(missing_ok=True)
+    return data
 
 
 def boot_heartbeat(state: State, interval: float = BOOT_BEAT_SECONDS) -> None:
@@ -594,8 +799,8 @@ def boot(state: State) -> None:
         comfy = fetch_comfy()
         download(comfy, state)
         state.phase = "starting ComfyUI"
-        start_comfy(comfy)
-        gpu = Gpu()
+        proc = start_comfy(comfy)
+        gpu = Gpu(comfy, proc)
         state.jobs = Jobs(gpu.run)
         threading.Thread(target=state.jobs.loop, daemon=True, name="gpu").start()
         state.phase, state.ready = "ready", True
@@ -612,6 +817,8 @@ def main(argv=None) -> int:
     if args.dry_run:
         print(json.dumps(plan(), indent=1))
         clip_graph({"prompt": "test", "seed": 1, "width": 480, "height": 832, "frames": 81}, "x.png", "clip/x")
+        scene_graph({"beats": [{"prompt": "a", "seed": 1}, {"prompt": "b", "seed": 2}], "width": 480, "height": 832},
+                    "x.png", "scene/x")
         print("dry run OK")
         return 0
     state = State()
