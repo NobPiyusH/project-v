@@ -18,13 +18,13 @@ import subprocess
 import tempfile
 import threading
 import urllib.request
-import uuid
 import wave
 from pathlib import Path
 
 from google.genai import types
 from temporalio import activity
 
+from workers import groq_whisper
 from workers.common import (RateLimiter, gemini, log, model_list, pcm_to_wav, put_bytes, run_ffmpeg, usage_dict,
                             with_models)
 
@@ -96,20 +96,9 @@ def _whisper(wav: bytes) -> str | None:
     """Literal transcript from Whisper on Groq (free tier). Gemini's transcriber was found to silently drop spoken
     style instructions ("Say in a fast-paced ... voice"), so the quality gate passed bad takes (16 Nov 2026).
     Returns None when no Groq key is set or the call fails, so the Gemini check is used instead."""
-    key = os.getenv("GROQ_API_KEY")
-    if not key:
-        return None
-    b = uuid.uuid4().hex
-    crlf = "\r\n"
-    head = (f'--{b}{crlf}Content-Disposition: form-data; name="model"{crlf}{crlf}whisper-large-v3{crlf}'
-            f'--{b}{crlf}Content-Disposition: form-data; name="file"; filename="line.wav"{crlf}'
-            f'Content-Type: audio/wav{crlf}{crlf}')
-    body = head.encode() + wav + f"{crlf}--{b}--{crlf}".encode()
-    request = urllib.request.Request("https://api.groq.com/openai/v1/audio/transcriptions", body, {
-        "Authorization": "Bearer " + key, "Content-Type": f"multipart/form-data; boundary={b}", "User-Agent": "projectv"})
     try:
-        with urllib.request.urlopen(request, timeout=60) as r:
-            return (json.load(r).get("text") or "").strip()
+        result = groq_whisper.transcribe(wav)
+        return None if result is None else (result.get("text") or "").strip()
     except Exception as e:  # never fail a take on the checker; fall back to Gemini
         log.warning("Whisper check unavailable (%s), using Gemini", type(e).__name__)
         return None

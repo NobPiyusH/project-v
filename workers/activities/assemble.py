@@ -10,16 +10,13 @@ the stage before rendering (CLAUDE.md rule 10).
 
 from __future__ import annotations
 
-import json
-import os
 import re
-import urllib.request
-import uuid
 import zipfile
 from pathlib import Path
 
 from temporalio import activity
 
+from workers import groq_whisper
 from workers.activities import sfx
 from workers.activities.mixing import mix_audio
 from workers.common import beat as _beat, download, drawtext_escape as _esc, log, media_duration, put_file, run_ffmpeg, workdir
@@ -35,22 +32,14 @@ MAX_STRETCH = 1.6  # slowing a clip more than this looks like slow motion: repor
 
 def _whisper_words(wav: bytes, language: str | None) -> list[dict] | None:
     """Word start/end times from Whisper on Groq (free). None when unavailable."""
-    key = os.getenv("GROQ_API_KEY")
-    if not key:
-        return None
-    b = uuid.uuid4().hex
-    crlf = "\r\n"
-    fields = [("model", "whisper-large-v3"), ("response_format", "verbose_json"), ("timestamp_granularities[]", "word")]
+    fields = [("response_format", "verbose_json"), ("timestamp_granularities[]", "word")]
     if language:
         fields.append(("language", language))
-    head = "".join(f"--{b}{crlf}Content-Disposition: form-data; name=\"{k}\"{crlf}{crlf}{v}{crlf}" for k, v in fields)
-    head += f'--{b}{crlf}Content-Disposition: form-data; name="file"; filename="line.wav"{crlf}Content-Type: audio/wav{crlf}{crlf}'
-    body = head.encode() + wav + f"{crlf}--{b}--{crlf}".encode()
-    req = urllib.request.Request("https://api.groq.com/openai/v1/audio/transcriptions", body, {
-        "Authorization": "Bearer " + key, "Content-Type": f"multipart/form-data; boundary={b}", "User-Agent": "projectv"})
     try:
-        with urllib.request.urlopen(req, timeout=60) as r:
-            words = json.load(r).get("words") or []
+        result = groq_whisper.transcribe(wav, fields)
+        if result is None:
+            return None
+        words = result.get("words") or []
         return [{"word": w["word"].strip(), "start": float(w["start"]), "end": float(w["end"])} for w in words if w.get("word")]
     except Exception as e:  # noqa: BLE001
         log.warning("Whisper word timings unavailable (%s); spacing caption words evenly", type(e).__name__)
