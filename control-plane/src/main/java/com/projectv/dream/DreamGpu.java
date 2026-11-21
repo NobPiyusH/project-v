@@ -85,6 +85,11 @@ public class DreamGpu {
         return enabled;
     }
 
+    /** Today's studio GPU spend (UTC) vs the daily cap: {spentUsd, bookedUsd, runningUsd, capUsd}. */
+    public java.util.Map<String, Object> today() {
+        return broker.today();
+    }
+
     /** Whether this Short is using the shared pod. */
     public boolean isOpen(UUID dreamId) {
         return broker.open(dreamId).isPresent();
@@ -169,13 +174,24 @@ public class DreamGpu {
      * gone: a released rental (the Short ended) is never rented again from here, and a live one is returned as it is.
      */
     public Session replace(UUID dreamId) {
+        return replace(dreamId, null, null);
+    }
+
+    /**
+     * As {@link #replace(UUID)}; with {@code unreadyUrl} the worker says the pod at that address never became ready
+     * ({@code why}): the broker retires that pod (terminated, booked) and rents another one.
+     */
+    public Session replace(UUID dreamId, String unreadyUrl, String why) {
         if (!enabled) {
             throw new IllegalStateException("The GPU broker is off (projectv.dream.gpu-provider=modal)");
         }
         if (broker.podState(dreamId) == GpuBroker.PodState.NONE) {
             throw new IllegalStateException("Short " + dreamId + " has no open GPU rental (released); not renting again");
         }
-        log.warn("GPU pod of Short {} vanished during a GPU step; renting a replacement", dreamId);
+        if (unreadyUrl != null && !unreadyUrl.isBlank()) {
+            broker.retireUnready(unreadyUrl, why == null ? "not ready in time" : why);
+        }
+        log.warn("GPU pod of Short {} vanished or never got ready during a GPU step; renting a replacement", dreamId);
         return session(dreamId); // acquire() releases and books the gone rental, then rents again
     }
 

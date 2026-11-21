@@ -15,11 +15,18 @@ import java.util.Map;
 
 /**
  * Broker settings: provider order and per-provider monthly caps (USD, 0 = blocked) from
- * {@code pricing.gpuBroker} in config/providers.yaml. Caps are limits, never prices (rule 7).
+ * {@code pricing.gpuBroker} in config/providers.yaml. Caps are limits, never prices (rule 7). {@code dailyCapUsd}: all
+ * studio GPU spend per UTC day (owner, 21 Nov 2026: $3.50); 0 = no daily limit.
  */
 public record BrokerConfig(List<String> order, Map<String, Double> monthlyCapUsd, double totalCapUsd,
                            List<String> gpuPreference, int minVramGb, int minRamGb, int diskGb,
-                           double expectedHours, int port) {
+                           double expectedHours, int port, double dailyCapUsd) {
+
+    /** Without a daily cap (tests and older callers): 0 = no daily limit. */
+    public BrokerConfig(List<String> order, Map<String, Double> monthlyCapUsd, double totalCapUsd,
+                        List<String> gpuPreference, int minVramGb, int minRamGb, int diskGb, double expectedHours, int port) {
+        this(order, monthlyCapUsd, totalCapUsd, gpuPreference, minVramGb, minRamGb, diskGb, expectedHours, port, 0);
+    }
 
     public static final List<String> DEFAULT_ORDER = List.of("runpod", "jarvislabs", "cloudrift", "vast", "shadeform", "modal");
 
@@ -45,7 +52,7 @@ public record BrokerConfig(List<String> order, Map<String, Double> monthlyCapUsd
                 b.get("gpuPreference") instanceof List<?> l ? l.stream().map(String::valueOf).toList()
                         : List.of("NVIDIA GeForce RTX 4090", "NVIDIA GeForce RTX 5090", "NVIDIA RTX A6000", "NVIDIA L40S"),
                 (int) num(b.get("minVramGb"), 24), (int) num(b.get("minRamGb"), 48), (int) num(b.get("diskGb"), 80),
-                num(b.get("expectedHours"), 0.75), (int) num(b.get("port"), 8000));
+                num(b.get("expectedHours"), 0.75), (int) num(b.get("port"), 8000), num(b.get("dailyCapUsd"), 0));
     }
 
     private static double num(Object o, double dflt) {

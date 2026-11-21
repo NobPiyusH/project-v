@@ -501,4 +501,58 @@ class GpuBrokerTest {
         b2.acquire(UUID.randomUUID(), "video.i2v.dream", "img", List.of("w"), Map.of(), null);
         assertTrue(records.decisions.getFirst().contains("cheapest eligible"));
     }
+
+    // ------------------------------------------------------------------ daily cap and never-ready pods (21 Nov 2026)
+
+    GpuBroker dailyBroker(Clock clock, double spentTodayUsd) {
+        BrokerConfig cfg = new BrokerConfig(List.of("runpod", "jarvislabs", "modal"), caps, 0,
+                List.of("NVIDIA GeForce RTX 4090"), 24, 48, 80, 1.0, 8000, 3.50);
+        GpuWallet wallet = new GpuWallet(cfg, p -> spent.getOrDefault(p, 0.0), () -> spentTodayUsd);
+        return new GpuBroker(List.of(runpod, jarvis, modal), cfg, wallet, records, leases, (p, pod, r, h, u) -> { },
+                new GpuPodLimits("projectv-", 120, 15, 10, 2, 2.0, false), clock);
+    }
+
+    @Test
+    void dailyCapRefusesARentalPastItWithAClearMessage() {
+        GpuBroker b = dailyBroker(Clock.fixed(NOW, ZoneOffset.UTC), 3.20); // $0.30 left, a rental needs about $0.50
+        GpuBroker.NoGpuAvailableException e = assertThrows(GpuBroker.NoGpuAvailableException.class, () -> acquire(b));
+        assertTrue(e.getMessage().startsWith("Daily GPU cap reached"), e.getMessage());
+        assertTrue(e.getMessage().contains("$3.20 spent today (UTC) of the $3.50 cap"), e.getMessage());
+        assertTrue(e.getMessage().contains("waits for you"), e.getMessage());
+        assertTrue(runpod.created.isEmpty() && jarvis.created.isEmpty(), "nothing rented");
+        assertEquals(1, records.decisions.size(), "the refusal is a routing decision too (rule 6)");
+    }
+
+    @Test
+    void underTheDailyCapItRentsAndTodayCountsTheRunningPod() {
+        java.util.concurrent.atomic.AtomicReference<Instant> now = new java.util.concurrent.atomic.AtomicReference<>(NOW);
+        Clock clock = new Clock() {
+            public java.time.ZoneId getZone() { return ZoneOffset.UTC; }
+            public Clock withZone(java.time.ZoneId z) { return this; }
+            public Instant instant() { return now.get(); }
+        };
+        GpuBroker b = dailyBroker(clock, 1.00);
+        acquire(b);
+        now.set(NOW.plusSeconds(3600)); // one hour at $0.50/h
+        Map<String, Object> t = b.today();
+        assertEquals(1.50, (double) t.get("spentUsd"), 1e-9);
+        assertEquals(0.50, (double) t.get("runningUsd"), 1e-9);
+        assertEquals(3.50, (double) t.get("capUsd"), 1e-9);
+    }
+
+    @Test
+    void aPodThatNeverBecameReadyIsRetiredBookedAndReplaced() {
+        GpuBroker b = dailyBroker(Clock.fixed(NOW, ZoneOffset.UTC), 0);
+        UUID other = UUID.randomUUID();
+        GpuBroker.Rental first = acquire(b);
+        b.acquire(other, "video.i2v.dream", "img", List.of("python", "worker.py"), Map.of(), null);
+        assertFalse(b.retireUnready("https://somewhere-else", "late"), "only the pod the worker waited on");
+        assertTrue(b.retireUnready("https://x/", "not ready after 30 min"));
+        assertEquals(List.of(first.instance().id()), runpod.terminated, "terminated");
+        assertEquals(List.of(first.instance().id()), leases.released);
+        assertFalse(records.costs.isEmpty(), "its time is booked");
+        GpuBroker.Rental second = acquire(b);
+        assertNotEquals(first.instance().id(), second.instance().id());
+        assertTrue(b.open(other).isPresent(), "the other Short moved to the new pod");
+    }
 }

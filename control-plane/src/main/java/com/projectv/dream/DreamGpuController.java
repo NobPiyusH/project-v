@@ -3,6 +3,7 @@ package com.projectv.dream;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -27,9 +28,13 @@ public class DreamGpuController {
 
     /** The worker found the pod gone mid-step: rent a replacement (refused once the Short's rental was released). */
     @PostMapping("/internal/gpu/{dreamId}/replace")
-    public Map<String, Object> replace(@PathVariable UUID dreamId) {
-        var s = gpu.replace(dreamId);
+    public Map<String, Object> replace(@PathVariable UUID dreamId, @RequestBody(required = false) ReplaceBody body) {
+        var s = body == null ? gpu.replace(dreamId) : gpu.replace(dreamId, body.unreadyUrl(), body.why());
         return Map.of("url", s.url(), "readyTimeoutSeconds", s.readyTimeoutSeconds());
+    }
+
+    /** unreadyUrl: the pod address that never became ready (null = the pod vanished). */
+    public record ReplaceBody(String unreadyUrl, String why) {
     }
 
     public record PickBody(String mode, String choice) {
@@ -81,6 +86,6 @@ public class DreamGpuController {
 
     @GetMapping("/gpu/broker")
     public Map<String, Object> status() {
-        return Map.of("enabled", gpu.enabled());
+        return gpu.enabled() ? Map.of("enabled", true, "today", gpu.today()) : Map.of("enabled", false);
     }
 }

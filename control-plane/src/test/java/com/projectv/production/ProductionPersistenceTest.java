@@ -138,7 +138,7 @@ class ProductionPersistenceTest {
 
     @Test
     void allMigrationsApplyAndLicencesAreSeeded() throws Exception {
-        assertEquals(12, jdbc.sql("SELECT count(*) FROM licence").query(Integer.class).single()); // main 11 + owner music (V22)
+        assertEquals(13, jdbc.sql("SELECT count(*) FROM licence").query(Integer.class).single()); // main 11 + owner music (V22) + FLUX.2 klein (V40)
         assertEquals(expectedMigrations(), jdbc.sql("SELECT count(*) FROM flyway_schema_history WHERE success").query(Integer.class).single());
     }
 

@@ -116,18 +116,62 @@ def worker(monkeypatch):
     return saved, sent
 
 
-def test_one_pod_job_per_scene_and_every_beat_saved(worker):
+def test_one_pod_job_per_beat_and_every_beat_saved_at_once(worker):
     saved, sent = worker
     jobs = [_job(1, b) for b in (1, 2, 3)] + [_job(2, b) for b in (1, 2, 3)]
     clips, stopped = C._svi({"gpuUrl": "https://g/", "jobs": jobs, "svi": True}, "http://cp", "v")
-    assert not stopped and [k for k, _ in sent] == ["scene", "scene"]
+    assert not stopped and [k for k, _ in sent] == ["scene"] * 6
+    assert [(p["startBeat"], len(p["beats"])) for _, p in sent] == [(1, 1), (2, 1), (3, 1)] * 2
     p = sent[0][1]
-    assert [b["prompt"] for b in p["beats"]] == ["move 1.1", "move 1.2", "move 1.3"] and p["startBeat"] == 1
-    assert base64.b64decode(p["image"]) == b"PNG:s3://b/scene1.png" and "prevLatent" not in p
-    assert base64.b64decode(sent[1][1]["image"]) == b"PNG:s3://b/scene2.png"
-    assert all(c["uri"] and c["gpuSeconds"] == 30 for c in clips) and len(clips) == 6
+    assert p["beats"][0]["prompt"] == "move 1.1" and "prevLatent" not in p
+    assert base64.b64decode(p["image"]) == b"PNG:s3://b/scene1.png"
+    assert base64.b64decode(sent[1][1]["prevLatent"]) == b"LAT-1", "beat 2 continues from beat 1's saved latent"
+    assert base64.b64decode(sent[2][1]["prevLatent"]) == b"LAT-2"
+    assert "prevLatent" not in sent[3][1] and base64.b64decode(sent[3][1]["image"]) == b"PNG:s3://b/scene2.png"
+    assert all(c["uri"] and c["gpuSeconds"] == 90 for c in clips) and len(clips) == 6
     assert saved["videos/v/clips/dream/shot002-take1.latent"] == b"LAT-2"
     assert saved["videos/v/clips/dream/shot002-take1.mp4"] == b"MP4-2"
+
+
+def test_a_lost_chain_keeps_every_finished_beat_and_retry_continues_from_the_last(worker, monkeypatch):
+    """21 Nov 2026: a whole-scene job hit the pod's limit mid-chain and nothing came back. Now beats 1-2 are in storage
+    before beat 3 fails, and a Retry of the same take renders only beats 3-4, from beat 2's latent."""
+    saved, sent = worker
+    real = client.run
+    n = {"i": 0}
+
+    def flaky(url, kind, payload, ready, beat=None):
+        n["i"] += 1
+        if n["i"] == 3:
+            raise RuntimeError("scene ran 90 min on the pod without finishing")
+        return real(url, kind, payload, ready, beat)
+    monkeypatch.setattr(client, "run", flaky)
+    jobs = [_job(1, b) for b in (1, 2, 3, 4)]
+    clips, _ = C._svi({"gpuUrl": "https://g/", "jobs": jobs}, "http://cp", "v")
+    assert [bool(c["uri"]) for c in clips] == [True, True, False, False]
+    assert "90 min" in clips[2]["error"] and "waits for beat 3" in clips[3]["error"]
+    assert "videos/v/clips/dream/shot002-take1.mp4" in saved and "videos/v/clips/dream/shot002-take1.latent" in saved
+
+    sent.clear()
+    clips, _ = C._svi({"gpuUrl": "https://g/", "jobs": jobs}, "http://cp", "v")  # Retry: same take
+    assert [p["startBeat"] for _, p in sent] == [3, 4], "beats 1-2 reused, not rendered again"
+    assert base64.b64decode(sent[0][1]["prevLatent"]) == b"LAT-2"
+    assert [c["gpuSeconds"] for c in clips] == [0, 0, 90, 90] and all(c["uri"] for c in clips)
+
+
+def test_a_worker_crash_mid_chain_loses_only_the_beat_in_flight(worker, monkeypatch):
+    saved, sent = worker
+    real = client.run
+
+    def crash(url, kind, payload, ready, beat=None):
+        if payload["startBeat"] == 3:
+            raise KeyboardInterrupt  # the media worker process is stopped: nothing after this runs
+        return real(url, kind, payload, ready, beat)
+    monkeypatch.setattr(client, "run", crash)
+    with pytest.raises(KeyboardInterrupt):
+        C._svi({"gpuUrl": "https://g/", "jobs": [_job(1, b) for b in (1, 2, 3, 4)]}, "http://cp", "v")
+    assert {k for k in saved if k.endswith(".mp4")} == {"videos/v/clips/dream/shot001-take1.mp4",
+                                                       "videos/v/clips/dream/shot002-take1.mp4"}
 
 
 def test_redo_from_a_beat_resumes_from_the_earlier_beats_latent(worker):
@@ -136,8 +180,9 @@ def test_redo_from_a_beat_resumes_from_the_earlier_beats_latent(worker):
     jobs = [_job(1, 2, take=2, chainFromUri="s3://b/videos/v/clips/dream/shot001-take1.mp4"), _job(1, 3, take=2)]
     clips, _ = C._svi({"gpuUrl": "https://g/", "jobs": jobs}, "http://cp", "v")
     p = sent[0][1]
-    assert p["startBeat"] == 2 and len(p["beats"]) == 2
+    assert p["startBeat"] == 2 and len(p["beats"]) == 1
     assert base64.b64decode(p["prevLatent"]) == b"OLD-LAT-1"
+    assert base64.b64decode(sent[1][1]["prevLatent"]) == b"LAT-2"
     assert [c["take"] for c in clips] == [2, 2] and all(c["uri"] for c in clips)
 
 
@@ -147,7 +192,7 @@ def test_retry_reuses_saved_beats_and_renders_only_the_rest(worker):
     saved["videos/v/clips/dream/shot001-take1.latent"] = b"L1"
     clips, _ = C._svi({"gpuUrl": "https://g/", "jobs": [_job(1, b) for b in (1, 2, 3)]}, "http://cp", "v")
     p = sent[0][1]
-    assert p["startBeat"] == 2 and base64.b64decode(p["prevLatent"]) == b"L1"
+    assert p["startBeat"] == 2 and base64.b64decode(p["prevLatent"]) == b"L1" and len(sent) == 2
     assert clips[0]["gpuSeconds"] == 0 and clips[0]["uri"].endswith("shot001-take1.mp4")
 
 
@@ -171,7 +216,7 @@ def test_svi_never_runs_on_modal(monkeypatch):
 
 
 def test_stop_between_scenes(worker, monkeypatch):
-    calls = iter([False, True])
+    calls = iter([False, True])  # checked before each beat that still has to render
     monkeypatch.setattr(C, "_stop_requested", lambda *a: next(calls))
     clips, stopped = C._svi({"gpuUrl": "https://g/", "jobs": [_job(1, 1), _job(2, 1)]}, "http://cp", "v")
     assert stopped and clips[1]["error"] == "stopped"

@@ -53,6 +53,8 @@ public class DreamService {
     static final String WAN = "modal_wan";
     /** The rented-pod route's provider id (pictures and clips): config/providers.yaml, docs/plans/m3-gpu-router.md. */
     static final String POD = "gpu_pod";
+    /** Provenance model name for FLUX.2 klein pictures (licence row a013 says Apache-2.0). */
+    static final String FLUX2_KLEIN_NAME = "FLUX.2 klein 4B";
     static final String LYRIA = "gemini_lyria";
     /** Provenance provider for pieces of the owner's music bed (cut free on the laptop). */
     static final String BED = "owner_music_bed";
@@ -289,6 +291,18 @@ public class DreamService {
     private final DreamGpu gpu; // null on the Modal route (the default)
 
     /** Modal route (the default): what every existing caller and test uses. */
+    private final String pictureModel; // the studio default for new Shorts on the pod (projectv.dream.picture-model)
+
+    /** The studio's default pod picture model for new Shorts. */
+    public String defaultPictureModel() {
+        return pictureModel;
+    }
+
+    /** This Short's pod picture model ("flux2-klein" or "zimage"). */
+    static String pictureModelOf(Map<String, Object> d) {
+        return DreamSettings.cleanPictureModel((String) d.get("picture_model"), "zimage");
+    }
+
     public DreamService(JdbcClient jdbc, ObjectMapper json, Llm llm, AssetStore assets, Pricing pricing, BudgetGuard budget,
                         Router router, com.projectv.video.ClipProgress clipProgress, DreamSettings settings) {
         this(jdbc, json, llm, assets, pricing, budget, router, clipProgress, settings, null);
@@ -318,6 +332,7 @@ public class DreamService {
         this.evidence = new DreamEvidence(jdbc, json);
         this.briefModel = settings.briefModel();
         this.qualityCheck = settings.qualityCheck();
+        this.pictureModel = settings.pictureModel();
         this.music = new DreamMusic(this, jdbc, json, assets, pricing, budget, router, evidence, settings);
         this.gpu = gpu != null && gpu.enabled() ? gpu : null;
     }
@@ -836,7 +851,7 @@ public class DreamService {
             int attempt = ((Number) s.get("picture_takes")).intValue() + 1;
             // One seed for the whole Short (owner, 19 Nov: the shelter changed shape every shot); a redo moves it on.
             jobs.add(new KeyframeJob(shotId, attempt, gpu != null ? POD : ZIMAGE, prompt, 768, 1344, "9:16", "1K", null,
-                    sceneSeed(id, d) + attempt - 1));
+                    sceneSeed(id, d) + attempt - 1, gpu != null ? pictureModelOf(d) : null)); // Modal route: Z-Image only
         }
         if (gpu != null) {
             if (jobs.isEmpty()) {
@@ -872,9 +887,10 @@ public class DreamService {
                 jdbc.sql("UPDATE dream_shot SET error = :e, updated_at = now() WHERE id = :s").param("e", o.error()).param("s", shotId).update();
                 continue;
             }
+            boolean flux = "flux2-klein".equals(job.podModel());
             UUID asset = assets.create(new NewAsset(null, "image", o.uri(), "image/png", job.width(), job.height(), null,
-                    job.provider(), Objects.toString(o.model(), "Tongyi-MAI/Z-Image-Turbo"), job.prompt(), o.seed(),
-                    AssetStore.LICENCE_ZIMAGE, true));
+                    job.provider(), flux ? FLUX2_KLEIN_NAME : Objects.toString(o.model(), "Tongyi-MAI/Z-Image-Turbo"), job.prompt(),
+                    o.seed(), flux ? AssetStore.LICENCE_FLUX2_KLEIN : AssetStore.LICENCE_ZIMAGE, true));
             jdbc.sql("UPDATE asset SET dream_short_id = :d WHERE id = :a").param("d", id).param("a", asset).update();
             // A new picture makes the old clip stale: it must be made again from this picture.
             jdbc.sql("""
@@ -904,7 +920,9 @@ public class DreamService {
             throw new IllegalStateException("No pictures were made: " + String.join(" | ", errors.stream().filter(Objects::nonNull).toList()));
         }
         staleFinal(id);
-        return "%d/%d pictures made (Z-Image%s)%s.".formatted(ok, req.jobs().size(), gpu != null ? " on a rented pod" : "",
+        boolean anyFlux = req.jobs().stream().anyMatch(j -> "flux2-klein".equals(j.podModel()));
+        return "%d/%d pictures made (%s%s)%s.".formatted(ok, req.jobs().size(), anyFlux ? FLUX2_KLEIN_NAME : "Z-Image",
+                gpu != null ? " on a rented pod" : "",
                 errors.isEmpty() ? "" : "; " + errors.size() + " failed: " + errors.getFirst());
     }
 

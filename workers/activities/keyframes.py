@@ -13,7 +13,7 @@ from temporalio import activity
 
 from workers.common import BUCKET, MEDIA_TIMEOUT_MS, exists, gemini, log, put_bytes, usage_dict, with_models
 
-POD_MODEL_NAMES = {"zimage": "Tongyi-MAI/Z-Image-Turbo", "flux2-klein": "black-forest-labs/FLUX.2-klein-4B"}
+POD_MODEL_NAMES = {"zimage": "Tongyi-MAI/Z-Image-Turbo", "flux2-klein": "FLUX.2 klein 4B"}  # licence: Apache-2.0
 MODAL_BATCH = 8 # images per Modal call; heartbeat between batches
 POD_PROVIDER = "gpu_pod"  # same value as DreamService.POD (Java); the job provider for pictures made on the rented GPU pod
 

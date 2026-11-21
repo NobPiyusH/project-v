@@ -23,7 +23,7 @@ providers:
   # The broker picks the cheapest provider and enforces pricing.gpuBroker caps itself, so no router budget bucket here.
   # Only used when projectv.dream.gpu-provider=broker.
   - id: gpu_pod
-    name: Rented GPU pod (Wan 2.2 fp8 + Z-Image Turbo, via the GPU broker)
+    name: Rented GPU pod (Wan 2.2 fp8 + FLUX.2 klein 4B / Z-Image Turbo, via the GPU broker)
     kind: gpu_pod
     capabilities: [image.dream, video.i2v.dream]
     quality: 6                     # fp8 Wan accepted by the owner as equal to Modal (20 Nov 2026)
@@ -196,6 +196,7 @@ pricing:
   gpuBroker:
     order: [runpod, jarvislabs, cloudrift, vast, shadeform, modal]   # tie-break only: the cheapest live price in stock and inside its cap wins
     totalCapUsd: 8               # all rented GPUs together per month (owner, 20 Nov 2026: 8)
+    dailyCapUsd: 3.50            # all studio GPU spend per UTC day, booked rentals + the running pod (owner, 21 Nov 2026); 0 = off
     providers:
       runpod:     { monthlyCapUsd: 8 }   # owner: 8 (20 Nov 2026); other providers stay 0 until they have an adapter and a key
       jarvislabs: { monthlyCapUsd: 0 }

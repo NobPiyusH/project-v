@@ -36,13 +36,26 @@ public class DreamStudio {
      * @param sviScenes  SVI scenes (default off = null/0): 1-3 continuous SVI shots of {@code sviSceneSeconds} (10/15/20,
      *                   default 20) made of 5 s beats, one picture per scene; {@code sviBetween} "cut" (default) or
      *                   "dissolve" between scenes. Wins over both chain styles (the Short has one clip method).
+     * @param pictureModel pod pictures: "flux2-klein" or "zimage" (null = the studio default, projectv.dream.picture-model)
      */
     public record NewDream(String idea, String look, Integer shots, String quality, String defaultMode,
                            Map<String, String> modes, Integer reviewMinutes, String music, Boolean scout,
                            Boolean musicEdit, Boolean ambience, Boolean pacing, Boolean producerDecides,
                            Boolean hookTitle, String hookText, String hookColor, Boolean chainShots, String ideaPack,
                            String ideaId, Integer chainGroup, Boolean chainLocked, Boolean pathChoice, Boolean chainBridge,
-                           String gpuHold, Integer gpuIdleMinutes, Integer sviScenes, Integer sviSceneSeconds, String sviBetween) {
+                           String gpuHold, Integer gpuIdleMinutes, Integer sviScenes, Integer sviSceneSeconds, String sviBetween,
+                           String pictureModel) {
+        public NewDream(String idea, String look, Integer shots, String quality, String defaultMode,
+                        Map<String, String> modes, Integer reviewMinutes, String music, Boolean scout,
+                        Boolean musicEdit, Boolean ambience, Boolean pacing, Boolean producerDecides,
+                        Boolean hookTitle, String hookText, String hookColor, Boolean chainShots, String ideaPack,
+                        String ideaId, Integer chainGroup, Boolean chainLocked, Boolean pathChoice, Boolean chainBridge,
+                        String gpuHold, Integer gpuIdleMinutes, Integer sviScenes, Integer sviSceneSeconds, String sviBetween) {
+            this(idea, look, shots, quality, defaultMode, modes, reviewMinutes, music, scout, musicEdit, ambience, pacing,
+                    producerDecides, hookTitle, hookText, hookColor, chainShots, ideaPack, ideaId, chainGroup, chainLocked,
+                    pathChoice, chainBridge, gpuHold, gpuIdleMinutes, sviScenes, sviSceneSeconds, sviBetween, null);
+        }
+
         public NewDream(String idea, String look, Integer shots, String quality, String defaultMode,
                         Map<String, String> modes, Integer reviewMinutes, String music, Boolean scout,
                         Boolean musicEdit, Boolean ambience, Boolean pacing, Boolean producerDecides,
@@ -167,6 +180,7 @@ public class DreamStudio {
         int shots = sviScenes > 0 ? (raw ? Math.max(1, DreamSvi.unfiltered(ideaText).size()) : sviScenes * DreamSvi.beatsFor(sviSeconds))
                 : raw ? (int) Math.max(1, Math.min(8, ideaText.lines().filter(l -> !l.isBlank()).count()))
                 : req.shots() == null ? 5 : Math.max(2, Math.min(8, req.shots()));
+        String pictureModel = DreamSettings.cleanPictureModel(req.pictureModel(), dreams.defaultPictureModel());
         String gpuHold = "manual".equalsIgnoreCase(req.gpuHold()) ? "manual" : "auto";
         int gpuIdle = req.gpuIdleMinutes() == null ? 10 : Math.max(5, Math.min(30, req.gpuIdleMinutes()));
         String quality = "720p".equals(req.quality()) ? "720p" : "480p";
@@ -191,11 +205,12 @@ public class DreamStudio {
                                                  hook_title, hook_text, hook_color, hook_locked, chain_shots, idea_ref,
                                                  chain_group, chain_locked, path_choice, parent_id, episode, chosen_path,
                                                  pick_source, start_clip_asset_id, scene_seed, chain_bridge, gpu_hold, gpu_idle_minutes,
-                                                 svi_scenes, svi_scene_seconds, svi_between)
+                                                 svi_scenes, svi_scene_seconds, svi_between, picture_model)
                         VALUES (:id, :idea, :look, :n, :q, CAST(:modes AS jsonb), :r, 'RUNNING', 'SCOUT', :wf, :music, :scout,
                                 :em, :ea, :ep, :pd, :ht, :htext, :hcol, :hlock, :chain, :iref, :cgroup, :clocked, :pc, :parent,
-                                :episode, :cpath, :psrc, :sclip, :seed, :bridge, :ghold, :gidle, :svi, :svisec, :svibetween)
+                                :episode, :cpath, :psrc, :sclip, :seed, :bridge, :ghold, :gidle, :svi, :svisec, :svibetween, :pmodel)
                         """)
+                .param("pmodel", pictureModel)
                 .param("svi", sviScenes).param("svisec", sviSeconds).param("svibetween", DreamSvi.cleanBetween(req.sviBetween()))
                 .param("bridge", bridge).param("ghold", gpuHold).param("gidle", gpuIdle)
                 .param("pc", !raw && Boolean.TRUE.equals(req.pathChoice()))
@@ -221,7 +236,8 @@ public class DreamStudio {
                 WorkflowOptions.newBuilder().setWorkflowId(workflowId).setTaskQueue(TaskQueues.CONTROL).build());
         WorkflowClient.start(wf::run, new DreamRequest(id.toString(), defaultMode, modes, review));
         var created = new java.util.LinkedHashMap<String, Object>(Map.of("look", look, "shots", shots, "quality", quality,
-                "music", "lyria".equalsIgnoreCase(req.music()) ? "lyria" : "bed", "mode", defaultMode.name()));
+                "music", "lyria".equalsIgnoreCase(req.music()) ? "lyria" : "bed", "mode", defaultMode.name(),
+                "pictureModel", pictureModel));
         if (hookTitle) created.put("hookTitle", true);
         if (lastFrame) created.put("chainShots", true);
         if (bridge) created.put("chainBridge", true);
@@ -410,7 +426,8 @@ public class DreamStudio {
                 (Boolean) p.get("edit_music"), (Boolean) p.get("edit_ambience"), (Boolean) p.get("edit_pacing"),
                 (Boolean) p.get("producer_decides"), (Boolean) p.get("hook_title"), null, (String) p.get("hook_color"),
                 (Boolean) p.get("chain_shots"), null, null, ((Number) p.get("chain_group")).intValue(),
-                (Boolean) p.get("chain_locked"), true, (Boolean) p.get("chain_bridge"));
+                (Boolean) p.get("chain_locked"), true, (Boolean) p.get("chain_bridge"), null, null, null, null, null,
+                (String) p.get("picture_model"));
         UUID child = create(req, new Continuation(parentId, episode, path, pick.source(), UUID.fromString(lastClip.toString()),
                 ((Number) branch.get("seed")).longValue()));
         dreams.evidence().event(parentId, null, "continue", null, path,

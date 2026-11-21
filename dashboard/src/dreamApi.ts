@@ -56,6 +56,7 @@ export interface NewDream {
   pathChoice?: boolean // "Choose the path": end card with two options; a finished Short can be continued (off by default)
   // SVI scenes (off by default): 1-3 continuous shots of 10/15/20 s made of 5 s beats; hard cut or 0.5 s dissolve between
   sviScenes?: number; sviSceneSeconds?: number; sviBetween?: 'cut' | 'dissolve'
+  pictureModel?: 'flux2-klein' | 'zimage' // pod pictures (default FLUX.2 klein; the studio's setting decides when absent)
 }
 
 export interface IdeaPackIdea { id: string; title: string; concept: string; hook: string; camera: string; palette: string }
@@ -92,8 +93,11 @@ async function gpuCall<T>(method: string, path: string, body?: unknown): Promise
   return (await res.json()) as T
 }
 
+/** Today's studio GPU spend (UTC day) against the daily cap: booked rentals + the pod that is on now. */
+export interface GpuToday { spentUsd: number; bookedUsd: number; runningUsd: number; capUsd: number }
+
 export const dreamApi = {
-  gpuEnabled: () => gpuCall<{ enabled: boolean }>('GET', '/api/gpu/broker'),
+  gpuEnabled: () => gpuCall<{ enabled: boolean; today?: GpuToday }>('GET', '/api/gpu/broker'),
   gpuOptions: () => gpuCall<GpuOption[]>('GET', '/api/gpu/broker/options'),
   gpuPick: (id: string) => gpuCall<GpuPick>('GET', `/api/dream/${id}/gpu`),
   setGpuPick: (id: string, mode: 'auto' | 'manual', choice?: string) => gpuCall<GpuPick>('POST', `/api/dream/${id}/gpu`, { mode, choice }),

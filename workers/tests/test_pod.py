@@ -219,6 +219,38 @@ def test_rented_replaces_a_vanished_pod_once_and_resubmits(monkeypatch):
     assert urls == [("https://old", 1800), ("https://new.example", 900)] and calls["replace"] == 1
 
 
+def test_rented_replaces_a_pod_that_never_became_ready(monkeypatch):
+    """21 Nov 2026: a pod never became ready and the step just failed. Now the broker retires it and rents another."""
+    bodies = []
+    calls = {"replace": 0}
+
+    def urlopen(req, timeout=None):
+        if req.full_url.endswith("/replace"):
+            calls["replace"] += 1
+            bodies.append(json.loads(req.data))
+            return _Resp(json.dumps({"url": "https://new.example", "readyTimeoutSeconds": 900}).encode())
+        return _Resp(json.dumps({"ok": True, "pod": "OPEN"}).encode())
+    monkeypatch.setattr(client.urllib.request, "urlopen", urlopen)
+    urls = []
+
+    def fake_run(url, kind, payload, ready, beat=None):
+        urls.append(url)
+        if url == "https://old":
+            raise client.NeverReady("Pod worker not ready after 30 min (last phase: downloading)")
+        return b"MP4", {"seconds": 70}
+    monkeypatch.setattr(client, "run", fake_run)
+    pod = client.Rented("http://cp", "v", "https://old/", 1800)
+    assert pod.run("scene", {}) == (b"MP4", {"seconds": 70})
+    assert urls == ["https://old", "https://new.example"] and calls["replace"] == 1
+    assert bodies[0]["unreadyUrl"] == "https://old" and "not ready" in bodies[0]["why"]
+
+
+def test_wait_ready_timeout_is_never_ready():
+    t = iter(range(0, 1000, 100))
+    with pytest.raises(client.NeverReady):
+        client.wait_ready("http://127.0.0.1:9", 150, sleep=lambda s: None, clock=lambda: next(t))
+
+
 def test_rented_second_loss_or_release_fails_fast_without_renting(monkeypatch):
     calls = _control_plane(monkeypatch, [])
     n = {"run": 0}

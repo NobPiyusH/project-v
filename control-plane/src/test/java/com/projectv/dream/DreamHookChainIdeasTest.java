@@ -344,6 +344,21 @@ class DreamHookChainIdeasTest {
         assertEquals(false, row.get("chain_locked"));
     }
 
+    @Test
+    void newShortsMakeFluxPicturesByDefaultAndZImageStaysSelectable() {
+        UUID def = studio.create(new NewDream("a pink pier", "lonely", 4, "480p", "AUTO", null, 10, "bed", false, true, true, true,
+                null, null, null, null, null, null, null, null, null, null, null));
+        UUID z = studio.create(new NewDream("a pink pier", "lonely", 4, "480p", "AUTO", null, 10, "bed", false, true, true, true,
+                null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "zimage"));
+        UUID junk = studio.create(new NewDream("a pink pier", "lonely", 4, "480p", "AUTO", null, 10, "bed", false, true, true, true,
+                null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "sdxl"));
+        java.util.function.Function<UUID, String> model = d -> jdbc.sql("SELECT picture_model FROM dream_short WHERE id = :d")
+                .param("d", d).query(String.class).single();
+        assertEquals("flux2-klein", model.apply(def), "owner's pick 21 Nov 2026: FLUX.2 klein is the studio default");
+        assertEquals("zimage", model.apply(z));
+        assertEquals("flux2-klein", model.apply(junk), "an unknown model falls back to the default");
+    }
+
     // ---------------------------------------------------------------------------------------------------- unfiltered
 
     static NewDream unfiltered(String prompt) {

@@ -19,6 +19,8 @@ import time
 import urllib.request
 import uuid
 import base64
+import zipfile
+import io
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -419,13 +421,12 @@ def scene_groups(jobs: list[dict]) -> list[list[dict]]:
 
 
 def _svi(req: dict, base: str, video_id: str) -> tuple[list[dict], bool]:
-    """SVI scenes on the Short's rented pod: one pod job per scene renders its beats back to back in one graph.
-    A scene resumed at beat k > 1 (redo or retry) sends the saved latent of beat k-1, so earlier beats are kept and
-    the new ones continue seamlessly. Beats already saved by an earlier try of this take are reused (0 GPU s).
-    Every beat is saved (MP4 + latent) as soon as its scene is back; a failed scene fails only its own beats."""
+    """SVI scenes on the Short's rented pod. Each beat is ONE pod job that continues from the saved latent of the beat
+    before (beat 1 starts from the scene's picture), so every beat is saved to storage (latent + MP4) the moment the pod
+    makes it. A lost pod, a run limit, a stopped worker or a crash can only ever lose the beat in flight (21 Nov 2026:
+    a whole-scene job hit the pod's limit mid-chain and no beat came back). A Retry reuses every saved beat of the same
+    take (0 GPU s) and continues the chain from the last one. A failed beat fails the rest of its scene only."""
     from workers.pod import client as podc
-    import io
-    import zipfile
 
     url = (req.get("gpuUrl") or "").rstrip("/")
     if not url:
@@ -433,43 +434,44 @@ def _svi(req: dict, base: str, video_id: str) -> tuple[list[dict], bool]:
     pod = podc.Rented(base, video_id, url, float(req.get("readyTimeoutSeconds") or 1800), _beat)
     clips: list[dict] = []
     groups = scene_groups(req["jobs"])
+    first_job = True
     for gi, group in enumerate(groups):
-        if _stop_requested(base, video_id):
-            clips += [_stopped(x) for g in groups[gi:] for x in g]
-            return clips, True
-        _report(base, video_id, [(x, None) for g in groups[gi:] for x in g], clips, {}, len(req["jobs"]))
         first = group[0]
         prev_latent = (first["chainFromUri"][:-4] + ".latent") if first["beat"] > 1 and first.get("chainFromUri") else None
-        rest = list(group)
-        while rest and exists(clip_key(video_id, rest[0])) and exists(latent_key(video_id, rest[0])):
-            j = rest.pop(0)  # a Retry after a lost save: this beat is rendered already
-            clips.append(_clip(video_id, j, {"uri": f"s3://{BUCKET}/{clip_key(video_id, j)}", "seconds": 0,
-                                             "mode": j["mode"], "fps": 16, "frames": 81}))
-            prev_latent = f"s3://{BUCKET}/{latent_key(video_id, j)}"
-        if not rest:
-            continue
-        try:
-            if rest[0]["beat"] > 1 and not prev_latent:
-                raise RuntimeError(f"beat {rest[0]['beat']} has no earlier beat to continue from")
-            payload = {"image": base64.b64encode(get_bytes(rest[0]["imageUri"])).decode(),
-                       "beats": [{"prompt": j["prompt"], "seed": int(j["seed"])} for j in rest],
-                       "startBeat": int(rest[0]["beat"]), "negative": rest[0].get("negative"), "frames": 81, "fps": 16,
-                       "width": int(rest[0]["width"]), "height": int(rest[0]["height"])}
-            if prev_latent:
-                payload["prevLatent"] = base64.b64encode(get_bytes(prev_latent)).decode()
-            data, info = pod.run("scene", payload)
-            per = float(info.get("seconds") or 0) / len(rest)  # one graph: its GPU time is shared by its beats
-            with zipfile.ZipFile(io.BytesIO(data)) as z:
-                made = {j["beat"]: (z.read(f"beat{j['beat']}.mp4"), z.read(f"beat{j['beat']}.latent")) for j in rest}
-        except Exception as e:  # noqa: BLE001 - one failed scene never fails the other scenes
-            err = f"{type(e).__name__}: {e}"[:600]
-            clips += [_clip(video_id, j, {"mp4": None, "seconds": 0, "error": err}) for j in rest]
-            continue
-        for k, j in enumerate(rest):
-            mp4, latent = made[j["beat"]]
+        for bi, j in enumerate(group):
+            if exists(clip_key(video_id, j)) and exists(latent_key(video_id, j)):
+                # A Retry after a stop, crash or lost save: this beat is rendered and saved already.
+                clips.append(_clip(video_id, j, {"uri": f"s3://{BUCKET}/{clip_key(video_id, j)}", "seconds": 0,
+                                                 "mode": j["mode"], "fps": 16, "frames": 81}))
+                prev_latent = f"s3://{BUCKET}/{latent_key(video_id, j)}"
+                continue
+            if _stop_requested(base, video_id):
+                clips += [_stopped(x) for x in group[bi:]] + [_stopped(x) for g in groups[gi + 1:] for x in g]
+                return clips, True
+            _report(base, video_id, [(x, None) for x in group[bi:]] + [(x, None) for g in groups[gi + 1:] for x in g],
+                    clips, {}, len(req["jobs"]))
+            try:
+                if j["beat"] > 1 and not prev_latent:
+                    raise RuntimeError(f"beat {j['beat']} has no earlier beat to continue from")
+                payload = {"image": base64.b64encode(get_bytes(j["imageUri"])).decode(),
+                           "beats": [{"prompt": j["prompt"], "seed": int(j["seed"])}],
+                           "startBeat": int(j["beat"]), "negative": j.get("negative"), "frames": 81, "fps": 16,
+                           "width": int(j["width"]), "height": int(j["height"])}
+                if prev_latent:
+                    payload["prevLatent"] = base64.b64encode(get_bytes(prev_latent)).decode()
+                data, info = pod.run("scene", payload)
+                with zipfile.ZipFile(io.BytesIO(data)) as z:
+                    mp4, latent = z.read(f"beat{j['beat']}.mp4"), z.read(f"beat{j['beat']}.latent")
+            except Exception as e:  # noqa: BLE001 - a failed beat fails the rest of its scene, never other scenes
+                err = f"{type(e).__name__}: {e}"[:600]
+                clips += [_clip(video_id, x, {"mp4": None, "seconds": 0, "error": err if x is j else
+                                              f"waits for beat {j['beat']} (failed: {err})"[:600]}) for x in group[bi:]]
+                break
             put_bytes(latent_key(video_id, j), latent, "application/octet-stream")  # before the MP4: reuse needs both
-            clips.append(_clip(video_id, j, {"mp4": mp4, "seconds": per, "frames": 81, "fps": 16, "mode": j["mode"],
-                                             "coldStart": gi == 0 and k == 0}))
+            clips.append(_clip(video_id, j, {"mp4": mp4, "seconds": float(info.get("seconds") or 0), "frames": 81,
+                                             "fps": 16, "mode": j["mode"], "coldStart": first_job}))
+            first_job = False
+            prev_latent = f"s3://{BUCKET}/{latent_key(video_id, j)}"
     return clips, False
 
 

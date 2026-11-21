@@ -31,6 +31,10 @@ class JobFailed(Exception):
     """The worker ran the job and it failed (a real error, not the instance going away)."""
 
 
+class NeverReady(RuntimeError):
+    """The pod's worker did not become ready in time, or its boot failed: the pod is bad, rent another one."""
+
+
 class PodGone(Exception):
     """The control plane says the Short's pod no longer exists (deleted from outside, self-stopped).
     released=True: the studio itself released it (the Short ended), so nothing may rent again."""
@@ -86,10 +90,10 @@ def wait_ready(base: str, timeout_s: float, beat=lambda info: None, sleep=time.s
         if h["ready"]:
             return
         if h.get("phase") == "failed":
-            raise RuntimeError(f"Pod worker failed to start: {h.get('error')}")
+            raise NeverReady(f"Pod worker failed to start: {h.get('error')}")
         beat({"pod": h.get("phase")})
         if clock() >= end:
-            raise RuntimeError(f"Pod worker not ready after {timeout_s / 60:.0f} min (last phase: {h.get('phase')})")
+            raise NeverReady(f"Pod worker not ready after {timeout_s / 60:.0f} min (last phase: {h.get('phase')})")
         sleep(10)
 
 
@@ -172,10 +176,12 @@ def lease_beat(control_plane: str, video_id: str, inner=lambda info: None, every
     return beat
 
 
-def replace_pod(control_plane: str, video_id: str) -> tuple[str, float]:
-    """Asks the control plane for a replacement pod (it books the gone one and rents again). Returns (url, ready_s)."""
+def replace_pod(control_plane: str, video_id: str, unready_url: str | None = None, why: str = "") -> tuple[str, float]:
+    """Asks the control plane for a replacement pod (it books the gone one and rents again). unready_url: the pod at that
+    address never became ready, so the broker terminates it first. Returns (url, ready_s)."""
+    body = {"unreadyUrl": unready_url, "why": why[:300]} if unready_url else {}
     req = urllib.request.Request(f"{control_plane.rstrip('/')}/api/internal/gpu/{video_id}/replace",
-                                 data=b"{}", headers={"Content-Type": "application/json"}, method="POST")
+                                 data=json.dumps(body).encode(), headers={"Content-Type": "application/json"}, method="POST")
     try:
         with urllib.request.urlopen(req, timeout=180) as r:
             body = json.loads(r.read())
@@ -204,14 +210,17 @@ class Rented:
                 raise RuntimeError(self.lost)
             try:
                 return run(self.url, kind, payload, self.ready_s, beat=self.beat)
-            except PodGone as e:
-                if e.released or self.replaced >= self.REPLACEMENTS:
-                    self.lost = f"GPU pod lost: {e}" + ("" if e.released else "; already replaced once. Retry rents a new one.")
+            except (PodGone, NeverReady) as e:
+                # A pod that never became ready (stuck download, failed boot) is as useless as a vanished one: the
+                # broker books it, deletes it and rents a replacement (21 Nov 2026: a pod that never got ready).
+                if getattr(e, "released", False) or self.replaced >= self.REPLACEMENTS:
+                    self.lost = f"GPU pod lost: {e}" + ("" if getattr(e, "released", False) else "; already replaced once. Retry rents a new one.")
                     raise RuntimeError(self.lost) from e
                 self.replaced += 1
                 self.beat({"pod": f"pod gone ({e}); renting a replacement"})
                 try:
-                    self.url, self.ready_s = replace_pod(self.control_plane, self.video_id)
+                    self.url, self.ready_s = replace_pod(self.control_plane, self.video_id,
+                                                         self.url if isinstance(e, NeverReady) else None, str(e))
                 except Exception as re:  # noqa: BLE001
                     self.lost = f"GPU pod lost ({e}) and no replacement: {re}"
                     raise RuntimeError(self.lost) from re

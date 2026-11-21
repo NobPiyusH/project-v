@@ -13,7 +13,7 @@ import org.springframework.stereotype.Component;
  * @param leaseGraceMinutes a new pod may run this long before its lease must exist (covers the create → lease gap)
  * @param maxPods           at most this many studio pods at once; {@link PodWatchdog#checkCanStart} refuses more
  * @param maxHourlyUsd      the sum of the studio pods' live hourly rates may not go above this
- * @param dryRun            true (default): log what would be terminated, terminate nothing
+ * @param dryRun            true: log what would be terminated, terminate nothing (default false: live since 21 Nov 2026)
  */
 public record GpuPodLimits(String prefix, int maxRuntimeMinutes, int idleMinutes, int leaseGraceMinutes, int maxPods,
                            double maxHourlyUsd, boolean dryRun) {
@@ -38,7 +38,7 @@ public record GpuPodLimits(String prefix, int maxRuntimeMinutes, int idleMinutes
                    @Value("${projectv.gpu.lease-grace-minutes:10}") int grace,
                    @Value("${projectv.gpu.max-pods:2}") int maxPods,
                    @Value("${projectv.gpu.max-hourly-usd:2.0}") double maxHourlyUsd,
-                   @Value("${projectv.gpu.watchdog.dry-run:true}") boolean dryRun) {
+                   @Value("${projectv.gpu.watchdog.dry-run:false}") boolean dryRun) {
             this.limits = new GpuPodLimits(prefix, maxRuntime, idle, grace, maxPods, maxHourlyUsd, dryRun);
         }
     }

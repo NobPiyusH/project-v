@@ -87,8 +87,13 @@ public final class MediaTypes {
 
     // ---- keyframes
     /** @param referenceQuery subject to fetch real reference photos for (Gemini only; empty = none) */
+    /** @param podModel rented-pod pictures only: "flux2-klein" or "zimage" (null = zimage, the worker's default) */
     public record KeyframeJob(String shotId, int attempt, String provider, String prompt, int width, int height,
-                              String aspectRatio, String imageSize, String referenceQuery, long seed) {
+                              String aspectRatio, String imageSize, String referenceQuery, long seed, String podModel) {
+        public KeyframeJob(String shotId, int attempt, String provider, String prompt, int width, int height,
+                           String aspectRatio, String imageSize, String referenceQuery, long seed) {
+            this(shotId, attempt, provider, prompt, width, height, aspectRatio, imageSize, referenceQuery, seed, null);
+        }
     }
 
     /** @param gpuUrl rented-pod route only: the Short's pod endpoint (null on the Modal route) */

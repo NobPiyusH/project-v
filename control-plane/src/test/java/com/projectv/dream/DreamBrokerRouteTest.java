@@ -256,4 +256,34 @@ class DreamBrokerRouteTest {
                 "a new scene picture makes every beat of that scene stale");
         dreams.status(dream, "MUSIC", "RUNNING", null);
     }
+
+    @Test
+    void fluxPicturesOnThePodCarryFluxProvenanceAndZImageStaysPerShort() {
+        UUID flux = UUID.randomUUID(), z = UUID.randomUUID(), fs = UUID.randomUUID(), zs = UUID.randomUUID();
+        jdbc.sql("INSERT INTO dream_short (id, idea, status, picture_model) VALUES (:id, 'x', 'RUNNING', 'flux2-klein')").param("id", flux).update();
+        jdbc.sql("INSERT INTO dream_short (id, idea, status, picture_model) VALUES (:id, 'x', 'RUNNING', 'zimage')").param("id", z).update();
+        for (UUID[] p : new UUID[][]{{fs, flux}, {zs, z}}) {
+            jdbc.sql("""
+                            INSERT INTO dream_shot (id, dream_short_id, ord, scene, picture_prompt, motion_prompt)
+                            VALUES (:id, :d, 0, 'scene', 'picture prompt', 'walk forward')
+                            """).param("id", p[0]).param("d", p[1]).update();
+        }
+        var fp = dreams.pictureRequest(flux, null, null);
+        var zp = dreams.pictureRequest(z, null, null);
+        assertEquals("flux2-klein", fp.jobs().getFirst().podModel());
+        assertEquals("zimage", zp.jobs().getFirst().podModel());
+        assertTrue(dreams.savePictures(flux, fp, new KeyframeResult(List.of(
+                new KeyframeOutput(fs.toString(), "s3://b/f.png", "gpu_pod", "FLUX.2 klein 4B", 1L, 5.0, null, null, List.of())), 0, 10))
+                .contains("FLUX.2 klein 4B"));
+        dreams.savePictures(z, zp, new KeyframeResult(List.of(
+                new KeyframeOutput(zs.toString(), "s3://b/z.png", "gpu_pod", "Tongyi-MAI/Z-Image-Turbo", 1L, 5.0, null, null, List.of())), 0, 10));
+        String sql = """
+                SELECT p.model || ' | ' || l.name FROM dream_shot s JOIN asset a ON a.id = s.picture_asset_id
+                JOIN provenance p ON p.id = a.provenance_id JOIN licence l ON l.id = p.licence_id WHERE s.id = :s
+                """;
+        assertEquals("FLUX.2 klein 4B | FLUX.2 klein 4B (Apache-2.0)", jdbc.sql(sql).param("s", fs).query(String.class).single());
+        assertTrue(jdbc.sql(sql).param("s", zs).query(String.class).single().startsWith("Tongyi-MAI/Z-Image-Turbo | "));
+        dreams.status(flux, "MUSIC", "RUNNING", null);
+        dreams.status(z, "MUSIC", "RUNNING", null);
+    }
 }

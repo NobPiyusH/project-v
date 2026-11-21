@@ -13,7 +13,25 @@ import java.math.BigDecimal;
  */
 public record DreamSettings(String zimageApp, String zimageClass, String wanApp, String wanClass, String publicUrl,
                             BigDecimal autoApproveInr, double shotSeconds, String musicDir, String musicModel,
-                            String musicBed, String listenModel, String briefModel, boolean qualityCheck) {
+                            String musicBed, String listenModel, String briefModel, boolean qualityCheck,
+                            String pictureModel) {
+
+    /** Pod picture models the pod worker knows (workers/pod/server.py PICTURE_MODELS). */
+    public static final java.util.List<String> PICTURE_MODELS = java.util.List.of("flux2-klein", "zimage");
+
+    /** Tests and older callers: the studio default picture model (FLUX.2 klein, owner's pick 21 Nov 2026). */
+    public DreamSettings(String zimageApp, String zimageClass, String wanApp, String wanClass, String publicUrl,
+                         BigDecimal autoApproveInr, double shotSeconds, String musicDir, String musicModel,
+                         String musicBed, String listenModel, String briefModel, boolean qualityCheck) {
+        this(zimageApp, zimageClass, wanApp, wanClass, publicUrl, autoApproveInr, shotSeconds, musicDir, musicModel,
+                musicBed, listenModel, briefModel, qualityCheck, "flux2-klein");
+    }
+
+    /** A known pod picture model, else the given default. */
+    public static String cleanPictureModel(String m, String fallback) {
+        String v = m == null ? "" : m.strip().toLowerCase();
+        return PICTURE_MODELS.contains(v) ? v : fallback;
+    }
 
     @Configuration
     static class Config {
@@ -31,9 +49,11 @@ public record DreamSettings(String zimageApp, String zimageClass, String wanApp,
                 @Value("${projectv.dream.music-bed:}") String musicBed,
                 @Value("${projectv.models.vision:gemini-3.6-flash}") String listenModel,
                 @Value("${projectv.models.story:claude:claude-sonnet-5-5}") String briefModel,
-                @Value("${projectv.dream.quality-check:true}") boolean qualityCheck) {
+                @Value("${projectv.dream.quality-check:true}") boolean qualityCheck,
+                @Value("${projectv.dream.picture-model:flux2-klein}") String pictureModel) {
             return new DreamSettings(zimageApp, zimageClass, wanApp, wanClass, publicUrl, autoApproveInr, shotSeconds,
-                    musicDir, musicModel, musicBed, listenModel, briefModel, qualityCheck);
+                    musicDir, musicModel, musicBed, listenModel, briefModel, qualityCheck,
+                    cleanPictureModel(pictureModel, "flux2-klein"));
         }
     }
 }

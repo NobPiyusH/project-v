@@ -136,6 +136,7 @@ function DreamHome() {
   const [pathChoice, setPathChoice] = useState(false)
   const [gpuHold, setGpuHold] = useState<'auto' | 'manual'>('auto')
   const [gpuIdle, setGpuIdle] = useState(10)
+  const [pictureModel, setPictureModel] = useState<'flux2-klein' | 'zimage'>('flux2-klein')
   const raw = look === 'unfiltered' // your prompt exactly as written: nothing is added, judged or filtered
   const [ideaRef, setIdeaRef] = useState<{ pack: string; id: string } | null>(null)
   const { data: packs } = usePoll(dreamApi.ideaPacks, 600000)
@@ -150,7 +151,7 @@ function DreamHome() {
     setBusy(true)
     try {
       const r = await dreamApi.create({ idea, look, shots, quality, defaultMode: mode, reviewMinutes: review, music, scout: scout && !raw, ...ed,
-        gpuHold, gpuIdleMinutes: gpuIdle,
+        gpuHold, gpuIdleMinutes: gpuIdle, pictureModel,
         ...(hook && !raw ? { hookTitle: true, hookText, hookColor } : {}), ...(chain ? { chainShots: true, chainGroup, chainLocked: locked && chainGroup === 0 } : {}),
         ...(chainStyle === 'bridge' ? { chainBridge: true } : {}),
         ...(svi ? { sviScenes, sviSceneSeconds: sviSeconds, sviBetween } : {}),
@@ -214,6 +215,9 @@ function DreamHome() {
             <option value="bed">Your track (free)</option><option value="lyria">Lyria (≈₹10)</option></select></label>
           <label className="small">Clips <select value={quality} onChange={(e) => setQuality(e.target.value)}>
             <option value="480p">480p (cheapest)</option><option value="720p">720p</option></select></label>
+          <label className="small" title="Picture model on the rented GPU pod (the Modal route always uses Z-Image)">
+            Pictures <select value={pictureModel} onChange={(e) => setPictureModel(e.target.value as 'flux2-klein' | 'zimage')}>
+              <option value="flux2-klein">FLUX.2 klein (default)</option><option value="zimage">Z-Image</option></select></label>
           <label className="small">Mode <select value={mode} onChange={(e) => setMode(e.target.value as DreamMode)}>
             <option value="AUTO">Auto</option><option value="REVIEW">Review</option><option value="MANUAL">Manual</option></select></label>
           <label className="small" title="Auto: the studio turns the GPU off when the GPU steps are over. Manual: it stays on (quick redos) until you turn it off, or until nothing used it for the idle minutes">
@@ -559,7 +563,7 @@ function Lessons() {
 
 /** Auto (the studio picks the cheapest, learning from your picks) or Manual (you pick from the live, price-sorted list). */
 function GpuCard({ id }: { id: string }) {
-  const { data: on } = usePoll(() => dreamApi.gpuEnabled(), 60000)
+  const { data: on } = usePoll(() => dreamApi.gpuEnabled(), 15000)
   const { data: pick, refresh } = usePoll(() => dreamApi.gpuPick(id), 5000, [id])
   const { data: opts, refresh: refreshOpts } = usePoll(() => dreamApi.gpuOptions(), 60000)
   const [err, setErr] = useState<string | null>(null)
@@ -584,6 +588,10 @@ function GpuCard({ id }: { id: string }) {
     <section className="card">
       <div className="card-head"><h2>GPU</h2>
         <span className="muted small">{pick.rented ? 'A GPU is rented for this Short; a change applies to the next rental' : 'Chosen when the Short needs a GPU'}</span></div>
+      {on.today && <p className="small" style={{ margin: '0 0 8px' }}
+        title={`Booked $${on.today.bookedUsd.toFixed(2)} + the pod that is on now $${on.today.runningUsd.toFixed(2)}. Past the cap nothing new is rented; the Short waits for you.`}>
+        <strong>Today (UTC):</strong> ${on.today.spentUsd.toFixed(2)} of ${on.today.capUsd.toFixed(2)} GPU cap
+        {on.today.capUsd > 0 && on.today.spentUsd >= on.today.capUsd && <span className="error"> · cap reached, no new GPU today</span>}</p>}
       <div className="row" style={{ marginBottom: 8 }}>
         <strong className="small">GPU power</strong>
         <label><input type="radio" checked={pick.hold === 'auto'} onChange={() => void power('auto')} /> Auto (the studio turns it off when done)</label>

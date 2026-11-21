@@ -58,6 +58,8 @@ public class GpuBroker {
     private volatile Rental shared;
     /** The Shorts using the shared pod, and since when. A Short that detached keeps its used seconds in {@link #usedSeconds}. */
     private final Map<UUID, Instant> users = new ConcurrentHashMap<>();
+    /** Shorts that were on a pod retired as never-ready: they move to the next rental. */
+    private final List<UUID> pendingCarry = new ArrayList<>();
     /** Seconds already used by Shorts that detached from the current pod: with the attached ones, the cost split. */
     private final Map<UUID, Long> usedSeconds = new ConcurrentHashMap<>();
 
@@ -368,8 +370,18 @@ public class GpuBroker {
             shared = r;
             attach(shortId);
             carried.forEach(this::attach);
+            pendingCarry.forEach(this::attach);
+            pendingCarry.clear();
             log.info("GPU broker: rented {} {} ({}, ${}/h live) for Short {}", id, inst.id(), inst.gpu(), inst.hourlyUsd(), shortId);
             return r;
+        }
+        String daily = considered.stream().map(r -> r.get("skipped")).filter(w -> w != null
+                && w.toString().startsWith(GpuWallet.DAILY_CAP)).map(Object::toString).findFirst().orElse(null);
+        if (daily != null && eligible.isEmpty() && !unsafe) {
+            String msg = "Daily GPU cap reached (" + daily + "). Nothing was rented; this Short waits for you. Press Retry"
+                    + " after 00:00 UTC, or raise pricing.gpuBroker.dailyCapUsd in config/providers.yaml.";
+            records.decision(shortId, capability, considered, null, msg);
+            throw new NoGpuAvailableException(msg);
         }
         String reason = "No GPU can run " + capability + " now: " + considered.stream()
                 .filter(r -> r.get("skipped") != null)
@@ -401,6 +413,23 @@ public class GpuBroker {
     }
 
     /** Keeps the lease warm without any provider call (the worker pings this while it waits or runs jobs). */
+    /** What the pod that is on now has cost since it was rented (not booked until it ends), USD. 0 when none is on. */
+    public double runningUsd() {
+        Rental r = shared;
+        return r == null ? 0 : Math.max(0, Duration.between(r.createdAt(), clock.instant()).toSeconds() / 3600.0) * r.instance().hourlyUsd();
+    }
+
+    /** Today's GPU spend (UTC) vs the daily cap, for the dashboard: booked + the running pod so far. */
+    public Map<String, Object> today() {
+        double booked = wallet.spentTodayUsd(), running = runningUsd();
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("spentUsd", Math.round((booked + running) * 100) / 100.0);
+        m.put("bookedUsd", Math.round(booked * 100) / 100.0);
+        m.put("runningUsd", Math.round(running * 100) / 100.0);
+        m.put("capUsd", wallet.dailyCapUsd());
+        return m;
+    }
+
     public void heartbeat(UUID shortId) {
         Rental r = open(shortId).orElse(null);
         if (r != null) {
@@ -488,6 +517,25 @@ public class GpuBroker {
             log.info("GPU broker: Short {} let go of the shared pod {} ({}); it stays on for {} other Short(s)",
                     shortId, r.instance().id(), why, users.size());
         }
+    }
+
+    /**
+     * A media worker waited the whole ready limit (or saw the boot fail) on the shared pod at {@code url}: that pod is
+     * useless, so it is terminated and booked now, and the Shorts on it move to the next rental (21 Nov 2026: a pod that
+     * never became ready). Does nothing when the shared pod is already another one (a second worker asked late).
+     * @return true when the pod was retired
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public synchronized boolean retireUnready(String url, String why) {
+        Rental r = shared;
+        if (r == null || url == null || !url.strip().replaceAll("/+$", "").equals(
+                java.util.Objects.toString(r.instance().endpoint(), "").replaceAll("/+$", ""))) {
+            return false;
+        }
+        log.warn("GPU broker: pod {} never became ready ({}); terminating it and renting another", r.instance().id(), why);
+        pendingCarry.addAll(users.keySet());
+        endShared("never became ready: " + why);
+        return true;
     }
 
     /** The owner's "Turn off GPU": ends the shared pod now, for every Short that uses it. Safe to call with no pod. */
