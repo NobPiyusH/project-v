@@ -393,6 +393,7 @@ class DreamHookChainIdeasTest {
         assertNull(jobs.getFirst().negative(), "no negative prompt added");
         assertEquals(0, DreamService.look("unfiltered").dissolveSec(), "hard cuts");
         assertEquals(1.0, DreamService.look("unfiltered").speed());
+        assertEquals(81, DreamService.frames(DreamService.look("unfiltered").shotSeconds()), "the longest Wan clip: 5 s per line of the script");
         assertEquals("", DreamService.look("unfiltered").pictureStyle());
     }
 
