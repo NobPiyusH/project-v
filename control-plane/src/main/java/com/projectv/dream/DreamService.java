@@ -1362,6 +1362,18 @@ public class DreamService {
      * free steps before the pictures, or in a review window that goes on to a GPU step by itself. Anything waiting for
      * the owner (Manual, cost OK, Retry) or past the clips is not: the pod is not kept on for it.
      */
+    static final java.time.Duration COST_OK_GRACE = java.time.Duration.ofMinutes(3);
+
+    /** Every 30 s: a cost OK that has waited past its grace ends the pod even when no status changes. */
+    @org.springframework.scheduling.annotation.Scheduled(initialDelay = 60_000, fixedDelay = 30_000)
+    void releaseGpuIfNobodyWaitsScheduled() {
+        try {
+            releaseGpuIfNobodyWaits();
+        } catch (RuntimeException e) {
+            log.warn("GPU empty check failed: {}", e.getMessage());
+        }
+    }
+
     static final List<String> GPU_SOON = List.of("SCOUT:RUNNING", "SCOUT:WAITING_REVIEW", "WRITE:RUNNING",
             "WRITE:WAITING_REVIEW", "PICTURES:RUNNING", "PICTURES:WAITING_BATCH", "PICTURES:WAITING_REVIEW",
             "CLIPS:RUNNING", "CLIPS:WAITING_BATCH");
@@ -1371,14 +1383,16 @@ public class DreamService {
      * through review windows and the in-pod idle tail (that guard stays the safety net, rule 8). GPU power Manual on
      * any Short using it keeps it on, as before.
      */
-    private void releaseGpuIfNobodyWaits() {
+    void releaseGpuIfNobodyWaits() {
         if (gpu == null || gpu.usersOnPod() == 0) {
             return;
         }
+        // Clips waiting for the owner's cost OK keep the pod on for COST_OK_GRACE (owner, 21 Nov 2026: 3 min max).
         int soon = jdbc.sql("""
                         SELECT count(*) FROM dream_short
-                        WHERE (step || ':' || status) IN (:k) AND updated_at > now() - interval '2 hours'
-                        """).param("k", GPU_SOON).query(Integer.class).single();
+                        WHERE ((step || ':' || status) IN (:k) AND updated_at > now() - interval '2 hours')
+                           OR (step = 'CLIPS' AND status = 'WAITING_COST' AND updated_at > now() - make_interval(secs => :grace))
+                        """).param("k", GPU_SOON).param("grace", COST_OK_GRACE.toSeconds()).query(Integer.class).single();
         if (soon == 0) {
             gpu.releaseAllUnlessHeld("no Short is waiting for GPU work");
         }
