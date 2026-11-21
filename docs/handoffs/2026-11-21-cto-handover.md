@@ -5,6 +5,8 @@ Read `CLAUDE.md`, `docs/HANDOVER.md` (from "Revision R1"), then this file, then 
 ## Roles (owner decision, 21 Nov)
 Gendu = CEO: decides what the studio makes and why, judges quality by eye and ear, approves every spend and irreversible step. Claude = CTO: recommends ONE way for each decision (reason, risk, cost), discusses, then starts after his OK; runs the work and reports failures plainly. Coding beyond a tiny edit goes to Opus low (Opus medium if hard); Sonnet only for routine work. Commit messages: no attribution lines. Push only on his "push"; he says "merge" himself.
 
+**One CTO at a time (owner decision, 21 Nov).** The chat Gendu names is the CTO: it decides, merges into `main`, restarts the backend and agrees GPU spend with him. Any other Claude (for example the one returning from the old account) works through side sessions as a senior engineer or reviewer and does not merge to `main`, restart the backend or rent pods unless the CTO or Gendu says so.
+
 ## START HERE
 1. `list-pods` on RunPod (MCP) and the dashboard GPU card. Today's rule: a pod must never be left running. The pod watchdog is now LIVE (it terminates studio-named pods with no lease after the grace period).
 2. `git status` and `git log --oneline -8`. `main` is pushed to GitHub up to `f5363d2`; `39793ea` (studio safety) is merged locally and NOT pushed.
