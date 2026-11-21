@@ -96,7 +96,7 @@ def health(base: str) -> dict:
     except NotReady as e:
         return {"ready": False, "phase": str(e)}
     if status == 401:  # wrong or missing token: this pod can never be used from here, do not wait 30 minutes
-        return {"ready": False, "phase": "failed", "error": f"worker refused the token (HTTP 401)"}
+        return {"ready": False, "phase": "failed", "error": "worker refused the token (HTTP 401)"}
     try:
         h = json.loads(body or b"{}")
     except ValueError:

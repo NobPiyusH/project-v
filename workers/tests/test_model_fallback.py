@@ -77,7 +77,6 @@ class Quota(Exception):
 
 
 def test_used_up_daily_quota_moves_to_next_model_instead_of_sleeping(monkeypatch):
-    from google.genai import errors as genai_errors
     monkeypatch.setattr(common.genai_errors, "ClientError", Quota)
     calls = []
 
