@@ -125,8 +125,12 @@ function DreamHome() {
   const [hook, setHook] = useState(false)
   const [hookText, setHookText] = useState('')
   const [hookColor, setHookColor] = useState('red')
-  const [chainStyle, setChainStyle] = useState<'off' | 'last' | 'bridge'>('off')
+  const [chainStyle, setChainStyle] = useState<'off' | 'last' | 'bridge' | 'svi'>('off')
   const chain = chainStyle === 'last'
+  const svi = chainStyle === 'svi'
+  const [sviScenes, setSviScenes] = useState(1)
+  const [sviSeconds, setSviSeconds] = useState(20)
+  const [sviBetween, setSviBetween] = useState<'cut' | 'dissolve'>('cut')
   const [chainGroup, setChainGroup] = useState(0)
   const [locked, setLocked] = useState(false)
   const [pathChoice, setPathChoice] = useState(false)
@@ -149,6 +153,7 @@ function DreamHome() {
         gpuHold, gpuIdleMinutes: gpuIdle,
         ...(hook && !raw ? { hookTitle: true, hookText, hookColor } : {}), ...(chain ? { chainShots: true, chainGroup, chainLocked: locked && chainGroup === 0 } : {}),
         ...(chainStyle === 'bridge' ? { chainBridge: true } : {}),
+        ...(svi ? { sviScenes, sviSceneSeconds: sviSeconds, sviBetween } : {}),
         ...(ideaRef ? { ideaPack: ideaRef.pack, ideaId: ideaRef.id } : {}), ...(pathChoice ? { pathChoice: true } : {}) })
       window.location.hash = `#/dream/${r.id}`
     } catch (e) {
@@ -164,7 +169,8 @@ function DreamHome() {
       <section className="card">
         <div className="card-head"><h2>New Dream Short</h2><span className="pill">Modal Wan clips · your music · laptop finish</span></div>
         <textarea rows={raw ? 5 : 2} value={idea}
-          placeholder={raw ? 'Write exactly what you want. It is used word for word: nothing is added or removed. One line = one shot.' : 'A pink house under a cloud at the end of a tiled pier'}
+          placeholder={raw ? (svi ? 'Used word for word. Each line = one 5 s beat of a scene; a blank line starts the next scene (up to 3 scenes of 5 beats).'
+            : 'Write exactly what you want. It is used word for word: nothing is added or removed. One line = one shot.') : 'A pink house under a cloud at the end of a tiled pier'}
           onChange={(e) => { setIdea(e.target.value); setFormError(null) }} style={{ width: '100%' }} />
         {formError && <p className="error small">{formError}</p>}
         {raw && <p className="muted small">Unfiltered: no writer, style, "no people" rule, lessons, Scout, quality judging or colour grading. One line of your prompt = one shot of about 5 s (up to 8).</p>}
@@ -177,7 +183,7 @@ function DreamHome() {
           <label className="small">Look <select value={look} onChange={(e) => setLook(e.target.value)}>
             <option value="lonely">Lonely object</option><option value="drive">Drive-by</option><option value="walkthrough">Walk-through</option><option value="dreamcore">Dreamcore (soft pastel)</option><option value="impossible">Impossible place</option><option value="architecture">Impossible architecture</option>
             <option value="unfiltered">Unfiltered (my prompt, exactly)</option></select></label>
-          {!raw && <label className="small">Shots <select value={shots} onChange={(e) => setShots(Number(e.target.value))}>
+          {!raw && !svi && <label className="small">Shots <select value={shots} onChange={(e) => setShots(Number(e.target.value))}>
             {[3, 4, 5, 6].map((n) => <option key={n} value={n}>{n}</option>)}</select></label>}
           {!raw && EDIT_SWITCHES.map(([k, label]) => <label key={k} className="small"><input type="checkbox" checked={ed[k]}
             onChange={(e) => setEd({ ...ed, [k]: e.target.checked })} /> {label}</label>)}
@@ -188,9 +194,16 @@ function DreamHome() {
             onChange={(e) => setHookText(e.target.value)} />}
           {hook && !raw && <label className="small">Big word <select value={hookColor} onChange={(e) => setHookColor(e.target.value)}>
             {HOOK_COLOURS.map((c) => <option key={c} value={c}>{c}</option>)}</select></label>}
-          <label className="small" title="Last frame: each clip starts from the last frame of the one before (one continuous move, clips run one at a time). First-last: every shot keeps its picture and each clip travels from its picture to the next one, so joins land on approved pictures (rented GPU pod only). Off by default">
-            Chain shots <select value={chainStyle} onChange={(e) => setChainStyle(e.target.value as 'off' | 'last' | 'bridge')}>
-              <option value="off">off</option><option value="last">last frame</option><option value="bridge">first-last frame</option></select></label>
+          <label className="small" title="Separate: every shot is its own clip. Last frame: each clip starts from the last frame of the one before (one continuous move, clips run one at a time). First-last: every shot keeps its picture and each clip travels from its picture to the next one, so joins land on approved pictures (rented GPU pod only). SVI scenes: each scene is one smooth continuous shot of 10-20 s from one picture, no visible restarts (rented GPU pod only). Separate by default">
+            Clip method <select value={chainStyle} onChange={(e) => setChainStyle(e.target.value as 'off' | 'last' | 'bridge' | 'svi')}>
+              <option value="off">separate clips</option><option value="last">last-frame chain</option><option value="bridge">first-last frame</option>
+              <option value="svi">SVI scenes (smooth long shots)</option></select></label>
+          {svi && <label className="small" title="1 = a single long shot; 2-3 = a story Short with a cut between scenes">Scenes <select value={sviScenes}
+            onChange={(e) => setSviScenes(Number(e.target.value))}>{[1, 2, 3].map((n) => <option key={n} value={n}>{n}</option>)}</select></label>}
+          {svi && <label className="small" title="Each scene is made of 5 s beats (10 s = 3, 15 s = 4, 20 s = 5); longer than 20 s drifts">Scene length <select value={sviSeconds}
+            onChange={(e) => setSviSeconds(Number(e.target.value))}>{[10, 15, 20].map((n) => <option key={n} value={n}>{n} s</option>)}</select></label>}
+          {svi && sviScenes > 1 && <label className="small">Between scenes <select value={sviBetween}
+            onChange={(e) => setSviBetween(e.target.value as 'cut' | 'dissolve')}><option value="cut">hard cut</option><option value="dissolve">0.5 s dissolve</option></select></label>}
           {chain && <label className="small">Chain <select value={chainGroup} onChange={(e) => setChainGroup(Number(e.target.value))}>
             <option value={0}>all shots in one scene</option><option value={2}>pairs (1+2, 3+4...)</option><option value={3}>threes (1+2+3, 4+5+6...)</option></select></label>}
           {chain && chainGroup === 0 && <label className="small" title="One camera path for the whole Short, one world and seed, cleaned last frames">
@@ -345,12 +358,13 @@ function DreamView({ id }: { id: string }) {
       )}
 
       <section className="card">
-        <div className="card-head"><h2>Shots</h2>{waiting && step !== 'WRITE' && <span className="muted small">Tick shots to redo only those</span>}</div>
+        <div className="card-head"><h2>{d.svi_scenes ? `SVI scenes (${d.svi_scenes} × ${d.svi_scene_seconds} s)` : 'Shots'}</h2>{waiting && step !== 'WRITE' && <span className="muted small">
+          {d.svi_scenes ? 'Tick a beat to redo it: that scene is made again from that beat on, earlier beats are kept' : 'Tick shots to redo only those'}</span>}</div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))', gap: 12 }}>
           {d.shots.map((s) => (
             <div key={s.id} style={{ border: '1px solid var(--border)', borderRadius: 8, padding: 8 }}>
               <div className="row small" style={{ justifyContent: 'space-between' }}>
-                <strong>#{s.ord + 1}</strong>
+                <strong>{s.scene_no ? `Scene ${s.scene_no} · beat ${s.beat_no}` : `#${s.ord + 1}`}</strong>
                 {waiting && step !== 'WRITE' && <input type="checkbox" checked={picked.includes(s.id)} aria-label={`Pick shot ${s.ord + 1}`}
                   onChange={(e) => setPicked(e.target.checked ? [...picked, s.id] : picked.filter((x) => x !== s.id))} />}
               </div>

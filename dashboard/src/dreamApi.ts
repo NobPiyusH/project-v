@@ -18,6 +18,7 @@ export interface DreamShot {
   id: string; ord: number; scene: string; picture_prompt: string; motion_prompt: string
   picture_asset_id: string | null; clip_asset_id: string | null; picture_takes: number; clip_takes: number
   error: string | null
+  scene_no?: number | null; beat_no?: number | null // SVI scenes only: which scene and which 5 s beat
 }
 
 export interface DreamDetail extends DreamSummary {
@@ -26,6 +27,7 @@ export interface DreamDetail extends DreamSummary {
   path_choice: boolean; path_a: string | null; path_b: string | null; chosen_path: string | null; pick_source: string | null
   chain: DreamEpisode[]; children: { id: string; title: string | null; chosen_path: string | null; status: string }[]
   edit_music: boolean; edit_ambience: boolean; edit_pacing: boolean; check_json: string | null; picture_check_json: string | null; modes_json: string | Record<string, DreamMode>
+  svi_scenes?: number; svi_scene_seconds?: number; svi_between?: 'cut' | 'dissolve'
   shots: DreamShot[]
   costs: { provider_id: string; amount_inr: number; units: number | null; unit_type: string | null; estimated: boolean; note: string; ts: string }[]
   decisions: { stage: string; capability: string; chosen_provider_id: string | null; reason_text: string; created_at: string }[]
@@ -52,6 +54,8 @@ export interface NewDream {
   hookTitle?: boolean; hookText?: string; hookColor?: string; chainShots?: boolean; chainGroup?: number; chainLocked?: boolean; chainBridge?: boolean; ideaPack?: string; ideaId?: string
   gpuHold?: 'auto' | 'manual'; gpuIdleMinutes?: number // GPU power (default auto)
   pathChoice?: boolean // "Choose the path": end card with two options; a finished Short can be continued (off by default)
+  // SVI scenes (off by default): 1-3 continuous shots of 10/15/20 s made of 5 s beats; hard cut or 0.5 s dissolve between
+  sviScenes?: number; sviSceneSeconds?: number; sviBetween?: 'cut' | 'dissolve'
 }
 
 export interface IdeaPackIdea { id: string; title: string; concept: string; hook: string; camera: string; palette: string }
