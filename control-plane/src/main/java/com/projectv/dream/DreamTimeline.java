@@ -171,6 +171,7 @@ final class DreamTimeline {
                 case "WAITING" -> step + " is waiting for you" + notes;
                 case "WAITING_REVIEW" -> step + " is waiting for your review (goes on by itself after the window)";
                 case "WAITING_COST" -> step + " is waiting for your OK on the cost" + notes;
+                case "WAITING_BATCH" -> step + " is waiting its turn on the shared GPU" + notes;
                 case "FAILED_WAITING" -> null; // the "failure" event says it
                 case "COMPLETED" -> "Short finished";
                 case "CANCELLED" -> "Short cancelled (at " + step + ")";

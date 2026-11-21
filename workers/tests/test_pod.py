@@ -8,6 +8,14 @@ import pytest
 
 from workers.activities import clips as C
 from workers.pod import client, server as S
+from workers.activities import keyframes as K
+
+
+@pytest.fixture(autouse=True)
+def _nothing_saved_yet(monkeypatch):
+    """Storage is never touched by these tests: by default no take is saved yet."""
+    monkeypatch.setattr(C, "exists", lambda key: False)
+    monkeypatch.setattr(K, "exists", lambda key: False)
 
 
 def test_dry_run_ok(capsys):
@@ -104,7 +112,7 @@ def test_http_not_ready_then_ready_roundtrip(live_worker):
 def test_run_retries_when_instance_lost(monkeypatch):
     calls = {"n": 0}
 
-    def fake_once(base, kind, payload, beat=None, sleep=None):
+    def fake_once(base, kind, payload, beat=None, sleep=None, clock=None):
         calls["n"] += 1
         if calls["n"] == 1:
             raise client.NotReady("job vanished")
@@ -330,3 +338,116 @@ def test_unfiltered_finish_look_adds_no_grading_haze_or_grain():
     assert "gblur" in F.look_filter("dreamcore")                       # (an unknown look would fall back to this haze)
     g = F.dissolve_graph([5.0, 5.0], 0, 1080, 1920, 24, "unfiltered")
     assert "[x]null,format=yuv420p[v]" in g and "noise" not in g and "curves" not in g
+
+
+def _job_states(monkeypatch, states):
+    """Fakes the pod: submit answers 202, each poll answers the next state, the result answers bytes."""
+    seq = iter(states)
+
+    def call(url, body=None, timeout=60):
+        if body is not None:
+            return 202, json.dumps({"id": "j1"}).encode()
+        if url.endswith("/result"):
+            return 200, b"PNG"
+        return 200, json.dumps({"state": next(seq)}).encode()
+    monkeypatch.setattr(client, "_call", call)
+
+
+def test_queued_time_never_counts_against_the_run_limit(monkeypatch):
+    # 3 h in the queue behind other Shorts' clips, then a 1-minute run: the picture is fine.
+    _job_states(monkeypatch, ["queued"] * 5 + ["running", "running", "done"])
+    t = iter([3 * 3600, 3 * 3600, 3 * 3600 + 60])  # the clock is read only once the job runs
+    data, _ = client.run_once("http://x", "picture", {}, sleep=lambda s: None, clock=lambda: next(t))
+    assert data == b"PNG"
+
+
+def test_a_job_running_past_its_limit_fails(monkeypatch):
+    _job_states(monkeypatch, ["queued", "running", "running"])
+    t = iter([0, 0, client.RUN_LIMIT_S["picture"] + 1])
+    with pytest.raises(client.JobFailed, match="ran 10 min"):
+        client.run_once("http://x", "picture", {}, sleep=lambda s: None, clock=lambda: next(t))
+
+
+def test_retry_reuses_saved_pictures_and_renders_only_the_rest(monkeypatch):
+    monkeypatch.setattr(K, "exists", lambda key: key.endswith("s1-1.png"))
+    monkeypatch.setattr(K, "put_bytes", lambda key, data, ct: f"s3://b/{key}")
+    monkeypatch.setattr(K, "activity_beat", lambda d: None)
+    monkeypatch.setattr(client, "lease_beat", lambda *a, **k: None)
+    sent = []
+    monkeypatch.setattr(client, "run", lambda url, kind, payload, ready, beat=None: (sent.append(payload) or (b"png", {"seconds": 9})))
+    jobs = [{"shotId": s, "attempt": 1, "provider": "gpu_pod", "prompt": s, "seed": 4} for s in ("s1", "s2")]
+    results: list = []
+    secs = K._pod_pictures({"videoId": "v", "gpuUrl": "https://g.example/"}, jobs, results)
+    assert [p["prompt"] for p in sent] == ["s2"] and secs == 9
+    assert results[0]["uri"].endswith("videos/v/keyframes/s1-1.png") and results[0]["reused"]
+
+
+def test_retry_reuses_saved_clips_and_chains_from_them(monkeypatch):
+    saved = "videos/v/clips/dream/shot001-take1.mp4"
+    monkeypatch.setattr(C, "exists", lambda key: key == saved)
+    monkeypatch.setattr(C, "get_bytes", lambda uri: b"OLDMP4" if uri.endswith(saved) else b"png")
+    monkeypatch.setattr(C, "put_bytes", lambda key, data, ct: f"s3://b/{key}")
+    monkeypatch.setattr(C, "_stop_requested", lambda *a: False)
+    monkeypatch.setattr(C, "_post", lambda *a: None)
+    monkeypatch.setattr(C, "last_frame_png", lambda mp4, clean=False: b"LAST:" + mp4)
+    sent = []
+    monkeypatch.setattr(client, "run", lambda url, kind, payload, ready, beat=None: (sent.append(payload) or (b"mp4", {"seconds": 70})))
+    base = {"kind": "dream", "mode": "fast", "prompt": "walk", "width": 480, "height": 832, "numFrames": 81, "seed": 5, "take": 1}
+    jobs = [{**base, "shotId": "aaaaaaaa-1", "shotNumber": 1, "imageUri": "s3://b/p1.png"},
+            {**base, "shotId": "bbbbbbbb-2", "shotNumber": 2}]
+    clips, _ = C._pod({"gpuUrl": "https://g.example/", "jobs": jobs, "chain": True}, "http://127.0.0.1:8080", "v")
+    import base64
+    assert len(sent) == 1 and base64.b64decode(sent[0]["image"]) == b"LAST:OLDMP4"
+    assert clips[0]["uri"].endswith(saved) and clips[0]["gpuSeconds"] == 0 and clips[1]["uri"]
+
+
+def test_batch_order_keeps_the_loaded_model_busy_before_swapping():
+    ran = []
+    t = [0.0]
+    jobs = S.Jobs(lambda kind, p: (ran.append(p["n"]) or b"x", {}), clock=lambda: t[0])
+    # Two Shorts interleave: pictures of one, a clip of the other, more pictures, another clip.
+    for kind, n in [("picture", "p1"), ("clip", "c1"), ("picture", "p2"), ("clip", "c2"), ("picture", "p3")]:
+        jobs.submit(kind, {"n": n})
+    while jobs.work_one(False):
+        pass
+    assert ran == ["p1", "p2", "p3", "c1", "c2"]  # one swap instead of four
+
+
+def test_batch_order_never_starves_the_other_kind():
+    ran = []
+    t = [0.0]
+    jobs = S.Jobs(lambda kind, p: (ran.append(p["n"]) or b"x", {}), clock=lambda: t[0])
+    jobs.submit("clip", {"n": "c1"})
+    jobs.work_one(False)                      # Wan is loaded now
+    jobs.submit("picture", {"n": "p1"})
+    jobs.submit("clip", {"n": "c2"})
+    jobs.work_one(False)                      # c2: stays on Wan
+    jobs.submit("clip", {"n": "c3"})
+    t[0] = S.Jobs.SWITCH_AFTER_S + 1          # p1 has waited long enough
+    jobs.work_one(False)
+    assert ran == ["c1", "c2", "p1"]
+
+
+def test_retry_chain_keeps_earlier_frames_when_a_saved_clip_is_unreadable(monkeypatch):
+    saved2 = "videos/v/clips/dream/shot002-take1.mp4"
+    monkeypatch.setattr(C, "exists", lambda key: key == saved2)
+
+    def get(uri):
+        if uri.endswith(saved2):
+            raise OSError("unreadable")
+        return b"png"
+    monkeypatch.setattr(C, "get_bytes", get)
+    monkeypatch.setattr(C, "put_bytes", lambda key, data, ct: f"s3://b/{key}")
+    monkeypatch.setattr(C, "_stop_requested", lambda *a: False)
+    monkeypatch.setattr(C, "_post", lambda *a: None)
+    monkeypatch.setattr(C, "last_frame_png", lambda mp4, clean=False: b"LAST:" + mp4)
+    sent = []
+    monkeypatch.setattr(client, "run", lambda url, kind, payload, ready, beat=None: (sent.append(payload) or (b"NEWMP4", {"seconds": 70})))
+    base = {"kind": "dream", "mode": "fast", "prompt": "walk", "width": 480, "height": 832, "numFrames": 81, "seed": 5, "take": 1}
+    jobs = [{**base, "shotId": "aaaaaaaa-1", "shotNumber": 1, "imageUri": "s3://b/p1.png"},
+            {**base, "shotId": "bbbbbbbb-2", "shotNumber": 2}]
+    clips, _ = C._pod({"gpuUrl": "https://g.example/", "jobs": jobs, "chain": True}, "http://127.0.0.1:8080", "v")
+    import base64
+    assert len(sent) == 2, "shot 1 is rendered, and so is shot 2 (its saved file could not be read)"
+    assert base64.b64decode(sent[1]["image"]) == b"LAST:NEWMP4", "shot 2 still starts from shot 1's last frame"
+    assert all(c["uri"] for c in clips)

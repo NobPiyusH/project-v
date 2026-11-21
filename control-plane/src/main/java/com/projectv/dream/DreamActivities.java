@@ -76,4 +76,14 @@ public interface DreamActivities {
 
     /** The owner's Stop for clips in flight (the media worker polls it). Cleared when a new batch starts. */
     void startClipBatch(String dreamId);
+
+    /**
+     * Batch order on the shared GPU pod (21 Nov 2026): how many other Shorts should use the pod before this one starts
+     * {@code step}. CLIPS waits for other Shorts still writing or making pictures (so Z-Image and Wan are not swapped on
+     * every job); PICTURES waits, while no pod is on yet, for other Shorts still on their free steps (rent once, later).
+     * 0 = go now, and always 0 off the broker route.
+     */
+    default int gpuBatchAhead(String dreamId, String step) {
+        return 0;
+    }
 }

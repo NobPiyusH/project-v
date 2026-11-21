@@ -136,4 +136,60 @@ class DreamBrokerRouteTest {
                 .param("d", dream).query(Integer.class).single());
         assertFalse(created.isEmpty());
     }
+
+    @Test
+    void batchOrderCountsOnlyWorkingShortsAhead() {
+        UUID me = UUID.randomUUID();
+        List<UUID> others = new ArrayList<>();
+        for (String[] row : new String[][]{{"CLIPS", "RUNNING"}, {"PICTURES", "RUNNING"}, {"WRITE", "RUNNING"},
+                {"WRITE", "WAITING"}, {"MUSIC", "RUNNING"}}) {
+            UUID id = others.isEmpty() ? me : UUID.randomUUID(); // the first row is this Short, at its clips
+            others.add(id);
+            jdbc.sql("INSERT INTO dream_short (id, idea, step, status) VALUES (:id, 'x', :s, :st)")
+                    .param("id", id).param("s", row[0]).param("st", row[1]).update();
+        }
+        try {
+            assertEquals(2, dreams.gpuBatchAhead(me, "CLIPS"), "pictures + writing Shorts go first; waiting/music ones never hold it up");
+            assertEquals(1, dreams.gpuBatchAhead(me, "PICTURES"), "no pod on yet: wait for the Short still writing");
+            assertEquals(0, dreams.gpuBatchAhead(me, "MUSIC"));
+        } finally {
+            others.forEach(id -> jdbc.sql("DELETE FROM dream_short WHERE id = :id").param("id", id).update());
+        }
+    }
+
+    @Test
+    void theSharedPodEndsAsSoonAsNoShortWaitsForGpuWork() {
+        UUID a = UUID.randomUUID();
+        UUID b = UUID.randomUUID();
+        for (UUID id : List.of(a, b)) {
+            jdbc.sql("INSERT INTO dream_short (id, idea, status) VALUES (:id, 'x', 'RUNNING')").param("id", id).update();
+            jdbc.sql("""
+                            INSERT INTO dream_shot (id, dream_short_id, ord, scene, picture_prompt, motion_prompt)
+                            VALUES (:id, :d, 0, 'scene', 'picture prompt', 'walk forward')
+                            """).param("id", UUID.randomUUID()).param("d", id).update();
+        }
+        try {
+            dreams.status(a, "PICTURES", "RUNNING", null);
+            dreams.status(b, "PICTURES", "RUNNING", null);
+            dreams.pictureRequest(a, null, null);
+            dreams.pictureRequest(b, null, null);
+            int ended = terminated.size();
+
+            dreams.status(a, "CLIPS", "WAITING_REVIEW", null); // a's clips are done; b is still at work
+            assertEquals(ended, terminated.size());
+            dreams.status(b, "PICTURES", "WAITING_REVIEW", null); // goes on to clips by itself: keep the pod
+            assertEquals(ended, terminated.size());
+            dreams.status(b, "CLIPS", "WAITING_COST", null); // the owner's cost OK: the pod waits up to 1 min
+            assertEquals(ended, terminated.size());
+            jdbc.sql("UPDATE dream_short SET updated_at = now() - interval '2 minutes' WHERE id = :id").param("id", b).update();
+            dreams.releaseGpuIfNobodyWaits(); // the 30 s check after the grace
+            assertEquals(ended + 1, terminated.size());
+            assertEquals(0, jdbc.sql("SELECT count(*) FROM gpu_pod_lease WHERE released_at IS NULL")
+                    .query(Integer.class).single(), "the lease is released with the pod");
+        } finally {
+            for (UUID id : List.of(a, b)) {
+                jdbc.sql("UPDATE dream_short SET status = 'CANCELLED' WHERE id = :id").param("id", id).update();
+            }
+        }
+    }
 }

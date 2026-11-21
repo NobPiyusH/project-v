@@ -11,7 +11,7 @@ import modal
 from google.genai import types
 from temporalio import activity
 
-from workers.common import MEDIA_TIMEOUT_MS, gemini, log, put_bytes, usage_dict, with_models
+from workers.common import BUCKET, MEDIA_TIMEOUT_MS, exists, gemini, log, put_bytes, usage_dict, with_models
 
 MODAL_BATCH = 8  # images per Modal call; heartbeat between batches
 POD_PROVIDER = "gpu_pod"  # same value as DreamService.POD (Java); the job provider for pictures made on the rented GPU pod
@@ -129,12 +129,21 @@ def _pod_pictures(req: dict, jobs: list[dict], results: list[dict]) -> float:
     pod = podc.Rented(req.get("progressUrl") or "http://127.0.0.1:8080", req["videoId"], url,
                       float(req.get("readyTimeoutSeconds") or 1800), activity_beat)  # a vanished pod is replaced once
     for j in jobs:
+        key = f"videos/{req['videoId']}/keyframes/{j['shotId']}-{j['attempt']}.png"
+        if exists(key):
+            # A Retry after a failed step: this take was already rendered and saved (same shot, attempt, seed and
+            # prompt), only the step's save was lost. Reuse it instead of paying the GPU for it again.
+            results.append({"shotId": j["shotId"], "uri": f"s3://{BUCKET}/{key}", "provider": POD_PROVIDER,
+                            "model": "Tongyi-MAI/Z-Image-Turbo", "seed": int(j.get("seed") or 0), "seconds": 0.0,
+                            "usage": {}, "error": None, "reused": True})
+            activity_beat(len(results))
+            continue
         try:
             if not url:
                 raise RuntimeError("GPU pod route: the control plane sent no container group URL")
             png, info = pod.run("picture", {"prompt": j["prompt"], "seed": int(j.get("seed") or 0),
                                             "width": int(j.get("width", 768)), "height": int(j.get("height", 1344))})
-            uri = put_bytes(f"videos/{req['videoId']}/keyframes/{j['shotId']}-{j['attempt']}.png", png, "image/png")
+            uri = put_bytes(key, png, "image/png")
             s = float(info.get("seconds") or 0)
             seconds += s
             results.append({"shotId": j["shotId"], "uri": uri, "provider": POD_PROVIDER, "model": "Tongyi-MAI/Z-Image-Turbo",

@@ -177,6 +177,18 @@ class DreamShortWorkflowTest {
         @Override
         public void startClipBatch(String dreamId) {
         }
+
+        /** Other Shorts ahead of this one on the shared pod, per step; each call takes the next value (last one repeats). */
+        final Map<String, List<Integer>> ahead = new java.util.concurrent.ConcurrentHashMap<>();
+
+        @Override
+        public int gpuBatchAhead(String dreamId, String step) {
+            List<Integer> q = ahead.get(step);
+            if (q == null || q.isEmpty()) {
+                return 0;
+            }
+            return q.size() > 1 ? q.remove(0) : q.get(0);
+        }
     }
 
     /** Media worker stand-in: only the two methods Dream Shorts call. */
@@ -496,5 +508,31 @@ class DreamShortWorkflowTest {
         assertTrue(dream.events.contains("scout:idea at night:1"));
         wf.approve(DreamStep.SCOUT);
         assertEquals("completed", result());
+    }
+
+    @Test
+    void clipsWaitTheirTurnWhileOtherShortsMakePictures() {
+        dream.ahead.put("CLIPS", new java.util.ArrayList<>(List.of(2, 1, 0)));
+        start(StageMode.AUTO, Map.of());
+        assertEquals("completed", result());
+        int waiting = dream.events.indexOf("status:CLIPS:WAITING_BATCH");
+        assertTrue(waiting >= 0, dream.events.toString());
+        assertTrue(dream.events.lastIndexOf("status:PICTURES:RUNNING") < waiting);
+    }
+
+    @Test
+    void startNowSkipsTheBatchWait() {
+        dream.ahead.put("PICTURES", new java.util.ArrayList<>(List.of(1)));
+        DreamShortWorkflow wf = start(StageMode.AUTO, Map.of());
+        waitFor(wf, "PICTURES", "WAITING_BATCH");
+        wf.approve(DreamStep.PICTURES);
+        assertEquals("completed", result());
+    }
+
+    @Test
+    void theBatchWaitIsCappedSoAShortIsNeverStuck() {
+        dream.ahead.put("CLIPS", new java.util.ArrayList<>(List.of(1))); // someone always ahead
+        start(StageMode.AUTO, Map.of());
+        assertEquals("completed", result()); // goes on by itself after DreamShortWorkflowImpl.BATCH_WAIT
     }
 }

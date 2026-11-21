@@ -26,7 +26,7 @@ import modal
 from temporalio import activity
 
 from workers import gemini_pool
-from workers.common import beat as _beat, gemini, get_bytes, log, put_bytes, put_file, run_ffmpeg, workdir
+from workers.common import BUCKET, beat as _beat, exists, gemini, get_bytes, log, put_bytes, put_file, run_ffmpeg, workdir
 
 POLL_SECONDS = 5
 
@@ -53,12 +53,15 @@ def _not_ready(e: Exception) -> bool:
     return isinstance(e, TimeoutError) and not isinstance(e, modal.exception.Error)
 
 
+def clip_key(video_id: str, j: dict) -> str:
+    return f"videos/{video_id}/clips/{j['kind']}/shot{j['shotNumber']:03d}-take{j['take']}.mp4"
+
+
 def _clip(video_id: str, j: dict, r: dict) -> dict:
     """Saves a finished clip to object storage at once (a later stop or crash can't lose it) and describes it."""
-    uri = None
-    if r.get("mp4"):
-        uri = put_bytes(f"videos/{video_id}/clips/{j['kind']}/shot{j['shotNumber']:03d}-take{j['take']}.mp4",
-                        r["mp4"], "video/mp4")
+    uri = r.get("uri")
+    if r.get("mp4") and not uri:
+        uri = put_bytes(clip_key(video_id, j), r["mp4"], "video/mp4")
     log.info("Clip shot %s %s: %s", j["shotNumber"], j["kind"], "saved" if uri else r.get("error"))
     return {"shotId": j["shotId"], "take": j["take"], "kind": j["kind"], "uri": uri,
             "gpuSeconds": round(float(r.get("seconds") or 0), 1), "frames": int(r.get("frames") or 0),
@@ -354,6 +357,20 @@ def _pod(req: dict, base: str, video_id: str) -> tuple[list[dict], bool]:
             clips += [_stopped(x) for x, _ in jobs[i:]]
             return clips, True
         _report(base, video_id, jobs[i:], clips, {}, len(jobs))
+        if exists(clip_key(video_id, j)):
+            # A Retry after a failed step: this take is already rendered and saved (the step's save was lost).
+            # Reuse it; a chained next shot still starts from its last frame.
+            uri = f"s3://{BUCKET}/{clip_key(video_id, j)}"
+            r = {"uri": uri, "seconds": 0, "mode": j["mode"], "fps": 16, "frames": int(j["numFrames"])}
+            reusable = True
+            if chain:
+                try:
+                    made[j["shotNumber"]] = get_bytes(uri)  # add to the frames kept so far, never replace them
+                except Exception:  # noqa: BLE001 - unreadable: render it again instead
+                    reusable = False
+            if reusable:
+                clips.append(_clip(video_id, j, r))
+                continue
         fps = 16
         try:
             image = start_image(j, chain, made, failed, int(req.get("chainGroup") or 0), bool(req.get("locked")))

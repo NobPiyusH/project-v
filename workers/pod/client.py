@@ -17,6 +17,9 @@ import urllib.request
 
 RETRIES = 2
 POLL = 3.0
+# How long ONE job may run once the pod has started it. Time spent queued behind other Shorts' jobs never counts
+# (21 Nov 2026: six Shorts on one pod timed out while waiting in the queue). The Temporal StartToClose is only the outer cap.
+RUN_LIMIT_S = {"picture": 10 * 60, "clip": 45 * 60}
 
 
 class NotReady(Exception):
@@ -89,8 +92,12 @@ def wait_ready(base: str, timeout_s: float, beat=lambda info: None, sleep=time.s
         sleep(10)
 
 
-def run_once(base: str, kind: str, payload: dict, beat=lambda info: None, sleep=time.sleep) -> tuple[bytes, dict]:
-    """Submit one job and wait for its bytes. NotReady when the instance went away; JobFailed on a real error."""
+def run_once(base: str, kind: str, payload: dict, beat=lambda info: None, sleep=time.sleep,
+             clock=time.monotonic) -> tuple[bytes, dict]:
+    """Submit one job and wait for its bytes. NotReady when the instance went away; JobFailed on a real error or when
+    the job RUNS longer than RUN_LIMIT_S[kind] (queued time is free: the clock starts when the pod reports "running")."""
+    limit = RUN_LIMIT_S.get(kind)
+    started = None
     status, body = _call(f"{base}/{kind}", payload)
     if status == 503 or status >= 500:
         raise NotReady(f"submit {kind}: HTTP {status}")
@@ -106,6 +113,10 @@ def run_once(base: str, kind: str, payload: dict, beat=lambda info: None, sleep=
             raise NotReady(f"job poll: HTTP {status}")
         j = json.loads(body)
         beat({"pod": j.get("state")})
+        if j["state"] == "running" and started is None:
+            started = clock()
+        if limit and started is not None and j["state"] == "running" and clock() - started > limit:
+            raise JobFailed(f"{kind} ran {limit // 60} min on the pod without finishing")
         if j["state"] == "failed":
             raise JobFailed(j.get("error") or "failed")
         if j["state"] == "done":
@@ -122,7 +133,7 @@ def run(base: str, kind: str, payload: dict, ready_timeout_s: float, beat=lambda
     for attempt in range(RETRIES + 1):
         wait_ready(base, ready_timeout_s, beat, sleep, clock)
         try:
-            data, info = run_once(base, kind, payload, beat, sleep)
+            data, info = run_once(base, kind, payload, beat, sleep, clock)
             info["retries"] = attempt
             return data, info
         except NotReady as e:

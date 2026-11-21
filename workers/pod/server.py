@@ -24,7 +24,6 @@ import base64
 import io
 import json
 import os
-import queue
 import shutil
 import socket
 import subprocess
@@ -190,14 +189,24 @@ def plan() -> dict:
 # ------------------------------------------------------------------------------------------- jobs
 
 class Jobs:
-    """Async job table + one GPU thread. `runner(kind, payload) -> (bytes, extra)` does the work."""
+    """Async job table + one GPU thread. `runner(kind, payload) -> (bytes, extra)` does the work.
 
-    def __init__(self, runner):
+    Batch order (21 Nov 2026): Z-Image and Wan never share the VRAM, so every change of job kind costs a model swap.
+    The next job is the oldest one of the kind that ran last (the loaded model); the other kind runs when none of that
+    kind is queued, or when its oldest job has waited SWITCH_AFTER_S (so a picture is never starved by a long clip run).
+    With nothing loaded yet, pictures go first (a Short needs its pictures before its clips)."""
+
+    SWITCH_AFTER_S = 15 * 60
+
+    def __init__(self, runner, clock=time.time):
         self.runner = runner
+        self.clock = clock
         self.jobs: dict[str, dict] = {}
         self.order: list[str] = []
-        self.q: queue.Queue = queue.Queue()
+        self.pending: list[tuple[str, str, dict, float]] = []  # (jid, kind, payload, queued at), oldest first
+        self.cv = threading.Condition()
         self.lock = threading.Lock()
+        self.last_kind: str | None = None
 
     def submit(self, kind: str, payload: dict) -> str:
         jid = uuid.uuid4().hex
@@ -207,8 +216,24 @@ class Jobs:
             self.order.append(jid)
             while len(self.order) > KEEP_RESULTS:  # results are fetched within seconds; keep memory bounded
                 self.jobs.pop(self.order.pop(0), None)
-        self.q.put((jid, kind, payload))
+        with self.cv:
+            self.pending.append((jid, kind, payload, self.clock()))
+            self.cv.notify()
         return jid
+
+    def _pick(self) -> tuple[str, str, dict, float] | None:
+        """The next job by the batch order above (called with self.cv held)."""
+        if not self.pending:
+            return None
+        loaded = self.last_kind or "picture"
+        same = [p for p in self.pending if p[1] == loaded]
+        other = [p for p in self.pending if p[1] != loaded]
+        if same and not (other and self.clock() - other[0][3] >= self.SWITCH_AFTER_S):
+            chosen = same[0]
+        else:
+            chosen = other[0]
+        self.pending.remove(chosen)
+        return chosen
 
     def get(self, jid: str) -> dict | None:
         with self.lock:
@@ -223,10 +248,14 @@ class Jobs:
             return j["result"], ("video/mp4" if j["kind"] == "clip" else "image/png")
 
     def work_one(self, block: bool = True) -> bool:
-        try:
-            jid, kind, payload = self.q.get(block=block, timeout=1 if block else None)
-        except queue.Empty:
+        with self.cv:
+            if block and not self.pending:
+                self.cv.wait(timeout=1)
+            picked = self._pick()
+        if picked is None:
             return False
+        jid, kind, payload, _ = picked
+        self.last_kind = kind
         with self.lock:
             if jid not in self.jobs:
                 return True

@@ -329,7 +329,8 @@ public class DreamService {
 
     /** Start the Short's pod while the writer works, so the weight download overlaps the writing. Best effort. */
     private void warmGpu(UUID id) {
-        if (gpu != null) {
+        // Collect first, rent later: in a batch the pod is rented when the Shorts reach their pictures (gpuBatchAhead).
+        if (gpu != null && (gpu.usersOnPod() > 0 || !othersStillWriting(id))) {
             gpu.warm(id);
         }
     }
@@ -1354,9 +1355,82 @@ public class DreamService {
             evidence.event(id, step, "failure", null, message, null);
         }
         releaseGpuIfDone(id, step, status);
+        releaseGpuIfNobodyWaits();
+    }
+
+    /**
+     * Step:status pairs that will use the shared pod soon by themselves: working on (or queued for) a GPU step, on the
+     * free steps before the pictures, or in a review window that goes on to a GPU step by itself. Anything waiting for
+     * the owner (Manual, cost OK, Retry) or past the clips is not: the pod is not kept on for it.
+     */
+    static final java.time.Duration COST_OK_GRACE = java.time.Duration.ofMinutes(1);
+
+    /** Every 30 s: a cost OK that has waited past its grace ends the pod even when no status changes. */
+    @org.springframework.scheduling.annotation.Scheduled(initialDelay = 60_000, fixedDelay = 30_000)
+    void releaseGpuIfNobodyWaitsScheduled() {
+        try {
+            releaseGpuIfNobodyWaits();
+        } catch (RuntimeException e) {
+            log.warn("GPU empty check failed: {}", e.getMessage());
+        }
+    }
+
+    static final List<String> GPU_SOON = List.of("SCOUT:RUNNING", "SCOUT:WAITING_REVIEW", "WRITE:RUNNING",
+            "WRITE:WAITING_REVIEW", "PICTURES:RUNNING", "PICTURES:WAITING_BATCH", "PICTURES:WAITING_REVIEW",
+            "CLIPS:RUNNING", "CLIPS:WAITING_BATCH");
+
+    /**
+     * Shut down at empty (21 Nov 2026): when no Short will use the shared pod soon, it ends now instead of sitting
+     * through review windows and the in-pod idle tail (that guard stays the safety net, rule 8). GPU power Manual on
+     * any Short using it keeps it on, as before.
+     */
+    void releaseGpuIfNobodyWaits() {
+        if (gpu == null || gpu.usersOnPod() == 0) {
+            return;
+        }
+        // Clips waiting for the owner's cost OK keep the pod on for COST_OK_GRACE (owner, 21 Nov 2026: 1 min max).
+        int soon = jdbc.sql("""
+                        SELECT count(*) FROM dream_short
+                        WHERE ((step || ':' || status) IN (:k) AND updated_at > now() - interval '2 hours')
+                           OR (step = 'CLIPS' AND status = 'WAITING_COST' AND updated_at > now() - make_interval(secs => :grace))
+                        """).param("k", GPU_SOON).param("grace", COST_OK_GRACE.toSeconds()).query(Integer.class).single();
+        if (soon == 0) {
+            gpu.releaseAllUnlessHeld("no Short is waiting for GPU work");
+        }
     }
 
     public void startClipBatch(UUID id) {
         clipProgress.startBatch(id);
+    }
+
+    /** Steps that come before a Short's pictures (free) and its clips (pictures, on the same pod). */
+    private static final List<String> FREE_STEPS = List.of("SCOUT", "WRITE");
+    private static final List<String> BEFORE_CLIPS = List.of("SCOUT", "WRITE", "PICTURES");
+
+    /** See {@link DreamActivities#gpuBatchAhead}. Only Shorts that are working right now count (one waiting for the owner never holds others up). */
+    public int gpuBatchAhead(UUID id, String step) {
+        if (gpu == null) {
+            return 0;
+        }
+        List<String> ahead;
+        if ("CLIPS".equals(step)) {
+            ahead = BEFORE_CLIPS;
+        } else if ("PICTURES".equals(step) && gpu.usersOnPod() == 0) {
+            ahead = FREE_STEPS;
+        } else {
+            return 0;
+        }
+        return jdbc.sql("""
+                        SELECT count(*) FROM dream_short
+                        WHERE id <> :id AND status = 'RUNNING' AND step IN (:steps) AND updated_at > now() - interval '2 hours'
+                        """).param("id", id).param("steps", ahead).query(Integer.class).single();
+    }
+
+    /** Whether another Short is still on its free steps: then the pod is rented when the batch reaches its pictures, not now. */
+    private boolean othersStillWriting(UUID id) {
+        return jdbc.sql("""
+                        SELECT count(*) FROM dream_short
+                        WHERE id <> :id AND status = 'RUNNING' AND step IN (:steps) AND updated_at > now() - interval '2 hours'
+                        """).param("id", id).param("steps", FREE_STEPS).query(Integer.class).single() > 0;
     }
 }
