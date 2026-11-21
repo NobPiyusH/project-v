@@ -5,7 +5,7 @@ import { Autopilot, autopilotApi } from './pages/Autopilot'
 import { useHashRoute, usePoll } from './hooks'
 import { Home } from './pages/Home'
 import { Providers } from './pages/Providers'
-import { DreamShorts } from './pages/DreamShorts'
+import { DreamShorts } from './pages/dream/DreamShorts'
 import { VideoDetail } from './pages/VideoDetail'
 
 type Theme = 'dark' | 'light'
