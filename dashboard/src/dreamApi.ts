@@ -81,6 +81,7 @@ export interface GpuPick {
   mode: 'auto' | 'manual'; choice: string; rented: boolean; usersOnPod: number
   // GPU power: auto = the studio turns the pod off when done; manual = stays on until turned off or idle
   hold: 'auto' | 'manual'; idleMinutes: number; offInSeconds: number | null
+  estimate?: { hours: number; usd: number; hourlyUsd: number } // this Short's expected rental (same hours as the daily-cap check)
 }
 
 async function gpuCall<T>(method: string, path: string, body?: unknown): Promise<T> {

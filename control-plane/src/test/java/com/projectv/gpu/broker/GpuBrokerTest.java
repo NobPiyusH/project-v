@@ -555,4 +555,19 @@ class GpuBrokerTest {
         assertNotEquals(first.instance().id(), second.instance().id());
         assertTrue(b.open(other).isPresent(), "the other Short moved to the new pod");
     }
+
+    @Test
+    void theDailyCapUsesThisShortsOwnEstimateAndStillRefusesWhenItDoesNotFit() {
+        runpod.hourly = 0.69; // 21 Nov 2026: an A6000 at $0.69/h with $0.42 left today
+        jarvis.stock = false;
+        GpuBroker b = dailyBroker(Clock.fixed(NOW, ZoneOffset.UTC), 3.08);
+        assertThrows(GpuBroker.NoGpuAvailableException.class, () -> acquire(b), "the fixed 1 h fallback ($0.69) does not fit");
+        GpuBroker.NoGpuAvailableException big = assertThrows(GpuBroker.NoGpuAvailableException.class, () ->
+                b.acquire(shortId, "video.i2v.dream", "img", List.of("python", "worker.py"), Map.of(), null, GpuBroker.Pick.AUTO, 0.70));
+        assertTrue(big.getMessage().contains("this rental needs about $0.48"), big.getMessage());
+        assertTrue(runpod.created.isEmpty(), "nothing rented");
+        GpuBroker.Rental r = b.acquire(shortId, "video.i2v.dream", "img", List.of("python", "worker.py"), Map.of(), null,
+                GpuBroker.Pick.AUTO, 0.39); // 1 SVI scene, 4 clips: about $0.27
+        assertEquals("runpod", r.instance().provider());
+    }
 }

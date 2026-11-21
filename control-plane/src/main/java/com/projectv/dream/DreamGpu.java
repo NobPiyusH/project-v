@@ -50,7 +50,17 @@ public class DreamGpu {
     private final double secondsPer81Frames;
     private final double startSeconds;
     private final double worstCaseHourlyUsd;
+    private final RentalEstimate estimate;
 
+    /** Tests and older callers: the default rental estimate. */
+    public DreamGpu(GpuBroker broker, org.springframework.jdbc.core.simple.JdbcClient jdbc, PreferenceStore prefs, Pricing pricing,
+                    String provider, String workerFile, String image, String volumeId, int readyTimeoutMinutes, int port,
+                    double secondsPerPicture, double secondsPer81Frames, double startSeconds, double worstCaseHourlyUsd) {
+        this(broker, jdbc, prefs, pricing, provider, workerFile, image, volumeId, readyTimeoutMinutes, port, secondsPerPicture,
+                secondsPer81Frames, startSeconds, worstCaseHourlyUsd, RentalEstimate.DEFAULT);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
     public DreamGpu(GpuBroker broker, org.springframework.jdbc.core.simple.JdbcClient jdbc, PreferenceStore prefs, Pricing pricing,
                     @Value("${projectv.dream.gpu-provider:modal}") String provider,
                     @Value("${projectv.gpu.pod-worker-file:workers/pod/server.py}") String workerFile,
@@ -61,7 +71,8 @@ public class DreamGpu {
                     @Value("${projectv.gpu.seconds-per-picture:10}") double secondsPerPicture,
                     @Value("${projectv.gpu.seconds-per-81-frames:76}") double secondsPer81Frames,
                     @Value("${projectv.gpu.pod-start-seconds:900}") double startSeconds,
-                    @Value("${projectv.gpu.max-hourly-usd:2.0}") double worstCaseHourlyUsd) {
+                    @Value("${projectv.gpu.max-hourly-usd:2.0}") double worstCaseHourlyUsd,
+                    RentalEstimate estimate) {
         if (!"modal".equalsIgnoreCase(provider) && !"broker".equalsIgnoreCase(provider)) {
             throw new IllegalArgumentException("projectv.dream.gpu-provider must be modal or broker, not '" + provider + "'");
         }
@@ -79,6 +90,22 @@ public class DreamGpu {
         this.secondsPer81Frames = secondsPer81Frames;
         this.startSeconds = startSeconds;
         this.worstCaseHourlyUsd = worstCaseHourlyUsd;
+        this.estimate = estimate;
+    }
+
+    /** Expected hours of a rental for this Short's own work (the daily-cap check and the dashboard both use this). */
+    public double rentalHours(UUID dreamId) {
+        var row = jdbc.sql("SELECT shot_count, picture_model, svi_scenes FROM dream_short WHERE id = :d").param("d", dreamId)
+                .query().listOfRows().stream().findFirst().orElse(null);
+        return estimate.hours(row);
+    }
+
+    /** Dashboard: this Short's expected rental (hours, USD at the cheapest live price now). */
+    public java.util.Map<String, Object> rentalEstimate(UUID dreamId) {
+        double h = rentalHours(dreamId);
+        double hourly = broker.cheapestQuote().map(GpuProvider.Quote::hourlyUsd).orElse(worstCaseHourlyUsd);
+        return java.util.Map.of("hours", Math.round(h * 100) / 100.0, "usd", Math.round(h * hourly * 100) / 100.0,
+                "hourlyUsd", hourly);
     }
 
     public boolean enabled() {
@@ -115,7 +142,7 @@ public class DreamGpu {
     /** Opens (or returns) the Short's pod. Throws when no provider can serve (the step then waits for the owner). */
     public Session session(UUID dreamId) {
         GpuBroker.Rental r = broker.acquire(dreamId, "video.i2v.dream", image, PodBoot.command(),
-                PodBoot.env(worker(), port, "/workspace/data", volumeId == null ? null : VOLUME_MOUNT), volumeId, pick(dreamId));
+                PodBoot.env(worker(), port, "/workspace/data", volumeId == null ? null : VOLUME_MOUNT), volumeId, pick(dreamId), rentalHours(dreamId));
         return new Session(r.instance().endpoint(), readyTimeoutMinutes * 60);
     }
 

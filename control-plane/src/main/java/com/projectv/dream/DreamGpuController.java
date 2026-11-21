@@ -53,6 +53,7 @@ public class DreamGpuController {
         out.put("mode", p.mode());
         out.put("choice", p.choice() == null ? "" : p.choice());
         out.put("rented", gpu.isOpen(dreamId));
+        out.put("estimate", gpu.rentalEstimate(dreamId)); // the same hours the daily-cap check uses before renting
         out.put("usersOnPod", gpu.usersOnPod()); // the ONE shared pod: how many Shorts are using it
         out.put("hold", gpu.holdManual(dreamId) ? "manual" : "auto");
         out.put("idleMinutes", gpu.idleMinutes(dreamId));

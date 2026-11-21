@@ -201,6 +201,11 @@ public class GpuBroker {
 
     /** Every provider's every option with the reason it can or cannot be rented now. Read-only. */
     private List<Cand> candidates(GpuProvider.GpuSpec spec) {
+        return candidates(spec, config.expectedHours());
+    }
+
+    /** {@code hours}: how long this rental is expected to run (the wallet and daily-cap checks use hourly x hours). */
+    private List<Cand> candidates(GpuProvider.GpuSpec spec, double hours) {
         List<Cand> out = new ArrayList<>();
         for (String id : config.order()) {
             GpuProvider p = providers.get(id);
@@ -224,7 +229,7 @@ public class GpuBroker {
                 continue;
             }
             for (GpuProvider.Quote q : quotes) {
-                String why = wallet.refusal(id, q.hourlyUsd() * config.expectedHours());
+                String why = wallet.refusal(id, q.hourlyUsd() * hours);
                 if (why == null) {
                     try {
                         new PodWatchdog(p, leases, events, limits, clock).checkCanStart(q.hourlyUsd());
@@ -269,6 +274,17 @@ public class GpuBroker {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public synchronized Rental acquire(UUID shortId, String capability, String image, List<String> workerArgv,
                                        Map<String, String> env, String volumeId, Pick pick) {
+        return acquire(shortId, capability, image, workerArgv, env, volumeId, pick, config.expectedHours());
+    }
+
+    /**
+     * As above, with the rental's expected hours for this Short (com.projectv.dream.RentalEstimate); 0 or less = the
+     * config's expectedHours.
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public synchronized Rental acquire(UUID shortId, String capability, String image, List<String> workerArgv,
+                                       Map<String, String> env, String volumeId, Pick pick, double expectedHours) {
+        double hours = expectedHours > 0 ? expectedHours : config.expectedHours();
         // ONE shared pod: when it is on, every Short uses it (a manual GPU pick applies only when no pod is on).
         Rental existing = shared;
         List<UUID> carried = List.of();
@@ -283,7 +299,7 @@ public class GpuBroker {
             endShared("pod gone before reuse (self-stopped or killed)");
         }
         GpuProvider.GpuSpec spec = new GpuProvider.GpuSpec(config.gpuPreference(), config.minVramGb(), config.minRamGb(), config.diskGb());
-        List<Cand> all = candidates(spec);
+        List<Cand> all = candidates(spec, hours);
         List<Map<String, Object>> considered = new ArrayList<>(all.stream().map(Cand::row).toList());
         // Cheapest live price first (owner, 20 Nov 2026); config order only breaks ties (the sort is stable).
         List<Cand> eligible = new ArrayList<>(all.stream().filter(Cand::ok)

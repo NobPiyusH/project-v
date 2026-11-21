@@ -591,7 +591,8 @@ function GpuCard({ id }: { id: string }) {
       {on.today && <p className="small" style={{ margin: '0 0 8px' }}
         title={`Booked $${on.today.bookedUsd.toFixed(2)} + the pod that is on now $${on.today.runningUsd.toFixed(2)}. Past the cap nothing new is rented; the Short waits for you.`}>
         <strong>Today (UTC):</strong> ${on.today.spentUsd.toFixed(2)} of ${on.today.capUsd.toFixed(2)} GPU cap
-        {on.today.capUsd > 0 && on.today.spentUsd >= on.today.capUsd && <span className="error"> · cap reached, no new GPU today</span>}</p>}
+        {on.today.capUsd > 0 && on.today.spentUsd >= on.today.capUsd && <span className="error"> · cap reached, no new GPU today</span>}
+        {pick.estimate && <span className="muted"> · this Short needs about {Math.round(pick.estimate.hours * 60)} min ≈ ${pick.estimate.usd.toFixed(2)} at ${pick.estimate.hourlyUsd.toFixed(2)}/h</span>}</p>}
       <div className="row" style={{ marginBottom: 8 }}>
         <strong className="small">GPU power</strong>
         <label><input type="radio" checked={pick.hold === 'auto'} onChange={() => void power('auto')} /> Auto (the studio turns it off when done)</label>
