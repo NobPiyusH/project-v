@@ -610,16 +610,17 @@ DOWNLOAD_TRIES = 3
 
 
 def hf_download(repo: str, path: str, local_dir: str, tries: int = DOWNLOAD_TRIES, sleep=time.sleep) -> Path:
-    """hf_hub_download with retries (21 Nov 2026: one Hugging Face xet hiccup, "File reconstruction error ... receiver
-    dropped", failed a whole paid step). Short backoff between tries; the last try turns xet off (HF_HUB_DISABLE_XET=1)
-    for a plain-HTTP download. Logs which try worked."""
-    from huggingface_hub import hf_hub_download
+    """hf_hub_download with retries (21 Nov 2026: Hugging Face xet failed every FLUX download on two pods with
+    "File reconstruction error ... receiver dropped"). Short backoff between tries; the last try turns xet off for a
+    plain-HTTP download. huggingface_hub reads HF_HUB_DISABLE_XET once at import, so the switch is made on
+    huggingface_hub.constants itself (setting the env var alone does nothing then). Logs which try worked."""
+    from huggingface_hub import constants, hf_hub_download
 
     for attempt in range(1, tries + 1):
         plain = attempt == tries and tries > 1
-        old = os.environ.get("HF_HUB_DISABLE_XET")
+        old = constants.HF_HUB_DISABLE_XET
         if plain:
-            os.environ["HF_HUB_DISABLE_XET"] = "1"
+            constants.HF_HUB_DISABLE_XET = True
         try:
             local = Path(hf_hub_download(repo, path, local_dir=local_dir))
             log(f"{path}: downloaded on try {attempt}/{tries}" + (" (plain HTTP, xet off)" if plain else ""))
@@ -631,10 +632,7 @@ def hf_download(repo: str, path: str, local_dir: str, tries: int = DOWNLOAD_TRIE
             sleep(5 * attempt)
         finally:
             if plain:
-                if old is None:
-                    os.environ.pop("HF_HUB_DISABLE_XET", None)
-                else:
-                    os.environ["HF_HUB_DISABLE_XET"] = old
+                constants.HF_HUB_DISABLE_XET = old
     raise RuntimeError("unreachable")
 
 
