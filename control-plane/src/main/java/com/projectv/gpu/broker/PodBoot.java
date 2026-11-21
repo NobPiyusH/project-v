@@ -45,6 +45,9 @@ public final class PodBoot {
         env.put("SV_BOOT_N", Integer.toString(n));
         env.put("SV_PORT", Integer.toString(port));
         env.put("SV_ROOT", root);
+        // Hugging Face xet failed every FLUX download on two pods (21 Nov 2026): plain HTTP from the first try. The
+        // worker sets it too (server.py hub_env) before huggingface_hub is imported; this covers anything else on the pod.
+        env.put("HF_HUB_DISABLE_XET", "1");
         if (volumeMount != null && !volumeMount.isBlank()) {
             env.put("SV_VOLUME", volumeMount);
         }

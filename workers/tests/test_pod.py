@@ -651,3 +651,46 @@ def test_weight_download_gives_up_after_three_tries(monkeypatch, tmp_path):
     with pytest.raises(OSError):
         S.hf_download("r", "a", str(tmp_path), sleep=lambda s: None)
     assert len(n) == 3
+
+
+def test_xet_is_off_before_huggingface_hub_is_imported():
+    import subprocess
+    import sys
+    code = ("import os, sys; os.environ.pop('HF_HUB_DISABLE_XET', None); import workers.pod.server as S; "
+            "assert 'huggingface_hub' not in sys.modules, 'imported too early'; "
+            "assert os.environ['HF_HUB_DISABLE_XET'] == '1'; "
+            "from huggingface_hub import constants; assert constants.HF_HUB_DISABLE_XET is True; print('ok')")
+    env = {k: v for k, v in os.environ.items() if k != "HF_HUB_DISABLE_XET"}
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=env)
+    assert out.stdout.strip() == "ok", out.stderr
+
+
+def test_hf_transfer_only_when_already_installed():
+    e = {}
+    S.hub_env(e, has_hf_transfer=False)
+    assert e == {"HF_HUB_DISABLE_XET": "1"}
+    S.hub_env(e, has_hf_transfer=True)
+    assert e["HF_HUB_ENABLE_HF_TRANSFER"] == "1"
+    e2 = {"HF_HUB_DISABLE_XET": "0"}
+    S.hub_env(e2, has_hf_transfer=False)
+    assert e2["HF_HUB_DISABLE_XET"] == "0", "an explicit setting on the pod wins"
+
+
+def test_fetch_files_retries_each_weight(monkeypatch, tmp_path):
+    calls = []
+
+    def flaky(repo, path, local_dir, tries=S.DOWNLOAD_TRIES, sleep=None):
+        calls.append(path)
+        f = tmp_path / path
+        f.write_bytes(b"abc")
+        return f
+    monkeypatch.setattr(S, "hf_download", flaky)
+    monkeypatch.setattr(S, "ROOT", tmp_path)
+    monkeypatch.setattr(S, "VOLUME", "")
+    monkeypatch.setattr(S, "log", lambda m: None)
+    links = []
+    monkeypatch.setattr(S.Path, "symlink_to", lambda self, target: links.append((self.name, target.name)))  # Windows
+    comfy = tmp_path / "comfy"
+    S.fetch_files(comfy, S.State(), {"a.safetensors": ("r", "a.safetensors", "unet", 3)}, "x")
+    assert calls == ["a.safetensors"], "every weight goes through the retrying download"
+    assert links == [("a.safetensors", "a.safetensors")]

@@ -47,6 +47,20 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+def hub_env(environ=os.environ, has_hf_transfer=None) -> None:
+    """Weight downloads skip Hugging Face xet from the first try (21 Nov 2026: xet failed every FLUX download on two
+    pods, "File reconstruction error ... receiver dropped"). Must run before huggingface_hub is imported: the library
+    reads these once at import. hf_transfer is used only if the pod already has it (nothing new is installed)."""
+    environ.setdefault("HF_HUB_DISABLE_XET", "1")
+    if has_hf_transfer is None:
+        import importlib.util
+        has_hf_transfer = importlib.util.find_spec("hf_transfer") is not None
+    if has_hf_transfer:
+        environ.setdefault("HF_HUB_ENABLE_HF_TRANSFER", "1")
+
+
+hub_env()  # at import, before any `from huggingface_hub import ...` below (they are all inside functions)
+
 COMFY_TAG = "v0.45.0"
 COMFY_TARBALL = f"https://github.com/comfyanonymous/ComfyUI/archive/refs/tags/{COMFY_TAG}.tar.gz"
 ROOT = Path(os.environ.get("SV_ROOT", "/data"))
