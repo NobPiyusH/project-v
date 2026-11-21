@@ -42,7 +42,8 @@ class E2eProviderTest {
             record(ex);
             send(ex, 200, "{\"code\":200,\"data\":[" + row("GDC3.L40S-60.220GB_v1", "p-l40s", 60, 220, 250, 102) + ","
                     + row("GDC3.L4-25.110GB_v1", "p-l4", 25, 110, 250, 49) + ","
-                    + row("GDC3.A40-16.100GB", "p-a40", 16, 100, 750, 96) + "]}");
+                    + row("GDC3.A40-16.100GB", "GDC3-16vCPU-100RAM-750DISK-GDC3.A40-16.100GB_Ubuntu20-Delhi", 16, 100, 750, 96, "Ubuntu-20.04-GPU") + ","
+                    + row("GDC3.A40-16.100GB", "GDC3-16vCPU-100RAM-750DISK-GDC3.2xA40-32.200GB_Ubuntu22-Delhi", 16, 100, 750, 90, "Ubuntu-22.04-GPU") + "]}");
         });
         server.createContext("/api/v1/nodes/", ex -> {
             record(ex);
@@ -74,7 +75,11 @@ class E2eProviderTest {
     }
 
     static String row(String sku, String plan, int cpu, int ram, int disk, double inr) {
-        return "{\"name\":\"" + sku + "\",\"plan\":\"" + plan + "\",\"image\":\"Ubuntu-22.04-GPU\",\"specs\":{\"cpu\":" + cpu + ",\"ram\":\""
+        return row(sku, plan, cpu, ram, disk, inr, "Ubuntu-22.04-GPU");
+    }
+
+    static String row(String sku, String plan, int cpu, int ram, int disk, double inr, String image) {
+        return "{\"name\":\"" + sku + "\",\"plan\":\"" + plan + "\",\"image\":\"" + image + "\",\"specs\":{\"cpu\":" + cpu + ",\"ram\":\""
                 + ram + ".00\",\"disk_space\":" + disk + ",\"price_per_hour\":" + inr + "}}";
     }
 
@@ -118,8 +123,51 @@ class E2eProviderTest {
         assertTrue(createBody.contains("\"disable_password\":true"));
         assertTrue(createBody.contains("ssh-ed25519 "));
         assertTrue(createBody.contains("SV_TOKEN=tok123"), "the per-rental worker token is the only secret on the node");
-        assertTrue(createBody.contains("--gpus all"));
-        assertTrue(createBody.contains("-p 443:8000"));
+        assertTrue(createBody.contains("\"image\":\"Ubuntu-20.04-GPU\""), "the A40 uses its single-GPU template image: " + createBody);
+        String run = decodedRunScript(p.startScripts(req(q)));
+        assertTrue(run.contains("--gpus all"));
+        assertTrue(run.contains("-p 443:8000"));
+    }
+
+    /** Reassembles run.b64 from the entries the way the node does. */
+    static String decodedRunScript(List<String> scripts) {
+        StringBuilder b64 = new StringBuilder();
+        for (String sc : scripts) {
+            if (sc.contains(">> /opt/projectv/run.b64")) {
+                b64.append(sc.substring(sc.indexOf("printf '%s' '") + 13, sc.indexOf("' >> /opt/projectv/run.b64")));
+            }
+        }
+        return new String(java.util.Base64.getDecoder().decode(b64.toString()), StandardCharsets.UTF_8);
+    }
+
+    @Test
+    void everyStartScriptEntryStaysUnderE2eLimitOf2048Chars() {
+        E2eProvider p = provider(2);
+        Map<String, String> env = new LinkedHashMap<>();
+        for (int i = 0; i < 23; i++) { // the real worker payload: ~23 chunks of 900 chars
+            env.put("SV_BOOT_%02d".formatted(i), "A".repeat(900));
+        }
+        env.put("SV_TOKEN", "t".repeat(64));
+        List<String> guard = com.projectv.gpu.PodSelfStop.wrapExit(List.of("python", "-c", "print('x')"), 120, 15, java.time.Instant.now());
+        GpuProvider.CreateRequest r = new GpuProvider.CreateRequest("projectv-e2e-aaaa", "ghcr.io/x/worker:latest", 80, guard, env, 8000, null, p.quote(SPEC));
+        List<String> scripts = p.startScripts(r);
+        assertTrue(scripts.size() > 10);
+        scripts.forEach(s -> assertTrue(s.length() <= 2048, "entry of " + s.length() + " chars"));
+        String last = scripts.getLast();
+        assertTrue(last.contains("sha256sum -c"));
+        assertTrue(last.contains(E2eProvider.sha256(decodedRunScript(scripts).getBytes(StandardCharsets.UTF_8))));
+    }
+
+    @Test
+    void badNodeNamesAreRefusedBeforeCalling() {
+        E2eProvider p = provider(2);
+        GpuProvider.CreateRequest r = new GpuProvider.CreateRequest("projectv_e2e_aaaa", "img", 80, List.of("x"), Map.of(), 8000, null, p.quote(SPEC));
+        assertThrows(IllegalArgumentException.class, () -> p.create(r));
+    }
+
+    @Test
+    void multiGpuTemplateNamesAreNeverQuoted() {
+        provider(2).quotes(SPEC).forEach(q -> assertFalse(q.gpu().contains("2xA40"), q.gpu()));
     }
 
     @Test
@@ -132,7 +180,7 @@ class E2eProviderTest {
         GpuProvider.CreateRequest r = new GpuProvider.CreateRequest("projectv-e2e-aaaa", "img", 80, List.of("x"), env, 8000, null, p.quote(SPEC));
         List<String> scripts = p.startScripts(r);
         assertTrue(scripts.size() >= 3);
-        scripts.forEach(s -> assertTrue(s.length() < 16_000));
+        scripts.forEach(s -> assertTrue(s.length() <= 2048));
     }
 
     @Test

@@ -31,13 +31,16 @@ public record E2eConfig(List<Plan> plans, String location, String image, double 
                         int startTimeoutSeconds, int pollSeconds, int cacheSeconds) {
 
     /** One allowed plan. */
-    public record Plan(String sku, String gpu, int vramGb) {
+    public record Plan(String sku, String gpu, int vramGb, String image) {
+        public Plan(String sku, String gpu, int vramGb) {
+            this(sku, gpu, vramGb, null);
+        }
     }
 
     public static final List<Plan> DEFAULT_PLANS = List.of(
             new Plan("GDC3.L40S-60.220GB_v1", "L40S", 48),
-            new Plan("GDC3.A40-16.100GB", "A40", 48),
-            new Plan("GDC3.A10080-16.115GB", "A100-80GB", 80));
+            // the 22.04 template of this SKU is named "2xA40-32.200GB_Ubuntu22": the clean single-GPU template is the 20.04 one
+            new Plan("GDC3.A40-16.100GB", "A40", 48, "Ubuntu-20.04-GPU"));
 
     public static E2eConfig defaults() {
         return fromYaml(Map.of());
@@ -52,7 +55,8 @@ public record E2eConfig(List<Plan> plans, String location, String image, double 
         List<Plan> plans = DEFAULT_PLANS;
         if (v.get("plans") instanceof List<?> l && !l.isEmpty()) {
             plans = l.stream().filter(o -> o instanceof Map<?, ?>).map(o -> (Map<String, Object>) o)
-                    .map(m -> new Plan(String.valueOf(m.get("sku")), String.valueOf(m.get("gpu")), (int) num(m.get("vramGb"), 0))).toList();
+                    .map(m -> new Plan(String.valueOf(m.get("sku")), String.valueOf(m.get("gpu")), (int) num(m.get("vramGb"), 0),
+                            m.get("image") != null ? m.get("image").toString() : null)).toList();
         }
         return new E2eConfig(plans, v.get("location") != null ? v.get("location").toString() : "Delhi",
                 v.get("image") != null ? v.get("image").toString() : "Ubuntu-22.04-GPU",

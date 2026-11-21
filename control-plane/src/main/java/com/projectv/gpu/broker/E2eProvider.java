@@ -53,8 +53,12 @@ public class E2eProvider implements GpuProvider {
     static final String LABEL_PREFIX = "projectv-";
     private static final Pattern SAFE_ENV = Pattern.compile("[A-Za-z0-9+/=._:@-]*");
     private static final Pattern PRICE = Pattern.compile("([0-9]+(?:\\.[0-9]+)?)\\s*/\\s*hour", Pattern.CASE_INSENSITIVE);
-    /** Start scripts are limited to 16 KB each: stay well below. */
-    static final int SCRIPT_BYTES = 14_000;
+    /** E2E rejects a start_scripts entry over 2048 characters (HTTP 400, 22 Nov 2026). Slices are cut so that a whole entry stays below the limit. */
+    static final int MAX_ENTRY = 2048;
+    static final int SLICE = 1700;
+    /** A plan name that says 2x/4x/8x GPUs in its template part, e.g. "...GDC3.2xA40-32.200GB_Ubuntu22-Delhi". */
+    private static final Pattern MULTI_GPU_TEMPLATE = Pattern.compile("[.\\-_]([2-9]|1[0-9])x[A-Za-z]");
+    private static final Pattern NODE_NAME = Pattern.compile("[A-Za-z0-9-]{3,50}");
 
     private final E2eConfig cfg;
     private final String baseUrl;
@@ -151,8 +155,8 @@ public class E2eProvider implements GpuProvider {
                 }
                 Map<String, Object> row = (Map<String, Object>) m;
                 E2eConfig.Plan plan = cfg.plans().stream().filter(p -> p.sku().equals(str(row.get("name")))).findFirst().orElse(null);
-                if (plan == null || !cfg.image().equals(str(row.get("image")))) {
-                    continue;
+                if (plan == null || !imageOf(plan).equals(str(row.get("image"))) || MULTI_GPU_TEMPLATE.matcher(str(row.get("plan"))).find()) {
+                    continue; // E2E names some single-GPU plans after a 2x/4x template: never rent one whose name says several GPUs
                 }
                 Map<String, Object> s = row.get("specs") instanceof Map<?, ?> sm ? (Map<String, Object>) sm : Map.of();
                 String reject = problem(plan, s, spec);
@@ -165,7 +169,7 @@ public class E2eProvider implements GpuProvider {
                 String planName = str(row.get("plan"));
                 String detail = "%s, %.0f vCPU, %.0f GB RAM, %.0f GB disk, Rs %.0f/h + %.0f%% GST = $%.2f/h (Rs %.0f per $); stock unknown until create"
                         .formatted(plan.sku(), num(s.get("cpu")), num(s.get("ram")), num(s.get("disk_space")), inr, cfg.gstPercent(), usd, cfg.inrPerUsd());
-                Quote q = new Quote("e2e", true, "ON-DEMAND", plan.gpu() + "|" + plan.sku() + "|" + planName, usd, detail);
+                Quote q = new Quote("e2e", true, "ON-DEMAND", plan.gpu() + "|" + plan.sku() + "|" + planName + "|" + imageOf(plan), usd, detail);
                 // several OS templates per card: prefer the CUDA 12 one
                 best.merge(plan.sku(), q, (a, b) -> a.gpu().contains("Cuda12") || !b.gpu().contains("Cuda12") ? a : b);
             }
@@ -174,6 +178,10 @@ public class E2eProvider implements GpuProvider {
         out.sort(Comparator.comparingDouble(Quote::hourlyUsd));
         lastWhy = !out.isEmpty() ? "" : why.isEmpty() ? "no allowed GPU plan in the E2E plan list" : "every plan was rejected: " + why.keySet();
         return out;
+    }
+
+    private String imageOf(E2eConfig.Plan plan) {
+        return plan.image() != null ? plan.image() : cfg.image();
     }
 
     private String problem(E2eConfig.Plan plan, Map<String, Object> s, GpuSpec spec) {
@@ -205,7 +213,7 @@ public class E2eProvider implements GpuProvider {
             throw new IllegalArgumentException("not an E2E quote: " + req.quote().gpu());
         }
         Map<String, Object> r = call(() -> http.post().uri(url("nodes/", Map.of())).contentType(MediaType.APPLICATION_JSON)
-                .header("Authorization", "Bearer " + authToken).body(createBody(req, g[2])).retrieve().body(Map.class));
+                .header("Authorization", "Bearer " + authToken).body(createBody(req, g[2], g)).retrieve().body(Map.class));
         Map<String, Object> data = r != null && r.get("data") instanceof Map<?, ?> m ? (Map<String, Object>) m : null;
         if (data == null && r != null && r.get("data") instanceof List<?> l && !l.isEmpty() && l.getFirst() instanceof Map<?, ?> m) {
             data = (Map<String, Object>) m; // we ask for exactly one node, but tolerate a one-element list
@@ -221,12 +229,15 @@ public class E2eProvider implements GpuProvider {
     }
 
     /** The create body. No account key, no password, no usable SSH key. Also what the tests check. */
-    Map<String, Object> createBody(CreateRequest req, String plan) {
+    Map<String, Object> createBody(CreateRequest req, String plan, String[] g) {
+        if (!NODE_NAME.matcher(req.name()).matches()) {
+            throw new IllegalArgumentException("E2E node names are 3-50 letters, digits and hyphens: " + req.name());
+        }
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("name", req.name());
         body.put("label", "default");
         body.put("plan", plan);
-        body.put("image", cfg.image());
+        body.put("image", g.length > 3 ? g[3] : cfg.image());
         body.put("ssh_keys", List.of(throwawayPublicKey));
         body.put("number_of_instances", 1);
         body.put("default_public_ip", true);
@@ -236,33 +247,22 @@ public class E2eProvider implements GpuProvider {
     }
 
     /**
-     * Cloud-init scripts: the worker env file (split in pieces under the 16 KB limit), then {@code docker run}. The env file is
-     * root-only. Values are checked against a safe character set, so nothing can break out of the here-documents.
+     * Cloud-init scripts. E2E rejects a {@code start_scripts} entry over 2048 characters (HTTP 400, found on the first real create; the
+     * docs say 16 KB), so the payload goes over many small entries: the env file in plain slices (its values are base64 text, already
+     * safe), the run script (docker wait + {@code docker run} + the guard) base64-encoded in slices, and a last entry that checks both
+     * sha256 sums on the node and only then starts the worker. Nothing is fetched from anywhere; no account key is in any entry.
      */
     List<String> startScripts(CreateRequest req) {
-        List<String> lines = new ArrayList<>();
+        StringBuilder env = new StringBuilder();
         if (req.env() != null) {
             for (Map.Entry<String, String> e : req.env().entrySet()) {
                 if (e.getKey().isEmpty() || !SAFE_ENV.matcher(e.getKey()).matches() || !SAFE_ENV.matcher(e.getValue()).matches()) {
                     throw new IllegalArgumentException("env " + e.getKey() + " has characters that cannot go into the E2E start script");
                 }
-                lines.add(e.getKey() + "=" + e.getValue());
+                env.append(e.getKey()).append('=').append(e.getValue()).append('\n');
             }
-        }
-        List<String> scripts = new ArrayList<>();
-        StringBuilder cur = new StringBuilder();
-        for (String line : lines) {
-            if (cur.length() + line.length() + 1 > SCRIPT_BYTES) {
-                scripts.add(envScript(cur));
-                cur = new StringBuilder();
-            }
-            cur.append(line).append('\n');
-        }
-        if (cur.length() > 0) {
-            scripts.add(envScript(cur));
         }
         StringBuilder run = new StringBuilder("#!/bin/bash\n")
-                .append("# wait for the Docker daemon (first boot)\n")
                 .append("for i in $(seq 1 90); do docker info >/dev/null 2>&1 && break; sleep 2; done\n")
                 .append("docker run -d --name projectv-worker --gpus all --shm-size=8g --env-file /opt/projectv/worker.env")
                 .append(" -p ").append(cfg.publicPort()).append(':').append(req.port()).append(' ').append(shellQuote(req.image()));
@@ -270,12 +270,46 @@ public class E2eProvider implements GpuProvider {
             run.append(' ').append(shellQuote(a));
         }
         run.append('\n');
-        scripts.add(run.toString());
+        byte[] envBytes = env.toString().getBytes(StandardCharsets.UTF_8);
+        byte[] runBytes = run.toString().getBytes(StandardCharsets.UTF_8);
+        List<String> scripts = new ArrayList<>();
+        for (String piece : slices(env.toString(), SLICE)) {
+            scripts.add(appendScript("worker.env", piece));
+        }
+        for (String piece : slices(Base64.getEncoder().encodeToString(runBytes), SLICE)) {
+            scripts.add(appendScript("run.b64", piece));
+        }
+        scripts.add("#!/bin/bash\ncd /opt/projectv || exit 1\n"
+                + "if echo '" + sha256(envBytes) + "  worker.env' | sha256sum -c - && base64 -d run.b64 > run.sh"
+                + " && echo '" + sha256(runBytes) + "  run.sh' | sha256sum -c -; then bash run.sh; "
+                + "else echo 'projectv: payload check failed, worker not started' >&2; exit 1; fi\n");
+        for (String sc : scripts) {
+            if (sc.length() > MAX_ENTRY) {
+                throw new IllegalStateException("E2E start script entry of " + sc.length() + " chars exceeds the " + MAX_ENTRY + " limit");
+            }
+        }
         return scripts;
     }
 
-    private static String envScript(StringBuilder lines) {
-        return "#!/bin/bash\numask 077\nmkdir -p /opt/projectv\ncat >> /opt/projectv/worker.env <<'PV_ENV_EOF'\n" + lines + "PV_ENV_EOF\n";
+    /** Entry that appends one slice (safe characters and newlines only, so single quotes cannot be broken) to a file in /opt/projectv. */
+    private static String appendScript(String file, String piece) {
+        return "#!/bin/bash\numask 077\nmkdir -p /opt/projectv\nprintf '%s' '" + piece + "' >> /opt/projectv/" + file + "\n";
+    }
+
+    private static List<String> slices(String s, int size) {
+        List<String> out = new ArrayList<>();
+        for (int i = 0; i < s.length(); i += size) {
+            out.add(s.substring(i, Math.min(s.length(), i + size)));
+        }
+        return out;
+    }
+
+    static String sha256(byte[] b) {
+        try {
+            return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(b));
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     static String shellQuote(String s) {
