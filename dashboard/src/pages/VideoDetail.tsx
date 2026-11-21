@@ -5,7 +5,7 @@ import { api, assetUrl, type Fact, type Inspection, type Mode, type StageInfo, t
 import { Countdown, ModeSwitch, STATUS_TEXT, StatusBadge } from '../components'
 import { fmtTime, usePoll } from '../hooks'
 import { CreativeCard } from './CreativeCard'
-import { AnimaticCard, ResearchCard, StoryCard } from './ProductionView'
+import { AnimaticCard, ResearchCard, StoryCard } from './ProductionCards'
 import { Storyboard } from './Storyboard'
 
 interface Modes { default: Mode; stages: Record<string, Mode> }

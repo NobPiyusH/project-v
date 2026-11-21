@@ -1,26 +1,8 @@
+// Cards for a studio video's production (animatic, story, research) and the shot editor the Storyboard opens.
 import { useState, type ReactNode } from 'react'
 import { api, assetUrl, type Fact, type ImagePolicy, type Production, type ShotRow, type ShotVersion } from '../api'
 import { usePoll } from '../hooks'
 import { ScriptEditor } from './ScriptEditor'
-import { ClipsCard } from './ClipsCard'
-
-/** What the stages have actually produced so far: research, concept, script + voice, music, shots, animatic. */
-export function ProductionView({ id }: { id: string }) {
-  const { data: p, refresh } = usePoll(() => api.production(id), 3000, [id])
-  if (!p) return null
-  const empty = !p.research && !p.concept && !p.script && !p.music && p.shots.length === 0
-  if (empty) return null
-
-  return (
-    <>
-      {p.animaticAssetId && <AnimaticCard id={id} p={p} onChange={refresh} />}
-      {p.shots.length > 0 && <ClipsCard id={id} p={p} onChange={refresh} />}
-      {p.shots.length > 0 && <ShotGrid id={id} p={p} onChange={refresh} />}
-      {(p.concept || p.script || p.music) && <StoryCard id={id} p={p} onChange={refresh} />}
-      {p.research && <ResearchCard facts={JSON.parse(p.research.facts) as Fact[]} queries={p.research.queries} />}
-    </>
-  )
-}
 
 /** Runs an API action with busy/error state, then refreshes. */
 function useAction(onChange: () => void) {
@@ -76,76 +58,6 @@ export function PolicySelect({ value, onChange }: { value: ImagePolicy; onChange
     <select value={value} onChange={(e) => onChange(e.target.value as ImagePolicy)} aria-label="Image model">
       {(Object.keys(POLICY_LABEL) as ImagePolicy[]).map((k) => <option key={k} value={k}>{POLICY_LABEL[k]}</option>)}
     </select>
-  )
-}
-
-function ShotGrid({ id, p, onChange }: { id: string; p: Production; onChange: () => void }) {
-  const [open, setOpen] = useState<string | null>(null)
-  const [selected, setSelected] = useState<Set<string>>(new Set())
-  const [notes, setNotes] = useState('')
-  const [policy, setPolicy] = useState<ImagePolicy>('AUTO')
-  const { error, busy, run } = useAction(onChange)
-  const heroes = p.shots.filter((s) => s.priority === 'hero').length
-  const toggle = (shotId: string) => setSelected((cur) => {
-    const next = new Set(cur)
-    if (next.has(shotId)) next.delete(shotId)
-    else next.add(shotId)
-    return next
-  })
-  const redoSelected = () => run(async () => {
-    await api.redoShots(id, [...selected], notes, policy)
-    setSelected(new Set())
-    setNotes('')
-  })
-
-  return (
-    <section className="card">
-      <div className="card-head">
-        <h2>Shots</h2>
-        <span className="pill">{p.shots.length} shots · {heroes} hero{p.redoingShots > 0 ? ` · ${p.redoingShots} redoing` : ''}</span>
-      </div>
-      {selected.size > 0 && (
-        <div className="notice" style={{ display: 'grid', gap: 8 }}>
-          <strong>Redo {selected.size} selected shot{selected.size > 1 ? 's' : ''}</strong>
-          <textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)}
-            placeholder="What should change? e.g. 'more photoreal, darker, no lens flares'" />
-          <div className="row">
-            <PolicySelect value={policy} onChange={setPolicy} />
-            <button className="primary" disabled={busy} onClick={redoSelected}>{busy ? 'Starting…' : 'Redo selected'}</button>
-            <button onClick={() => setSelected(new Set())}>Clear selection</button>
-          </div>
-        </div>
-      )}
-      {error && <p className="error">{error}</p>}
-      <p className="muted small" style={{ marginTop: 0 }}>
-        Tick shots to redo several at once, or click an image to edit its prompt, redo it, or switch versions.
-      </p>
-      <div className="shot-grid">
-        {p.shots.map((s) => (
-          <figure key={s.id} className={`shot ${s.priority === 'hero' ? 'hero' : ''} ${selected.has(s.id) ? 'selected' : ''}`}>
-            <div className="shot-media" onClick={() => setOpen(open === s.id ? null : s.id)}>
-              {s.keyframe_asset_id
-                ? <img key={s.keyframe_asset_id} src={assetUrl(s.keyframe_asset_id)} alt={s.description ?? `Shot ${s.ord + 1}`} loading="lazy" />
-                : <div className="shot-empty">No keyframe yet</div>}
-              {s.status === 'REDOING' && <div className="shot-overlay">Redoing…</div>}
-            </div>
-            <figcaption>
-              <div className="row small">
-                <input type="checkbox" checked={selected.has(s.id)} onChange={() => toggle(s.id)} aria-label={`Select shot ${s.ord + 1}`} />
-                <strong>#{s.ord + 1}</strong>
-                <span className="muted">{Number(s.duration_target_sec).toFixed(1)}s · {s.camera_move ?? ''}</span>
-                {s.priority === 'hero' && <span className="badge b-warn">hero</span>}
-                {s.keyframe_provider && <span className="muted small">{s.keyframe_provider === 'gemini_api' ? 'Nano Banana' : 'Z-Image'}</span>}
-              </div>
-              {s.status === 'FAILED' && <div className="small error">Redo failed: {s.error}</div>}
-              <div className="small">{s.description}</div>
-              {s.overlay_text && <div className="small muted">On screen: “{s.overlay_text}”</div>}
-              {open === s.id && <ShotEditor videoId={id} shot={s} onChange={onChange} />}
-            </figcaption>
-          </figure>
-        ))}
-      </div>
-    </section>
   )
 }
 
