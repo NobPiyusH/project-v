@@ -64,7 +64,7 @@ public class DreamController {
 
     @GetMapping("/looks")
     public List<String> looks() {
-        return DreamService.SELECTABLE_LOOKS;
+        return DreamLooks.SELECTABLE_LOOKS;
     }
 
     /** The idea packs (curated concept seeds with a hook title and a camera note) for the new-Short idea picker. */

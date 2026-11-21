@@ -2,7 +2,7 @@ package com.projectv.dream;
 
 import com.projectv.assets.AssetStore;
 import com.projectv.assets.AssetStore.NewAsset;
-import com.projectv.dream.DreamService.Look;
+import com.projectv.dream.DreamLooks.Look;
 import com.projectv.dream.DreamTypes.DreamWorld;
 import com.projectv.ledger.BudgetGuard;
 import com.projectv.ledger.Pricing;
@@ -53,7 +53,7 @@ class DreamMusic {
     @Transactional
     com.projectv.media.MediaTypes.MusicRequest musicRequest(UUID id, String notes) {
         Map<String, Object> d = svc.dream(id);
-        Look look = DreamService.look((String) d.get("look"));
+        Look look = DreamLooks.look((String) d.get("look"));
         DreamWorld w = d.get("world_json") == null ? null : json.readValue(d.get("world_json").toString(), DreamWorld.class);
         double target = svc.shortSeconds(svc.shots(id).size(), look);
         BigDecimal inr = pricing.musicInr(1);
@@ -108,7 +108,7 @@ class DreamMusic {
         DreamWorld w = d.get("world_json") == null ? null : json.readValue(d.get("world_json").toString(), DreamWorld.class);
         List<String> scenes = shots.stream().map(s -> Objects.toString(s.get("scene"), "")).filter(s -> !s.isBlank()).toList();
         String brief = String.join("\n",
-                "Look: " + DreamService.look((String) d.get("look")).brief(),
+                "Look: " + DreamLooks.look((String) d.get("look")).brief(),
                 "Idea: " + d.get("idea"),
                 w == null ? "" : "World: " + Objects.toString(w.world(), "") + " Palette: " + Objects.toString(w.palette(), "")
                         + " Light: " + Objects.toString(w.light(), ""),
@@ -120,7 +120,7 @@ class DreamMusic {
         } catch (BudgetGuard.BudgetExceededException e) {
             model = null; // over the Gemini cap: pick by loudness only, never block the Short over a few paise
         }
-        return new DreamTypes.DreamBedRequest(DreamService.storageId(id), musicBed, svc.shortSeconds(shots.size(), DreamService.look((String) d.get("look"))),
+        return new DreamTypes.DreamBedRequest(DreamService.storageId(id), musicBed, svc.shortSeconds(shots.size(), DreamLooks.look((String) d.get("look"))),
                 id + "#" + takes, used,
                 model, brief, pictures, DreamService.BED_CANDIDATES);
     }

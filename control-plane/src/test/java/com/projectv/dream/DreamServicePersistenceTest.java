@@ -223,9 +223,9 @@ class DreamServicePersistenceTest {
 
     @Test
     void theNewLooksHaveTheirOwnShotLengthAndJoins() {
-        assertEquals("lonely", DreamService.LOOK_ORDER.getFirst());
-        var lonely = DreamService.look("lonely");
-        var walk = DreamService.look("walkthrough");
+        assertEquals("lonely", DreamLooks.LOOK_ORDER.getFirst());
+        var lonely = DreamLooks.look("lonely");
+        var walk = DreamLooks.look("walkthrough");
         assertEquals(0, lonely.dissolveSec(), "hard cuts");
         assertEquals(5 * 57 / 16.0 / 0.7 + 1, dreams.shortSeconds(5, lonely), 0.01); // slowed to 70% on the laptop
         assertEquals(4 * 81 / 16.0 / 0.75 - 3 * 0.35 + 1, dreams.shortSeconds(4, walk), 0.01);
@@ -233,8 +233,8 @@ class DreamServicePersistenceTest {
         assertTrue(lonely.motionStyle().contains("nobody is ever visible") && !lonely.motionStyle().contains("a person "), "no person in the camera words");
         assertEquals("stand", lonely.handheld());
         assertTrue(lonely.structure().formatted(5).contains("DIFFERENT place"));
-        assertEquals(lonely, DreamService.look("nope"), "unknown looks fall back to the default");
-        var drive = DreamService.look("drive");
+        assertEquals(lonely, DreamLooks.look("nope"), "unknown looks fall back to the default");
+        var drive = DreamLooks.look("drive");
         assertEquals(0, drive.dissolveSec());
         assertTrue(drive.pictureStyle().contains("not a 3D render") && lonely.pictureStyle().contains("not a 3D render"));
     }

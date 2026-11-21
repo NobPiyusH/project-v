@@ -20,9 +20,9 @@ class DreamIdeaPacksTest {
     void thePackLoadsWithAtLeastTwentyIdeasInADreamLook() {
         var pack = DreamIdeaPacks.pack("impossible-architecture").orElseThrow();
         assertTrue(pack.ideas().size() >= 20, "at least 20 concept seeds, got " + pack.ideas().size());
-        assertTrue(DreamService.LOOKS.containsKey(pack.look()), "the pack's look exists: " + pack.look());
-        assertTrue(DreamService.SELECTABLE_LOOKS.contains(pack.look()), "and the form offers it");
-        assertFalse(DreamService.LOOK_ORDER.contains(pack.look()), "the Autopilot's rotation is unchanged");
+        assertTrue(DreamLooks.LOOKS.containsKey(pack.look()), "the pack's look exists: " + pack.look());
+        assertTrue(DreamLooks.SELECTABLE_LOOKS.contains(pack.look()), "and the form offers it");
+        assertFalse(DreamLooks.LOOK_ORDER.contains(pack.look()), "the Autopilot's rotation is unchanged");
     }
 
     @Test
@@ -53,10 +53,10 @@ class DreamIdeaPacksTest {
 
     @Test
     void theArchitectureLookHasItsOwnCameraRuleShotLengthAndHardCuts() {
-        var look = DreamService.look("architecture");
+        var look = DreamLooks.look("architecture");
         assertEquals(2.5, look.shotSeconds());
         assertEquals(0, look.dissolveSec(), "hard cuts: chained shots already flow into each other");
-        assertTrue(DreamService.FEEL_ARCHITECTURE.contains("glides slowly and continuously"));
-        assertTrue(DreamService.CHAIN_STRUCTURE.formatted(5).contains("first frame IS the previous shot"));
+        assertTrue(DreamLooks.FEEL_ARCHITECTURE.contains("glides slowly and continuously"));
+        assertTrue(DreamLooks.CHAIN_STRUCTURE.formatted(5).contains("first frame IS the previous shot"));
     }
 }
