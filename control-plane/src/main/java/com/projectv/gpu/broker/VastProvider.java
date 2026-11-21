@@ -10,6 +10,8 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -33,7 +35,10 @@ import java.util.regex.Pattern;
  * </ul>
  * Shapes checked 21 Nov 2026: the offer search ({@code POST /bundles/}) live and read-only with the owner's key (200, fields in
  * {@link #offer}); create / show / destroy against docs.vast.ai (openapi). NOT checked live: create, show instance, destroy and
- * the instance list (the key's list call answers 401 "requires Two-Factor Authentication", see {@link #listPods}).
+ * the instance list (see {@link #listPods}). 22 Nov 2026: with a 2FA account, instance and account calls need a 2FA session key
+ * ({@code vastai tfa login}, saved in {@code ~/.config/vastai/vast_tfa_key}); the normal key is used only for offer search.
+ * Instance list/show use {@code GET /api/v1/instances/} (the v0 list is gone: 410); create and destroy stay {@code /api/v0}
+ * (v1 has no by-id route: 404; the docs and live error shapes show v0 create/destroy are current).
  */
 @Component
 public class VastProvider implements GpuProvider {
@@ -44,7 +49,22 @@ public class VastProvider implements GpuProvider {
 
     private final VastConfig cfg;
     private final String baseUrl;
+    /** The instance list lives under /api/v1 (the v0 list answers 410); create and destroy are still /api/v0. */
+    private final String v1Url;
     private final String apiKey;
+    /** Vast accounts with 2FA need a 2FA session key for instance and account calls (the normal key only works for offer search). */
+    private final java.util.function.Supplier<String> sessionKey;
+    /** Base32 TOTP seed (VAST_TOTP_SECRET). With it the adapter logs in to Vast's 2FA itself; never logged, never sent anywhere but as a code. */
+    private final String totpSecret;
+    /** Session key from our own TOTP login. Memory only, never written to disk or logged. */
+    private volatile String autoSession = "";
+    private volatile long lastLoginAtMillis;
+    /** After a rejected code (twice) automatic login pauses until then, so a wrong seed cannot lock the account by looping. */
+    private volatile long loginBlockedUntilMillis;
+    /** Package-private for tests: gap between two logins, wait before the one retry after a rejected code, pause after a double rejection. */
+    volatile long minLoginGapMillis = 5_000;
+    volatile java.util.function.LongSupplier retryWaitMillis = () -> Totp.millisToNextWindow(System.currentTimeMillis()) + 500;
+    volatile long blockMillis = 10 * 60_000L;
     private final RestClient http;
     private final long pollMillis;
     /** First time each instance was seen (or created here): the fallback when Vast reports no start date. */
@@ -58,17 +78,48 @@ public class VastProvider implements GpuProvider {
 
     @Autowired
     public VastProvider(VastConfig cfg, @Value("${projectv.vast.base-url:https://console.vast.ai/api/v0}") String baseUrl,
-                        @Value("${projectv.vast.api-key:}") String apiKey) {
-        this(cfg, baseUrl, apiKey, client(), cfg.pollSeconds() * 1000L);
+                        @Value("${projectv.vast.api-key:}") String apiKey,
+                        @Value("${projectv.vast.session-key:}") String sessionKey,
+                        @Value("${projectv.vast.totp-secret:}") String totpSecret) {
+        this(cfg, baseUrl, apiKey, sessionKeySource(sessionKey, Path.of(System.getProperty("user.home"), ".config", "vastai", "vast_tfa_key")),
+                totpSecret, client(), cfg.pollSeconds() * 1000L);
     }
 
-    VastProvider(VastConfig cfg, String baseUrl, String apiKey, RestClient http, long pollMillis) {
+    VastProvider(VastConfig cfg, String baseUrl, String apiKey, java.util.function.Supplier<String> sessionKey, RestClient http, long pollMillis) {
+        this(cfg, baseUrl, apiKey, sessionKey, "", http, pollMillis);
+    }
+
+    VastProvider(VastConfig cfg, String baseUrl, String apiKey, java.util.function.Supplier<String> sessionKey, String totpSecret,
+                 RestClient http, long pollMillis) {
+        this.totpSecret = totpSecret == null ? "" : totpSecret.strip();
+        this.sessionKey = sessionKey;
         this.cfg = cfg;
         this.baseUrl = baseUrl.replaceAll("/+$", "");
+        this.v1Url = this.baseUrl.endsWith("/api/v0") ? this.baseUrl.substring(0, this.baseUrl.length() - 2) + "v1" : this.baseUrl;
         this.apiKey = apiKey == null ? "" : apiKey.strip();
         this.http = http;
         this.pollMillis = pollMillis;
     }
+
+    /**
+     * The 2FA session key: the setting if given, else the file {@code vastai tfa login} writes. The file is read on every call
+     * so a fresh login is picked up without a restart. The key is never logged.
+     */
+    static java.util.function.Supplier<String> sessionKeySource(String setting, Path file) {
+        String fixed = setting == null ? "" : setting.strip();
+        return () -> {
+            if (!fixed.isEmpty()) {
+                return fixed;
+            }
+            try {
+                return Files.isRegularFile(file) ? Files.readString(file).strip() : "";
+            } catch (java.io.IOException | RuntimeException e) {
+                return "";
+            }
+        };
+    }
+
+    static final String SESSION_HELP = "Vast 2FA session expired: run `vastai tfa login --method-type totp -c <code>`";
 
     private static RestClient client() {
         SimpleClientHttpRequestFactory f = new SimpleClientHttpRequestFactory();
@@ -84,7 +135,83 @@ public class VastProvider implements GpuProvider {
 
     @Override
     public boolean configured() {
-        return !apiKey.isEmpty();
+        return !apiKey.isEmpty() || !sessionKey.get().isEmpty();
+    }
+
+    /** Key for offer search: the normal key (falls back to the session key when only that is set). */
+    private String searchKey() {
+        return apiKey.isEmpty() ? sessionKey.get() : apiKey;
+    }
+
+    /**
+     * Key for instance and account calls: our own TOTP session when {@code VAST_TOTP_SECRET} is set (logged in lazily here), else
+     * the 2FA session key from the setting or the CLI file, else the normal key (accounts without 2FA).
+     */
+    private String accountKey() {
+        if (!totpSecret.isEmpty()) {
+            String k = autoSession;
+            return k.isEmpty() ? login(false) : k;
+        }
+        String k = sessionKey.get();
+        return k.isEmpty() ? apiKey : k;
+    }
+
+    /**
+     * {@code POST /api/v0/tfa/} with the normal key as Bearer and {@code {"tfa_method":"totp","code":"123456"}}; the reply has
+     * {@code session_key}. At most two attempts: a rejected code is retried once in the next 30 s window, then login pauses
+     * ({@link #blockMillis}) and the card says why: repeated failed 2FA attempts can lock the account. Nothing secret is logged.
+     */
+    private synchronized String login(boolean force) {
+        if (!force && !autoSession.isEmpty()) {
+            return autoSession; // another thread logged in while this one waited for the lock
+        }
+        long now = System.currentTimeMillis();
+        if (now < loginBlockedUntilMillis) {
+            throw new VastSessionExpired("Vast 2FA login paused after the code was rejected twice (check VAST_TOTP_SECRET and the laptop clock); "
+                    + "not retrying for " + (loginBlockedUntilMillis - now) / 1000 + " s to avoid locking the account. Or run `vastai tfa login --method-type totp -c <code>`");
+        }
+        long gap = minLoginGapMillis - (now - lastLoginAtMillis);
+        if (gap > 0) {
+            sleep(gap);
+        }
+        String why = null;
+        for (int attempt = 0; attempt < 2; attempt++) {
+            if (attempt > 0) {
+                sleep(retryWaitMillis.getAsLong()); // the next window gives a different code
+            }
+            lastLoginAtMillis = System.currentTimeMillis();
+            String code = Totp.code(totpSecret, lastLoginAtMillis / 1000, 6);
+            try {
+                Map<?, ?> r = http.post().uri(baseUrl + "/tfa/").contentType(MediaType.APPLICATION_JSON)
+                        .header("Authorization", "Bearer " + apiKey).body(Map.of("tfa_method", "totp", "code", code))
+                        .retrieve().body(Map.class);
+                if (r != null && r.get("session_key") instanceof String sk && !sk.isBlank()) {
+                    autoSession = sk.strip();
+                    loginBlockedUntilMillis = 0;
+                    log.info("Vast: logged in to 2FA with the TOTP seed");
+                    return autoSession;
+                }
+                why = "login answered without a session_key";
+            } catch (HttpClientErrorException e) {
+                why = "HTTP " + e.getStatusCode().value();
+            } catch (RuntimeException e) {
+                why = e.getClass().getSimpleName(); // network trouble: not a rejected code, but do not hammer either
+                break;
+            }
+        }
+        loginBlockedUntilMillis = System.currentTimeMillis() + blockMillis;
+        log.warn("Vast: 2FA login failed ({}); automatic login paused for {} s", why, blockMillis / 1000);
+        throw new VastSessionExpired("Vast 2FA login failed (" + why + "): the TOTP code was rejected twice. Check VAST_TOTP_SECRET and the laptop clock; "
+                + "automatic login is paused " + blockMillis / 60_000 + " min to avoid locking the account. Or run `vastai tfa login --method-type totp -c <code>`");
+    }
+
+    private static void sleep(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("interrupted while logging in to Vast");
+        }
     }
 
     @Override
@@ -138,8 +265,8 @@ public class VastProvider implements GpuProvider {
         body.put("allocated_storage", cfg.diskGb()); // dph_total then includes the disk we will rent
         body.put("order", List.of(List.of("dph_total", "asc")));
         body.put("limit", 40);
-        Map<String, Object> r = call(() -> http.post().uri(baseUrl + "/bundles/").contentType(MediaType.APPLICATION_JSON)
-                .header("Authorization", "Bearer " + apiKey).body(body).retrieve().body(Map.class));
+        Map<String, Object> r = call(false, () -> http.post().uri(baseUrl + "/bundles/").contentType(MediaType.APPLICATION_JSON)
+                .header("Authorization", "Bearer " + searchKey()).body(body).retrieve().body(Map.class));
         List<Quote> out = new ArrayList<>();
         Map<String, String> why = new LinkedHashMap<>();
         if (r != null && r.get("offers") instanceof List<?> offers) {
@@ -245,8 +372,8 @@ public class VastProvider implements GpuProvider {
             tried.add(ask);
             String id = null;
             try {
-                Map<String, Object> r = call(() -> http.put().uri(baseUrl + "/asks/{id}/", tried.getLast())
-                        .contentType(MediaType.APPLICATION_JSON).header("Authorization", "Bearer " + apiKey)
+                Map<String, Object> r = call(true, () -> http.put().uri(baseUrl + "/asks/{id}/", tried.getLast())
+                        .contentType(MediaType.APPLICATION_JSON).header("Authorization", "Bearer " + accountKey())
                         .body(createBody(req)).retrieve().body(Map.class));
                 if (r == null || !(r.get("new_contract") instanceof Number n)) {
                     throw new IllegalStateException("Vast create returned no new_contract: "
@@ -411,33 +538,42 @@ public class VastProvider implements GpuProvider {
         }
     }
 
-    /** All instances of the account (the watchdog filters by the studio label). Needs a key that may read instances. */
+    /** All instances of the account (the watchdog filters by the studio label). {@code GET /api/v1/instances/}, keyset-paged, 2FA session key. */
     @Override
     @SuppressWarnings("unchecked")
     public List<Pod> listPods() {
-        Map<String, Object> r = call(() -> http.get().uri(baseUrl + "/instances/").header("Authorization", "Bearer " + apiKey)
-                .retrieve().body(Map.class));
-        if (r == null || !(r.get("instances") instanceof List<?> l)) {
-            throw new IllegalStateException("Vast list instances returned no instances array");
-        }
         List<Pod> out = new ArrayList<>();
-        for (Object o : l) {
-            if (o instanceof Map<?, ?> m) {
-                Map<String, Object> inst = (Map<String, Object>) m;
-                String id = String.valueOf((long) num(inst.get("id")));
-                Instant born = born(id, inst);
-                out.add(new Pod(id, str(inst.get("label")), str(inst.get("actual_status")).isEmpty() ? "LOADING"
-                        : str(inst.get("actual_status")).toUpperCase(), num(inst.get("dph_total")), born, born));
+        String after = null;
+        for (int page = 0; page < 40; page++) { // 25 per page: 1000 instances is far beyond any sane account
+            String token = after;
+            Map<String, Object> r = call(true, () -> http.get().uri(v1Url + "/instances/?limit=25" + (token == null ? "" : "&after_token={t}"),
+                    token == null ? Map.<String, Object>of() : Map.<String, Object>of("t", token))
+                    .header("Authorization", "Bearer " + accountKey()).retrieve().body(Map.class));
+            if (r == null || !(r.get("instances") instanceof List<?> l)) {
+                throw new IllegalStateException("Vast list instances returned no instances array");
+            }
+            for (Object o : l) {
+                if (o instanceof Map<?, ?> m) {
+                    Map<String, Object> inst = (Map<String, Object>) m;
+                    String id = String.valueOf((long) num(inst.get("id")));
+                    Instant born = born(id, inst);
+                    out.add(new Pod(id, str(inst.get("label")), str(inst.get("actual_status")).isEmpty() ? "LOADING"
+                            : str(inst.get("actual_status")).toUpperCase(), num(inst.get("dph_total")), born, born));
+                }
+            }
+            after = r.get("next_token") == null ? null : r.get("next_token").toString();
+            if (after == null || after.isBlank() || l.isEmpty()) {
+                return out;
             }
         }
-        return out;
+        throw new IllegalStateException("Vast list instances did not end after 40 pages");
     }
 
     @Override
     public void terminate(String podId) {
         try {
-            Map<String, Object> r = call(() -> http.delete().uri(baseUrl + "/instances/{id}/", podId)
-                    .header("Authorization", "Bearer " + apiKey).retrieve().body(Map.class));
+            Map<String, Object> r = call(true, () -> http.delete().uri(baseUrl + "/instances/{id}/", podId)
+                    .header("Authorization", "Bearer " + accountKey()).retrieve().body(Map.class));
             if (r != null && Boolean.FALSE.equals(r.get("success"))) {
                 throw new IllegalStateException("Vast destroy " + podId + " refused: " + r.get("msg"));
             }
@@ -449,21 +585,21 @@ public class VastProvider implements GpuProvider {
 
     // ------------------------------------------------------------------------------------------------ helpers
 
+    /** One instance by id through the v1 list ({@code select_filters} on id): v1 has no by-id route (404) and the v0 list is gone (410). Null when it does not exist. */
     @SuppressWarnings("unchecked")
     private Map<String, Object> fetch(String id) {
-        Map<String, Object> r = call(() -> http.get().uri(baseUrl + "/instances/{id}/", id)
-                .header("Authorization", "Bearer " + apiKey).retrieve().body(Map.class));
-        if (r == null) {
+        String filter = "{\"id\":{\"eq\":" + Long.parseLong(id) + "}}";
+        Map<String, Object> r = call(true, () -> http.get().uri(v1Url + "/instances/?limit=5&select_filters={f}", Map.of("f", filter))
+                .header("Authorization", "Bearer " + accountKey()).retrieve().body(Map.class));
+        if (r == null || !(r.get("instances") instanceof List<?> l)) {
             return null;
         }
-        Object i = r.get("instances");
-        if (i instanceof Map<?, ?> m) {
-            return (Map<String, Object>) m;
+        for (Object o : l) {
+            if (o instanceof Map<?, ?> m && id.equals(String.valueOf((long) num(m.get("id"))))) {
+                return (Map<String, Object>) m;
+            }
         }
-        if (i instanceof List<?> l) {
-            return l.isEmpty() || !(l.getFirst() instanceof Map<?, ?> m) ? null : (Map<String, Object>) m;
-        }
-        return r.containsKey("actual_status") ? r : null;
+        return null;
     }
 
     /** {@code http://<public ip>:<mapped port>} from {@code ports["<port>/tcp"][0].HostPort}; null until the mapping exists. */
@@ -487,13 +623,42 @@ public class VastProvider implements GpuProvider {
         return firstSeen.computeIfAbsent(id, k -> Instant.now());
     }
 
-    /** Runs one Vast call; turns the key's permission failure into a message the dashboard can show. */
-    private <T> T call(java.util.function.Supplier<T> c) {
+    /**
+     * Runs one Vast call. {@code account}: an instance/account call (needs the 2FA session key); a 401/403 there means the session
+     * is missing or expired, and the message says how to log in again (it reaches the dashboard card, and the broker rents nothing).
+     */
+    private <T> T call(boolean account, java.util.function.Supplier<T> c) {
         try {
             return c.get();
-        } catch (HttpClientErrorException.Unauthorized | HttpClientErrorException.Forbidden e) {
-            throw new IllegalStateException("Vast.ai refused the key (HTTP " + e.getStatusCode().value() + "): "
-                    + abbreviate(e.getResponseBodyAsString()) + " (the key needs instance read + write rights; check the key on cloud.vast.ai/manage-keys)");
+        } catch (HttpClientErrorException.Unauthorized | HttpClientErrorException.Forbidden first) {
+            if (!account) {
+                throw new IllegalStateException("Vast.ai refused the key (HTTP " + first.getStatusCode().value() + "): "
+                        + abbreviate(first.getResponseBodyAsString()) + " (check the key on cloud.vast.ai/manage-keys)");
+            }
+            HttpClientErrorException refused = first;
+            if (!totpSecret.isEmpty() && !autoSession.isEmpty()) {
+                // the session expired: log in again (at most once per call) and retry this call once
+                String stale = autoSession;
+                synchronized (this) {
+                    if (stale.equals(autoSession)) {
+                        autoSession = "";
+                    }
+                }
+                login(false);
+                try {
+                    return c.get();
+                } catch (HttpClientErrorException.Unauthorized | HttpClientErrorException.Forbidden again) {
+                    refused = again;
+                }
+            }
+            throw new VastSessionExpired(SESSION_HELP + " (HTTP " + refused.getStatusCode().value() + ": " + abbreviate(refused.getResponseBodyAsString()) + ")");
+        }
+    }
+
+    /** The account key was refused: the 2FA session is missing or has expired. Never carries a key. */
+    public static class VastSessionExpired extends IllegalStateException {
+        VastSessionExpired(String m) {
+            super(m);
         }
     }
 

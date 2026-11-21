@@ -27,6 +27,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class VastProviderTest {
 
     static final String KEY = "vast-key-must-never-reach-an-instance";
+    static final String SESSION = "vast-2fa-session-key-must-never-reach-an-instance";
     static final GpuProvider.GpuSpec SPEC = new GpuProvider.GpuSpec(List.of("ignored"), 24, 48, 80);
 
     HttpServer server;
@@ -44,8 +45,16 @@ class VastProviderTest {
     final Map<String, List<String>> script = new ConcurrentHashMap<>();
     volatile int listStatus = 200;
     volatile int destroyStatus = 200;
-    volatile String instancesList = "{\"instances\":[]}";
+    volatile String instancesList = "{\"success\":true,\"instances\":[],\"next_token\":null}";
+    volatile String instancesPage2 = "{\"success\":true,\"instances\":[],\"next_token\":null}";
     final AtomicInteger nextId = new AtomicInteger(777);
+    /** the 2FA login endpoint: status, the session key it hands out, and every request body it saw. */
+    volatile int tfaStatus = 200;
+    volatile String tfaIssues = "sess-1";
+    final List<String> tfaBodies = new CopyOnWriteArrayList<>();
+    final List<String> tfaAuth = new CopyOnWriteArrayList<>();
+    /** when set, instance calls need this exact session key (else 401 like a 2FA account). */
+    volatile String validSession = null;
 
     @BeforeEach
     void start() throws IOException {
@@ -66,26 +75,55 @@ class VastProviderTest {
             createdAsks.add(ask);
             send(ex, 200, "{\"success\":true,\"new_contract\":" + nextId.getAndIncrement() + "}");
         });
+        server.createContext("/api/v0/tfa/", ex -> {
+            record(ex);
+            tfaBodies.add(new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            tfaAuth.add(String.valueOf(ex.getRequestHeaders().getFirst("Authorization")));
+            send(ex, tfaStatus, tfaStatus == 200 ? "{\"id\":1,\"tfa_status\":\"enabled\",\"session_key\":\"" + tfaIssues + "\"}"
+                    : "{\"success\":false,\"msg\":\"invalid code\"}");
+        });
+        // destroy stays v0 (v1 has no by-id route)
         server.createContext("/api/v0/instances/", ex -> {
             record(ex);
-            String path = ex.getRequestURI().getPath();
-            String id = path.replaceAll(".*/instances/?(\\d*)/?", "$1");
-            if ("DELETE".equals(ex.getRequestMethod())) {
-                if (destroyStatus == 200) {
-                    destroyed.add(id);
-                    send(ex, 200, "{\"success\":true}");
-                } else {
-                    send(ex, destroyStatus, "{\"success\":false,\"msg\":\"nope\"}");
-                }
-            } else if (id.isEmpty()) {
-                send(ex, listStatus, listStatus == 200 ? instancesList
-                        : "{\"success\":false,\"msg\":\"requires Two Factor Authentication\"}");
-            } else if (!script.containsKey(id)) {
-                send(ex, 404, "{\"success\":false,\"error\":\"not_found\"}");
+            String id = ex.getRequestURI().getPath().replaceAll(".*/instances/?(\\d*)/?", "$1");
+            if (!"DELETE".equals(ex.getRequestMethod())) {
+                send(ex, 410, "{\"error\":\"deprecated_endpoint\",\"msg\":\"/api/v0/instances/ is deprecated. Use /api/v1/instances/ instead.\"}");
+            } else if (listStatus != 200) {
+                send(ex, listStatus, "{\"success\":false,\"msg\":\"requires Two Factor Authentication\"}");
+            } else if (destroyStatus == 200) {
+                destroyed.add(id);
+                send(ex, 200, "{\"success\":true}");
             } else {
+                send(ex, destroyStatus, "{\"success\":false,\"msg\":\"nope\"}");
+            }
+        });
+        // list and show are v1: GET /api/v1/instances/?limit=..&after_token=..&select_filters={"id":{"eq":N}}
+        server.createContext("/api/v1/instances/", ex -> {
+            record(ex);
+            String q = String.valueOf(ex.getRequestURI().getQuery());
+            if (validSession != null && !("Bearer " + validSession).equals(ex.getRequestHeaders().getFirst("Authorization"))) {
+                send(ex, 401, "{\"success\":false,\"msg\":\"requires Two Factor Authentication\"}");
+                return;
+            }
+            if (listStatus != 200) {
+                send(ex, listStatus, "{\"success\":false,\"msg\":\"requires Two Factor Authentication\"}");
+                return;
+            }
+            java.util.regex.Matcher m = java.util.regex.Pattern.compile("\"id\":\\{\"eq\":(\\d+)\\}").matcher(q);
+            if (m.find()) {
+                String id = m.group(1);
                 List<String> steps = script.get(id);
-                int n = showCalls.computeIfAbsent(id, k -> new AtomicInteger()).getAndIncrement();
-                send(ex, 200, "{\"instances\":" + steps.get(Math.min(n, steps.size() - 1)) + "}");
+                if (steps == null) {
+                    send(ex, 200, "{\"success\":true,\"total_instances\":0,\"instances\":[],\"next_token\":null}");
+                } else {
+                    int n = showCalls.computeIfAbsent(id, k -> new AtomicInteger()).getAndIncrement();
+                    send(ex, 200, "{\"success\":true,\"total_instances\":1,\"instances\":[{\"id\":" + id + "," + steps.get(Math.min(n, steps.size() - 1)).substring(1)
+                            + "],\"next_token\":null}");
+                }
+            } else if (q.contains("after_token=p2")) {
+                send(ex, 200, instancesPage2);
+            } else {
+                send(ex, 200, instancesList);
             }
         });
         server.start();
@@ -116,7 +154,7 @@ class VastProviderTest {
 
     VastProvider provider(String key, VastConfig cfg) {
         String url = "http://127.0.0.1:" + server.getAddress().getPort() + "/api/v0";
-        return new VastProvider(cfg, url, key, RestClient.builder().build(), 5);
+        return new VastProvider(cfg, url, key, () -> key.isEmpty() ? "" : SESSION, RestClient.builder().build(), 5);
     }
 
     VastProvider provider() {
@@ -231,7 +269,9 @@ class VastProviderTest {
         for (String forbidden : List.of("RUNPOD", "API_KEY", "S3_", "GEMINI", "AWS_", "SECRET", "ssh_key", "SSH_PUBLIC_KEY", "jupyter")) {
             assertFalse(createBody.toUpperCase().contains(forbidden.toUpperCase()), forbidden + " must not be in the create body");
         }
-        assertTrue(authHeaders.stream().allMatch(h -> h.equals("Bearer " + KEY)), "every Vast call carries the bearer key");
+        assertFalse(createBody.contains(SESSION), "the 2FA session key never goes to an instance");
+        assertEquals("Bearer " + KEY, authHeaders.getFirst(), "offer search uses the normal key");
+        assertTrue(authHeaders.stream().skip(1).allMatch(h -> h.equals("Bearer " + SESSION)), "create, show and destroy use the 2FA session key");
     }
 
     @Test
@@ -334,9 +374,9 @@ class VastProviderTest {
 
     @Test
     void listPodsMapsLabelStatusAndCostAndTheWatchdogCanSeeStudioInstances() {
-        instancesList = "{\"instances\":[{\"id\":11,\"label\":\"projectv-vast-aaaa-bbbb\",\"actual_status\":\"running\",\"dph_total\":0.42,"
+        instancesList = "{\"success\":true,\"instances\":[{\"id\":11,\"label\":\"projectv-vast-aaaa-bbbb\",\"actual_status\":\"running\",\"dph_total\":0.42,"
                 + "\"start_date\":1795000000.5},{\"id\":12,\"label\":\"my-own-box\",\"actual_status\":\"loading\",\"dph_total\":1.5},"
-                + "{\"id\":13,\"label\":null,\"actual_status\":null,\"dph_total\":0.1}]}";
+                + "{\"id\":13,\"label\":null,\"actual_status\":null,\"dph_total\":0.1}],\"next_token\":null}";
         List<com.projectv.gpu.PodApi.Pod> pods = provider().listPods();
         assertEquals(3, pods.size());
         assertEquals("11", pods.get(0).id());
@@ -351,11 +391,47 @@ class VastProviderTest {
     }
 
     @Test
-    void keyWithoutInstanceRightsGivesAClearReasonSoNothingIsRentedBlind() {
+    void listPodsFollowsThePagesOfTheV1List() {
+        instancesList = "{\"success\":true,\"instances\":[{\"id\":1,\"label\":\"projectv-vast-a\",\"actual_status\":\"running\",\"dph_total\":0.4}],\"next_token\":\"p2\"}";
+        instancesPage2 = "{\"success\":true,\"instances\":[{\"id\":2,\"label\":\"projectv-vast-b\",\"actual_status\":\"exited\",\"dph_total\":0.4}],\"next_token\":null}";
+        List<com.projectv.gpu.PodApi.Pod> pods = provider().listPods();
+        assertEquals(List.of("1", "2"), pods.stream().map(com.projectv.gpu.PodApi.Pod::id).toList());
+        assertEquals("EXITED", pods.get(1).status(), "exited instances are listed so the watchdog destroys them");
+        assertTrue(requests.stream().allMatch(r -> r.startsWith("GET /api/v1/instances")), "list uses v1, never the deprecated v0 list: " + requests);
+    }
+
+    @Test
+    void expiredOrMissingTwoFactorSessionGivesAClearReasonAndNothingIsRentedOrDestroyedBlind() {
         listStatus = 401;
         IllegalStateException e = assertThrows(IllegalStateException.class, () -> provider().listPods());
-        assertTrue(e.getMessage().contains("refused the key") && e.getMessage().contains("instance read + write"), e.getMessage());
-        assertFalse(e.getMessage().contains(KEY));
+        assertTrue(e instanceof VastProvider.VastSessionExpired, e.getMessage());
+        assertTrue(e.getMessage().startsWith("Vast 2FA session expired: run `vastai tfa login --method-type totp -c <code>`"), e.getMessage());
+        assertFalse(e.getMessage().contains(KEY) || e.getMessage().contains(SESSION));
+        listStatus = 403;
+        assertTrue(assertThrows(IllegalStateException.class, () -> provider().listPods()) instanceof VastProvider.VastSessionExpired);
+        // destroy and the status check say the same; status() never turns a login problem into "GONE" (the broker would replace a healthy pod)
+        assertTrue(assertThrows(IllegalStateException.class, () -> provider().terminate("5")) instanceof VastProvider.VastSessionExpired);
+        assertTrue(assertThrows(IllegalStateException.class, () -> provider().status("5")) instanceof VastProvider.VastSessionExpired);
+    }
+
+    @Test
+    void searchWithABadNormalKeyKeepsTheOldMessage() {
+        server.removeContext("/api/v0/bundles/");
+        server.createContext("/api/v0/bundles/", ex -> send(ex, 401, "{\"success\":false,\"msg\":\"bad key\"}"));
+        IllegalStateException e = assertThrows(IllegalStateException.class, () -> provider().quotes(SPEC));
+        assertTrue(e.getMessage().contains("refused the key") && !(e instanceof VastProvider.VastSessionExpired), e.getMessage());
+    }
+
+    @Test
+    void sessionKeyComesFromTheSettingElseTheVastCliFileAndIsReadFreshEachTime(@org.junit.jupiter.api.io.TempDir java.nio.file.Path dir) throws Exception {
+        java.nio.file.Path f = dir.resolve("vast_tfa_key");
+        var fromFile = VastProvider.sessionKeySource("", f);
+        assertEquals("", fromFile.get(), "no file, no setting: empty");
+        java.nio.file.Files.writeString(f, "abc123\r\n");
+        assertEquals("abc123", fromFile.get());
+        java.nio.file.Files.writeString(f, "newer");
+        assertEquals("newer", fromFile.get(), "a fresh `vastai tfa login` is used without a restart");
+        assertEquals("fromsetting", VastProvider.sessionKeySource(" fromsetting ", f).get(), "the setting wins over the file");
     }
 
     @Test
@@ -377,5 +453,95 @@ class VastProviderTest {
         assertTrue(argv.get(2).contains("kill -TERM"));
         List<String> all = new ArrayList<>(argv);
         assertTrue(all.contains("w.py"));
+    }
+
+    // ---------------------------------------------------------------------------------------------- hands-free TOTP login
+
+    VastProvider totpProvider() {
+        String url = "http://127.0.0.1:" + server.getAddress().getPort() + "/api/v0";
+        VastProvider p = new VastProvider(cfg(2, 2), url, KEY, () -> "", TotpTest.SEED, RestClient.builder().build(), 5);
+        p.minLoginGapMillis = 0;
+        p.retryWaitMillis = () -> 10;
+        p.blockMillis = 60_000;
+        return p;
+    }
+
+    static String codeNow(long offsetSeconds) {
+        return Totp.code(TotpTest.SEED, System.currentTimeMillis() / 1000 + offsetSeconds, 6);
+    }
+
+    @Test
+    void logsInLazilyOnceWithTheNormalKeyAndUsesTheSessionKeyAfterwards() {
+        validSession = "sess-1";
+        VastProvider p = totpProvider();
+        offers = "[" + offer(1, "RTX 4090", 0.41, 0.98, 0.001) + "]";
+        p.quotes(SPEC);
+        assertEquals(0, tfaBodies.size(), "offer search needs no login");
+        assertEquals(1, p.listPods().size() + 1);
+        p.listPods();
+        assertEquals(1, tfaBodies.size(), "one login, then the session is reused");
+        assertEquals("Bearer " + KEY, tfaAuth.getFirst(), "login carries the normal API key");
+        String body = tfaBodies.getFirst();
+        assertTrue(body.contains("\"tfa_method\":\"totp\""), body);
+        assertTrue(body.contains("\"code\":\"" + codeNow(0) + "\"") || body.contains("\"code\":\"" + codeNow(-1) + "\"")
+                || body.contains("\"code\":\"" + codeNow(1) + "\""), "a 6-digit TOTP code for the current window");
+        assertFalse(body.contains(TotpTest.SEED), "the seed itself is never sent");
+        assertTrue(authHeaders.stream().filter(h -> !h.equals("Bearer " + KEY)).allMatch(h -> h.equals("Bearer sess-1")));
+    }
+
+    @Test
+    void expiredSessionIsRefreshedOnceAndTheCallRetried() {
+        validSession = "sess-1";
+        VastProvider p = totpProvider();
+        p.listPods();
+        validSession = "sess-2";      // Vast expired the first session
+        tfaIssues = "sess-2";
+        p.listPods();
+        assertEquals(2, tfaBodies.size(), "exactly one more login");
+        validSession = "sess-3";      // expired again and the login hands out a key that still fails: no loop
+        int before = tfaBodies.size();
+        assertThrows(VastProvider.VastSessionExpired.class, p::listPods);
+        assertTrue(tfaBodies.size() - before <= 1, "at most one login per call");
+    }
+
+    @Test
+    void rejectedCodeIsRetriedOnceInTheNextWindowThenLoginPausesWithAClearReason() {
+        tfaStatus = 401;
+        VastProvider p = totpProvider();
+        VastProvider.VastSessionExpired e = assertThrows(VastProvider.VastSessionExpired.class, p::listPods);
+        assertEquals(2, tfaBodies.size(), "the first try and one retry, never more");
+        assertTrue(e.getMessage().contains("rejected twice") && e.getMessage().contains("VAST_TOTP_SECRET"), e.getMessage());
+        VastProvider.VastSessionExpired again = assertThrows(VastProvider.VastSessionExpired.class, p::listPods);
+        assertEquals(2, tfaBodies.size(), "paused: no further login attempts while blocked");
+        assertTrue(again.getMessage().contains("paused"), again.getMessage());
+        assertFalse(e.getMessage().contains(TotpTest.SEED) || again.getMessage().contains(TotpTest.SEED));
+    }
+
+    @Test
+    void noSeedMeansNoLoginAttemptAndTheOldFallbackStillWorks() {
+        VastProvider p = provider(); // session key from the supplier, no seed
+        p.listPods();
+        assertEquals(0, tfaBodies.size());
+    }
+
+    @Test
+    void neitherTheSeedNorCodesNorSessionKeysAreLogged() {
+        ch.qos.logback.classic.Logger lg = (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(VastProvider.class);
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> app = new ch.qos.logback.core.read.ListAppender<>();
+        app.start();
+        lg.addAppender(app);
+        try {
+            validSession = "sess-1";
+            totpProvider().listPods();
+            tfaStatus = 401;
+            assertThrows(VastProvider.VastSessionExpired.class, () -> totpProvider().listPods());
+            assertFalse(app.list.isEmpty(), "the login and the failure are logged");
+            String all = app.list.stream().map(ch.qos.logback.classic.spi.ILoggingEvent::getFormattedMessage).reduce("", (a, b) -> a + "\n" + b);
+            for (String secret : List.of(TotpTest.SEED, "sess-1", KEY, SESSION, codeNow(-1), codeNow(0), codeNow(1))) {
+                assertFalse(all.contains(secret), "must not log: " + secret.substring(0, 3) + "...");
+            }
+        } finally {
+            lg.detachAppender(app);
+        }
     }
 }
