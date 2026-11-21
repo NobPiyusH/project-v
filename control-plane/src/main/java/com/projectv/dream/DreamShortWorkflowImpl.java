@@ -43,8 +43,12 @@ public class DreamShortWorkflowImpl implements DreamShortWorkflow {
     private final MediaActivities pictures = Workflow.newActivityStub(MediaActivities.class,
             ActivityOptions.newBuilder()
                     .setTaskQueue(TaskQueues.MEDIA)
-                    .setStartToCloseTimeout(Duration.ofMinutes(30))
-                    .setHeartbeatTimeout(Duration.ofMinutes(8)) // a restarted media worker must not leave Pictures hanging for 30 min
+                    // Outer cap only: on the shared pod a Short's pictures can wait behind other Shorts' jobs. Each job's own
+                    // limit counts from when the pod starts it (workers/pod/client.py RUN_LIMIT_S), so queued time is free.
+                    .setStartToCloseTimeout(Duration.ofHours(4))
+                    // The worker beats every few seconds while a job is queued or running; 12 min rides out a laptop stall
+                    // (21 Nov 2026: ~10 min) and still catches a dead media worker well before the outer cap.
+                    .setHeartbeatTimeout(Duration.ofMinutes(12))
                     .setRetryOptions(RetryOptions.newBuilder().setMaximumAttempts(1).build())
                     .build());
 
@@ -52,8 +56,8 @@ public class DreamShortWorkflowImpl implements DreamShortWorkflow {
     private final MediaActivities clips = Workflow.newActivityStub(MediaActivities.class,
             ActivityOptions.newBuilder()
                     .setTaskQueue(TaskQueues.MEDIA)
-                    .setStartToCloseTimeout(Duration.ofHours(4))
-                    .setHeartbeatTimeout(Duration.ofMinutes(3))
+                    .setStartToCloseTimeout(Duration.ofHours(8)) // outer cap; per-clip run limit is on the worker (see pictures)
+                    .setHeartbeatTimeout(Duration.ofMinutes(12))
                     .setRetryOptions(RetryOptions.newBuilder().setMaximumAttempts(1).build())
                     .build());
 
