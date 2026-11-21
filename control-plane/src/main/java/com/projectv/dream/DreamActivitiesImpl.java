@@ -131,4 +131,9 @@ public class DreamActivitiesImpl implements DreamActivities {
     public void startClipBatch(String dreamId) {
         dreams.startClipBatch(UUID.fromString(dreamId));
     }
+
+    @Override
+    public int gpuBatchAhead(String dreamId, String step) {
+        return dreams.gpuBatchAhead(UUID.fromString(dreamId), step);
+    }
 }

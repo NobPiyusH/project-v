@@ -186,6 +186,9 @@ public class DreamShortWorkflowImpl implements DreamShortWorkflow {
             }
             case WRITE -> activities.writeShots(dreamId, notes);
             case PICTURES -> {
+                if (!waitForBatch(step)) {
+                    yield null;
+                }
                 var req = activities.pictureRequest(dreamId, only, notes);
                 String made = req.jobs().isEmpty() ? "Every shot already has a picture."
                         : activities.savePictures(dreamId, req, pictures.generateKeyframes(req));
@@ -203,6 +206,9 @@ public class DreamShortWorkflowImpl implements DreamShortWorkflow {
                 yield made;
             }
             case CLIPS -> {
+                if (!waitForBatch(step)) {
+                    yield null;
+                }
                 DreamEstimate est = activities.clipEstimate(dreamId, only);
                 if (est.needsApproval() && !producerApprovesSpend(step, est)) {
                     approved = null;
@@ -244,6 +250,41 @@ public class DreamShortWorkflowImpl implements DreamShortWorkflow {
             }
         };
     }
+
+    /**
+     * Batch order on the shared pod: waits (at most {@link #BATCH_WAIT}) while other working Shorts should use the pod
+     * first; the owner's approve(step) starts it at once. Scheduling only: the step's mode and gate are unchanged.
+     * false = cancelled while waiting.
+     */
+    private boolean waitForBatch(DreamStep step) {
+        // Version 1 added the batch order; older runs replay without it.
+        if (Workflow.getVersion("dream-batch-order", Workflow.DEFAULT_VERSION, 1) != 1) {
+            return true;
+        }
+        long until = Workflow.currentTimeMillis() + BATCH_WAIT.toMillis();
+        approved = null;
+        boolean waited = false;
+        while (!cancelled && approved != step && Workflow.currentTimeMillis() < until) {
+            int ahead = activities.gpuBatchAhead(dreamId, step.name());
+            if (ahead <= 0) {
+                break;
+            }
+            waited = true;
+            show(step, "WAITING_BATCH", (step == DreamStep.CLIPS
+                    ? "Waiting for %d other Short(s) to finish their pictures, so the GPU makes all clips back to back."
+                    : "Waiting for %d other Short(s) to finish writing, so one GPU is rented for the whole batch.")
+                    .formatted(ahead) + " Start now to skip the wait.");
+            Workflow.await(BATCH_POLL, () -> cancelled || approved == step);
+        }
+        approved = null;
+        if (waited && !cancelled) {
+            show(step, "RUNNING", working(step));
+        }
+        return !cancelled;
+    }
+
+    static final Duration BATCH_WAIT = Duration.ofMinutes(30);
+    static final Duration BATCH_POLL = Duration.ofSeconds(30);
 
     /** What the dashboard says while a step runs (so an old "approve" message never lingers). */
     static String working(DreamStep step) {

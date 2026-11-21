@@ -100,6 +100,7 @@ function statusBadge(status: string) {
     : status === 'FAILED_WAITING' ? 'b-bad' : status === 'CANCELLED' ? 'b-idle' : 'b-info'
   const text: Record<string, string> = {
     RUNNING: 'Working', WAITING: 'Waiting for you', WAITING_REVIEW: 'In review', WAITING_COST: 'Cost to approve',
+    WAITING_BATCH: 'Batch queue',
     FAILED_WAITING: 'Failed: waiting', COMPLETED: 'Done', CANCELLED: 'Cancelled',
   }
   return <span className={`badge ${cls}`}>{text[status] ?? status}</span>
@@ -303,6 +304,7 @@ function DreamView({ id }: { id: string }) {
             {step === 'FINISH' && <button onClick={() => void act(() => dreamApi.redo(id, step, [], notes))}>Finish again</button>}
           </>}
           {status === 'WAITING_COST' && <button className="primary" onClick={() => void act(() => dreamApi.approve(id, 'CLIPS'))}>Approve cost and start clips</button>}
+          {status === 'WAITING_BATCH' && step && <button onClick={() => void act(() => dreamApi.approve(id, step))}>Start now</button>}
           {status === 'FAILED_WAITING' && <button className="primary" onClick={() => void act(() => dreamApi.retry(id))}>Retry</button>}
           {status === 'RUNNING' && step === 'CLIPS' && <button className="danger" onClick={() => void act(() => dreamApi.stop(id))}>Stop clips</button>}
           <span style={{ flex: 1 }} />

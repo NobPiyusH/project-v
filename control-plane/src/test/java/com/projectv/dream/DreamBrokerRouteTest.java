@@ -136,4 +136,24 @@ class DreamBrokerRouteTest {
                 .param("d", dream).query(Integer.class).single());
         assertFalse(created.isEmpty());
     }
+
+    @Test
+    void batchOrderCountsOnlyWorkingShortsAhead() {
+        UUID me = UUID.randomUUID();
+        List<UUID> others = new ArrayList<>();
+        for (String[] row : new String[][]{{"CLIPS", "RUNNING"}, {"PICTURES", "RUNNING"}, {"WRITE", "RUNNING"},
+                {"WRITE", "WAITING"}, {"MUSIC", "RUNNING"}}) {
+            UUID id = others.isEmpty() ? me : UUID.randomUUID(); // the first row is this Short, at its clips
+            others.add(id);
+            jdbc.sql("INSERT INTO dream_short (id, idea, step, status) VALUES (:id, 'x', :s, :st)")
+                    .param("id", id).param("s", row[0]).param("st", row[1]).update();
+        }
+        try {
+            assertEquals(2, dreams.gpuBatchAhead(me, "CLIPS"), "pictures + writing Shorts go first; waiting/music ones never hold it up");
+            assertEquals(1, dreams.gpuBatchAhead(me, "PICTURES"), "no pod on yet: wait for the Short still writing");
+            assertEquals(0, dreams.gpuBatchAhead(me, "MUSIC"));
+        } finally {
+            others.forEach(id -> jdbc.sql("DELETE FROM dream_short WHERE id = :id").param("id", id).update());
+        }
+    }
 }

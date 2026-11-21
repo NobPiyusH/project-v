@@ -328,7 +328,8 @@ public class DreamService {
 
     /** Start the Short's pod while the writer works, so the weight download overlaps the writing. Best effort. */
     private void warmGpu(UUID id) {
-        if (gpu != null) {
+        // Collect first, rent later: in a batch the pod is rented when the Shorts reach their pictures (gpuBatchAhead).
+        if (gpu != null && (gpu.usersOnPod() > 0 || !othersStillWriting(id))) {
             gpu.warm(id);
         }
     }
@@ -1357,5 +1358,36 @@ public class DreamService {
 
     public void startClipBatch(UUID id) {
         clipProgress.startBatch(id);
+    }
+
+    /** Steps that come before a Short's pictures (free) and its clips (pictures, on the same pod). */
+    private static final List<String> FREE_STEPS = List.of("SCOUT", "WRITE");
+    private static final List<String> BEFORE_CLIPS = List.of("SCOUT", "WRITE", "PICTURES");
+
+    /** See {@link DreamActivities#gpuBatchAhead}. Only Shorts that are working right now count (one waiting for the owner never holds others up). */
+    public int gpuBatchAhead(UUID id, String step) {
+        if (gpu == null) {
+            return 0;
+        }
+        List<String> ahead;
+        if ("CLIPS".equals(step)) {
+            ahead = BEFORE_CLIPS;
+        } else if ("PICTURES".equals(step) && gpu.usersOnPod() == 0) {
+            ahead = FREE_STEPS;
+        } else {
+            return 0;
+        }
+        return jdbc.sql("""
+                        SELECT count(*) FROM dream_short
+                        WHERE id <> :id AND status = 'RUNNING' AND step IN (:steps) AND updated_at > now() - interval '2 hours'
+                        """).param("id", id).param("steps", ahead).query(Integer.class).single();
+    }
+
+    /** Whether another Short is still on its free steps: then the pod is rented when the batch reaches its pictures, not now. */
+    private boolean othersStillWriting(UUID id) {
+        return jdbc.sql("""
+                        SELECT count(*) FROM dream_short
+                        WHERE id <> :id AND status = 'RUNNING' AND step IN (:steps) AND updated_at > now() - interval '2 hours'
+                        """).param("id", id).param("steps", FREE_STEPS).query(Integer.class).single() > 0;
     }
 }

@@ -400,3 +400,29 @@ def test_retry_reuses_saved_clips_and_chains_from_them(monkeypatch):
     assert len(sent) == 1 and base64.b64decode(sent[0]["image"]) == b"LAST:OLDMP4"
     assert clips[0]["uri"].endswith(saved) and clips[0]["gpuSeconds"] == 0 and clips[1]["uri"]
 
+
+def test_batch_order_keeps_the_loaded_model_busy_before_swapping():
+    ran = []
+    t = [0.0]
+    jobs = S.Jobs(lambda kind, p: (ran.append(p["n"]) or b"x", {}), clock=lambda: t[0])
+    # Two Shorts interleave: pictures of one, a clip of the other, more pictures, another clip.
+    for kind, n in [("picture", "p1"), ("clip", "c1"), ("picture", "p2"), ("clip", "c2"), ("picture", "p3")]:
+        jobs.submit(kind, {"n": n})
+    while jobs.work_one(False):
+        pass
+    assert ran == ["p1", "p2", "p3", "c1", "c2"]  # one swap instead of four
+
+
+def test_batch_order_never_starves_the_other_kind():
+    ran = []
+    t = [0.0]
+    jobs = S.Jobs(lambda kind, p: (ran.append(p["n"]) or b"x", {}), clock=lambda: t[0])
+    jobs.submit("clip", {"n": "c1"})
+    jobs.work_one(False)                      # Wan is loaded now
+    jobs.submit("picture", {"n": "p1"})
+    jobs.submit("clip", {"n": "c2"})
+    jobs.work_one(False)                      # c2: stays on Wan
+    jobs.submit("clip", {"n": "c3"})
+    t[0] = S.Jobs.SWITCH_AFTER_S + 1          # p1 has waited long enough
+    jobs.work_one(False)
+    assert ran == ["c1", "c2", "p1"]
