@@ -186,6 +186,13 @@ export interface GpuPods { configured: boolean; pods: GpuPod[]; error?: string }
 export interface GpuLogLine { ts: string; source: string; line: string }
 export interface GpuLogPage { lines: GpuLogLine[]; next: string | null; error: string | null }
 
+/** This month's spend against the studio's caps (top bar meters). */
+export interface Budget {
+  geminiCapInr: number; geminiSpentInr: number; geminiRemainingInr: number; gpuCapInr: number; gpuSpentInr: number
+  claudeCapInr?: number; claudeSpentInr?: number
+  modal?: { meteredUsd: number; creditsUsedUsd: number; billedUsd: number; freeCreditUsd: number; creditLeftUsd: number; fxInrPerUsd: number; fetchedAt: string }
+}
+
 export const api = {
   gpuPods: () => call<GpuPods>('GET', '/gpu/pods'),
   gpuLogs: (id: string, since: string | null) =>
@@ -196,9 +203,7 @@ export const api = {
   videos: () => call<VideoSummary[]>('GET', '/videos'),
   video: (id: string) => call<VideoDetail>('GET', `/videos/${id}`),
   production: (id: string) => call<Production>('GET', `/videos/${id}/production`),
-  budget: () => call<{ geminiCapInr: number; geminiSpentInr: number; geminiRemainingInr: number; gpuCapInr: number; gpuSpentInr: number;
-    claudeCapInr?: number; claudeSpentInr?: number
-    modal?: { meteredUsd: number; creditsUsedUsd: number; billedUsd: number; freeCreditUsd: number; creditLeftUsd: number; fxInrPerUsd: number; fetchedAt: string } }>('GET', '/budget'),
+  budget: () => call<Budget>('GET', '/budget'),
   createVideo: (prompt: string, defaultMode: Mode, modes: Record<string, Mode>, reviewMinutes: number) =>
     call<{ id: string }>('POST', '/videos', { prompt, defaultMode, modes, reviewMinutes }),
   setReviewMinutes: (id: string, minutes: number) => call<void>('PUT', `/videos/${id}/review-minutes`, { minutes }),

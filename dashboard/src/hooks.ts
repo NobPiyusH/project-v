@@ -41,3 +41,25 @@ export function fmtTime(iso: string | null | undefined) {
   if (!iso) return ''
   return new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
 }
+
+export type Theme = 'dark' | 'light'
+
+/** Dark (default) or light theme, remembered in localStorage when the browser allows it. */
+export function useTheme(): [Theme, () => void] {
+  const [theme, setTheme] = useState<Theme>(() => {
+    try {
+      return localStorage.getItem('pv-theme') === 'light' ? 'light' : 'dark'
+    } catch {
+      return 'dark'
+    }
+  })
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme
+    try {
+      localStorage.setItem('pv-theme', theme)
+    } catch {
+      /* private mode: the choice just isn't remembered */
+    }
+  }, [theme])
+  return [theme, () => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))]
+}
