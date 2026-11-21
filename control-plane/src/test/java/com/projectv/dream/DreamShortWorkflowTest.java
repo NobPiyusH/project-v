@@ -353,9 +353,9 @@ class DreamShortWorkflowTest {
         DreamShortWorkflow wf = start(StageMode.PRODUCER, Map.of(DreamStep.SCOUT, StageMode.AUTO));
         waitFor(wf, "PICTURES", "WAITING");
         assertTrue(wf.view().message().contains("advice redo"));
-        assertTrue(producer.acted.contains("d-PICTURES2:asked"));
         wf.approve(DreamStep.PICTURES);
         assertEquals("completed", result());
+        assertTrue(producer.acted.contains("d-PICTURES2:asked"), "you answered inside the 30 s: it counts as asked");
     }
 
     @Test
@@ -367,6 +367,23 @@ class DreamShortWorkflowTest {
         assertTrue(producer.acted.isEmpty());
         wf.approve(DreamStep.WRITE);
         assertEquals("completed", result());
+    }
+
+    @Test
+    void advisingProducerDecidesAloneWhenTheOwnerStaysSilentFor30Seconds() {
+        producer.decides = false;
+        start(StageMode.AUTO, Map.of(DreamStep.WRITE, StageMode.PRODUCER));
+        assertEquals("completed", result(), "no answer: it approved by itself and the Short went on");
+        assertTrue(producer.acted.contains("d-WRITE1:approved"));
+    }
+
+    @Test
+    void producerOutOfRoundsGoesOnAfter30SecondsInsteadOfWaitingForever() {
+        producer.maxRounds = 1;
+        producer.verdicts.addAll(List.of("redo", "redo"));
+        start(StageMode.PRODUCER, Map.of(DreamStep.SCOUT, StageMode.AUTO));
+        assertEquals("completed", result());
+        assertTrue(producer.acted.contains("d-PICTURES2:approved"));
     }
 
     @Test

@@ -451,3 +451,46 @@ def test_retry_chain_keeps_earlier_frames_when_a_saved_clip_is_unreadable(monkey
     assert len(sent) == 2, "shot 1 is rendered, and so is shot 2 (its saved file could not be read)"
     assert base64.b64decode(sent[1]["image"]) == b"LAST:NEWMP4", "shot 2 still starts from shot 1's last frame"
     assert all(c["uri"] for c in clips)
+
+
+def test_picture_model_defaults_to_zimage_and_rejects_unknown():
+    base = {"prompt": "x", "width": 768, "height": 1344, "seed": 1}
+    assert S.validate_picture(base) == []
+    assert S.validate_picture({**base, "model": "zimage"}) == []
+    assert S.validate_picture({**base, "model": "flux2-klein"}) == []
+    assert S.validate_picture({**base, "model": "nope"})
+
+
+def test_flux_graph_matches_comfy_template():
+    g = S.flux_graph({"prompt": "a fox", "seed": 9, "width": 768, "height": 1344}, "pic/a")
+    assert g["1"]["inputs"]["unet_name"] == "flux-2-klein-4b.safetensors"
+    assert g["2"]["inputs"] == {"clip_name": "qwen_3_4b.safetensors", "type": "flux2", "device": "default"}
+    assert g["3"]["inputs"]["vae_name"] == "flux2-vae.safetensors" and g["4"]["inputs"]["text"] == "a fox"
+    assert g["6"]["inputs"]["cfg"] == 1.0 and g["8"]["inputs"] == {"steps": 4, "width": 768, "height": 1344}
+    assert g["9"]["inputs"]["noise_seed"] == 9 and g["10"]["inputs"]["width"] == 768 and g["13"]["inputs"]["filename_prefix"] == "pic/a"
+    assert set(S.FLUX_FILES) == {"flux-2-klein-4b.safetensors", "qwen_3_4b.safetensors", "flux2-vae.safetensors"}
+
+
+def test_gpu_routes_by_model_and_keeps_flux_loaded(monkeypatch):
+    gpu = S.Gpu()
+    calls = []
+    monkeypatch.setattr(gpu, "picture", lambda p: calls.append("zimage") or (b"z", {}))
+    monkeypatch.setattr(gpu, "flux_picture", lambda p: calls.append("flux") or (b"f", {}))
+    gpu.run("picture", {"prompt": "x"})
+    gpu.run("picture", {"prompt": "x", "model": "flux2-klein"})
+    assert calls == ["zimage", "flux"]
+
+
+def test_flux_fetches_once_and_never_frees_comfy(monkeypatch, tmp_path):
+    gpu = S.Gpu(tmp_path, S.State())
+    fetched, freed, graphs = [], [], []
+    monkeypatch.setattr(S, "fetch_files", lambda *a: fetched.append(a[2]))
+    monkeypatch.setattr(S, "ROOT", tmp_path)
+    (tmp_path / "comfy" / "out" / "pic").mkdir(parents=True)
+    (tmp_path / "comfy" / "out" / "pic" / "x.png").write_bytes(b"PNG")
+    monkeypatch.setattr(gpu, "_free_comfy", lambda: freed.append(1))
+    monkeypatch.setattr(gpu, "_run_graph", lambda g: graphs.append(g) or {"outputs": {"13": {"images": [{"subfolder": "pic", "filename": "x.png"}]}}})
+    for _ in range(2):
+        (tmp_path / "comfy" / "out" / "pic" / "x.png").write_bytes(b"PNG")
+        assert gpu.flux_picture({"prompt": "p", "seed": 1})[0] == b"PNG"
+    assert fetched == [S.FLUX_FILES] and not freed and len(graphs) == 2

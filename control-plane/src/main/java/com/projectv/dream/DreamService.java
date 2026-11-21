@@ -262,7 +262,8 @@ public class DreamService {
                     "photorealistic, cinematic wide shot, believable lighting and scale, rich detail, no text",
                     "slow cinematic camera move (push-in, drift or crane), subtle life in the scene, no cuts"),
             // Nothing is added to the owner's words (see UNFILTERED): empty style suffixes, hard cuts, normal speed.
-            UNFILTERED, new Look("Unfiltered: the owner's own prompt, exactly as written.", "", "", ONE_WORLD, 0, 0, 1.0, "none"));
+            // 5 s = Wan's longest clip (81 frames at 16 fps): each line of the owner's script gets the most screen time it can.
+            UNFILTERED, new Look("Unfiltered: the owner's own prompt, exactly as written.", "", "", ONE_WORLD, 5.0, 0, 1.0, "none"));
 
     private final JdbcClient jdbc;
     private final ObjectMapper json;

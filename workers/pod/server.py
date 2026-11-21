@@ -8,7 +8,8 @@ imported on the box after `boot()` installed them.
 At start: install deps, fetch ComfyUI (pinned tag), download weights from Hugging Face (Apache-2.0; CLAUDE.md rule 9)
 onto the container disk, start ComfyUI on 127.0.0.1. Serves on [::]:PORT (IPv6, for the Container Gateway):
   GET  /health              200 {"ready": true} once ready, else 503 {"ready": false, "phase": ...}
-  POST /picture             {prompt, seed, width, height}                         -> 202 {"id": job}
+  POST /picture             {prompt, seed, width, height, model?}                 -> 202 {"id": job}
+                            model: "zimage" (default) or "flux2-klein" (FLUX.2 klein 4B on ComfyUI, fetched on first use)
   POST /clip                {image: b64 PNG, prompt, negative, seed, frames, fps, width, height} -> 202 {"id": job}
   POST /scene               SVI scene {image: b64 PNG (the anchor), beats: [{prompt, seed}], startBeat, prevLatent: b64
                             .latent (startBeat > 1), negative, frames, fps, width, height} -> 202 {"id": job}; result: a
@@ -79,6 +80,20 @@ SVI_FILES = {
 SVI_MOTION_LATENTS = 3   # ~12 frames carried into the next beat; 5 (20 frames) measured WORSE on 21 Nov
 SVI_MAX_BEATS = 5        # 20 s: content drifts after that (bench)
 ZIMAGE_REPO = "Tongyi-MAI/Z-Image-Turbo"
+# FLUX.2 klein 4B distilled (Black Forest Labs, Apache-2.0, not gated; checked on Hugging Face 21 Nov 2026; ComfyUI v0.45.0
+# has Flux2Scheduler / EmptyFlux2LatentImage / CLIPLoader type "flux2"). The 9B is non-commercial and gated: not used.
+# Fetched on the first flux2-klein job, not at boot, so pods that never make FLUX pictures pay nothing for it.
+FLUX_REPO = "Comfy-Org/flux2-klein-4B"
+FLUX_UNET = "flux-2-klein-4b.safetensors"
+FLUX_TEXT = "qwen_3_4b.safetensors"
+FLUX_VAE = "flux2-vae.safetensors"
+FLUX_FILES = {  # name: (repo, path in repo, ComfyUI models subfolder, size in bytes)
+    FLUX_UNET: (FLUX_REPO, f"split_files/diffusion_models/{FLUX_UNET}", "diffusion_models", 7751105712),
+    FLUX_TEXT: (FLUX_REPO, f"split_files/text_encoders/{FLUX_TEXT}", "text_encoders", 8044982048),
+    FLUX_VAE: (FLUX_REPO, f"split_files/vae/{FLUX_VAE}", "vae", 336211292),
+}
+FLUX_STEPS, FLUX_CFG = 4, 1.0   # the distilled model's settings (ComfyUI's own template: 4 steps, CFG 1, euler)
+PICTURE_MODELS = ("zimage", "flux2-klein")
 PIP = ["huggingface_hub>=0.34", "diffusers>=0.36.0", "transformers>=4.57.0", "accelerate>=1.10", "safetensors",
        "sentencepiece", "pillow", "imageio-ffmpeg"]
 NEGATIVE = ("blurry, low quality, low resolution, distorted, warped, morphing, flickering, jittery, text, captions, "
@@ -145,6 +160,8 @@ def validate_picture(p: dict) -> list[str]:
     errors = []
     if not (p.get("prompt") or "").strip():
         errors.append("empty prompt")
+    if (p.get("model") or "zimage") not in PICTURE_MODELS:
+        errors.append(f"model must be one of {', '.join(PICTURE_MODELS)}")
     for k in ("width", "height"):
         v = p.get(k, 768)
         if not isinstance(v, int) or v < 64 or v > 2048 or v % 16:
@@ -264,8 +281,31 @@ def scene_graph(c: dict, image_name: str, prefix: str, prev_latent: str | None =
     return g
 
 
+def flux_graph(p: dict, prefix: str) -> dict:
+    """ComfyUI API graph for one FLUX.2 klein 4B (distilled) picture: ComfyUI's official template, 4 steps, CFG 1.
+    The negative is the zeroed positive (the distilled model takes no negative prompt)."""
+    w, h = int(p.get("width", 768)), int(p.get("height", 1344))
+    return {
+        "1": {"class_type": "UNETLoader", "inputs": {"unet_name": FLUX_UNET, "weight_dtype": "default"}},
+        "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": FLUX_TEXT, "type": "flux2", "device": "default"}},
+        "3": {"class_type": "VAELoader", "inputs": {"vae_name": FLUX_VAE}},
+        "4": {"class_type": "CLIPTextEncode", "inputs": {"text": p["prompt"], "clip": ["2", 0]}},
+        "5": {"class_type": "ConditioningZeroOut", "inputs": {"conditioning": ["4", 0]}},
+        "6": {"class_type": "CFGGuider", "inputs": {"model": ["1", 0], "positive": ["4", 0], "negative": ["5", 0], "cfg": FLUX_CFG}},
+        "7": {"class_type": "KSamplerSelect", "inputs": {"sampler_name": "euler"}},
+        "8": {"class_type": "Flux2Scheduler", "inputs": {"steps": FLUX_STEPS, "width": w, "height": h}},
+        "9": {"class_type": "RandomNoise", "inputs": {"noise_seed": int(p.get("seed") or 0) & 0xFFFFFFFFFFFFFFFF}},
+        "10": {"class_type": "EmptyFlux2LatentImage", "inputs": {"width": w, "height": h, "batch_size": 1}},
+        "11": {"class_type": "SamplerCustomAdvanced", "inputs": {
+            "noise": ["9", 0], "guider": ["6", 0], "sampler": ["7", 0], "sigmas": ["8", 0], "latent_image": ["10", 0]}},
+        "12": {"class_type": "VAEDecode", "inputs": {"samples": ["11", 0], "vae": ["3", 0]}},
+        "13": {"class_type": "SaveImage", "inputs": {"images": ["12", 0], "filename_prefix": prefix}},
+    }
+
+
 def plan() -> dict:
     return {"comfy": COMFY_TAG, "files": sorted(FILES), "zimage": ZIMAGE_REPO,
+            "flux2_klein": {"files": sorted(FLUX_FILES), "gb": round(sum(f[3] for f in FLUX_FILES.values()) / 1e9, 1)},
             "download_gb": round(sum(f[3] for f in FILES.values()) / 1e9, 1), "root": str(ROOT), "port": PORT,
             "steps": STEPS, "split": expert_split(STEPS), "sampler": SAMPLER}
 
@@ -485,20 +525,20 @@ VOLUME = os.environ.get("SV_VOLUME", "")   # optional persistent (RunPod global)
 ZIMAGE_PATH = ZIMAGE_REPO                  # becomes a local snapshot folder once downloaded / found on the volume
 
 
-def volume_file(volume: str, name: str, size: int) -> Path | None:
+def volume_file(volume: str, name: str, size: int, folder: str = "wan-fp8") -> Path | None:
     """The cached copy of `name` on the volume when it is complete (right size), else None. A global volume is
     object-backed (no locks, no atomic rename), so completeness is judged by size alone, never by a lock file."""
     if not volume:
         return None
-    p = Path(volume) / "wan-fp8" / name
+    p = Path(volume) / folder / name
     try:
         return p if p.stat().st_size == size else None
     except OSError:
         return None
 
 
-def copy_to_volume(volume: str, name: str, local: Path) -> None:
-    dest = Path(volume) / "wan-fp8" / name
+def copy_to_volume(volume: str, name: str, local: Path, folder: str = "wan-fp8") -> None:
+    dest = Path(volume) / folder / name
     dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(local, dest)   # a half-copied file has the wrong size, so the next start re-copies it
 
@@ -511,29 +551,6 @@ def copy_tree_plain(src: Path, dst: Path) -> None:
         out.mkdir(parents=True, exist_ok=True)
         for f in files:
             shutil.copyfile(Path(root) / f, out / f)
-
-
-def fetch_file(name: str, spec: tuple, comfy: Path, weights: Path) -> str:
-    """One weight file into ComfyUI's models folder: the volume copy when complete, else Hugging Face (size-checked)."""
-    from huggingface_hub import hf_hub_download
-
-    repo, path, sub, size = spec
-    cached = volume_file(VOLUME, name, size)
-    if cached is not None:
-        local, how = cached, "volume"
-    else:
-        local = Path(hf_hub_download(repo, path, local_dir=str(weights)))
-        if local.stat().st_size != size:
-            raise RuntimeError(f"{name}: size {local.stat().st_size} != expected {size}")
-        how = "huggingface"
-        if VOLUME:
-            copy_to_volume(VOLUME, name, local)
-    dest = comfy / "models" / sub / name
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    if dest.is_symlink() or dest.exists():
-        dest.unlink()
-    dest.symlink_to(local)
-    return how
 
 
 def fetch_kjnodes(comfy: Path) -> None:
@@ -555,32 +572,39 @@ def fetch_kjnodes(comfy: Path) -> None:
                        check=True)
 
 
-def download(comfy: Path, state: State) -> None:
-    global ZIMAGE_PATH
-    from huggingface_hub import hf_hub_download, snapshot_download
+def fetch_files(comfy: Path, state: State, files: dict, volume_dir: str) -> None:
+    """Puts each (repo, path, subfolder, size) of `files` into ComfyUI's models folder, from the volume when cached."""
+    from huggingface_hub import hf_hub_download
 
     weights = ROOT / "weights"
-    for i, (name, (repo, path, sub, size)) in enumerate(FILES.items(), 1):
+    for i, (name, (repo, path, sub, size)) in enumerate(files.items(), 1):
         t = time.time()
-        cached = volume_file(VOLUME, name, size)
+        cached = volume_file(VOLUME, name, size, volume_dir)
         if cached is not None:
-            state.phase = f"using volume copy {i}/{len(FILES)} {name}"
+            state.phase = f"using volume copy {i}/{len(files)} {name}"
             local, how = cached, "volume"
         else:
-            state.phase = f"downloading {i}/{len(FILES)} {name}"
+            state.phase = f"downloading {i}/{len(files)} {name}"
             local = Path(hf_hub_download(repo, path, local_dir=str(weights)))
             if local.stat().st_size != size:
                 raise RuntimeError(f"{name}: size {local.stat().st_size} != expected {size}")
             how = "huggingface"
             if VOLUME:
-                state.phase = f"caching {i}/{len(FILES)} {name} on the volume"
-                copy_to_volume(VOLUME, name, local)
+                state.phase = f"caching {i}/{len(files)} {name} on the volume"
+                copy_to_volume(VOLUME, name, local, volume_dir)
         dest = comfy / "models" / sub / name
         dest.parent.mkdir(parents=True, exist_ok=True)
         if dest.is_symlink() or dest.exists():
             dest.unlink()
         dest.symlink_to(local)
         log(f"{name} {size / 1e9:.1f} GB from {how} in {time.time() - t:.0f} s")
+
+
+def download(comfy: Path, state: State) -> None:
+    global ZIMAGE_PATH
+    from huggingface_hub import snapshot_download
+
+    fetch_files(comfy, state, FILES, "wan-fp8")
     t = time.time()
     marker = Path(VOLUME) / "zimage-turbo" / ".complete" if VOLUME else None
     if marker is not None and marker.exists():
@@ -633,11 +657,16 @@ def ffmpeg() -> str:
 
 
 class Gpu:
-    """Runs one job at a time. Z-Image (diffusers) and the Wan experts (ComfyUI) never share the VRAM."""
+    """Runs one job at a time. Z-Image (diffusers) and the ComfyUI models (Wan experts, FLUX.2 klein) never share the
+    VRAM. A model stays loaded between jobs: Z-Image until a ComfyUI job needs the card, FLUX in ComfyUI's own cache
+    (never freed per picture), so send the pictures of one model back to back."""
 
-    def __init__(self, comfy: Path | None = None, proc: subprocess.Popen | None = None):
+    def __init__(self, comfy: Path | None = None, state: State | None = None,
+                 proc: subprocess.Popen | None = None):
         self.zimage = None
-        self.comfy, self.proc = comfy, proc
+        self.comfy, self.state = comfy, state
+        self.flux_ready = False
+        self.proc = proc
         self.svi_ready = False
 
     def ensure_svi(self) -> None:
@@ -647,8 +676,7 @@ class Gpu:
             return
         t = time.time()
         fetch_kjnodes(self.comfy)
-        for name, spec in SVI_FILES.items():
-            log(f"SVI {name} from {fetch_file(name, spec, self.comfy, ROOT / 'weights')}")
+        fetch_files(self.comfy, self.state or State(), SVI_FILES, "svi-pro")
         if self.proc is not None:
             self.proc.terminate()
             try:
@@ -678,7 +706,36 @@ class Gpu:
     def run(self, kind: str, p: dict) -> tuple[bytes, dict]:
         if kind == "scene":
             return self.scene(p)
+        if kind == "picture" and (p.get("model") or "zimage") == "flux2-klein":
+            return self.flux_picture(p)
         return self.picture(p) if kind == "picture" else self.clip(p)
+
+    def _run_graph(self, graph: dict) -> dict:
+        """Queues a ComfyUI graph and waits for its history entry (raises on a ComfyUI error)."""
+        pid = http_json(f"http://127.0.0.1:{COMFY_PORT}/prompt", {"prompt": graph})["prompt_id"]
+        while True:
+            hist = http_json(f"http://127.0.0.1:{COMFY_PORT}/history/{pid}").get(pid)
+            status = (hist or {}).get("status", {})
+            if status.get("status_str") == "error":
+                msgs = [m for m in status.get("messages", []) if m and m[0] == "execution_error"]
+                raise RuntimeError(msgs[0][1].get("exception_message", "ComfyUI error") if msgs else "ComfyUI error")
+            if hist and hist.get("outputs"):
+                return hist
+            time.sleep(1)
+
+    def flux_picture(self, p: dict) -> tuple[bytes, dict]:
+        if not self.flux_ready:
+            if self.comfy is None or self.state is None:
+                raise RuntimeError("FLUX.2 klein is not set up on this worker")
+            fetch_files(self.comfy, self.state, FLUX_FILES, "flux2-klein")
+            self.flux_ready = True
+        self._free_zimage()  # ComfyUI keeps FLUX cached between pictures; only Z-Image's diffusers copy must go
+        hist = self._run_graph(flux_graph(p, f"pic/{uuid.uuid4().hex[:12]}"))
+        im = hist["outputs"]["13"]["images"][0]
+        f = ROOT / "comfy" / "out" / im.get("subfolder", "") / im["filename"]
+        data = f.read_bytes()
+        f.unlink(missing_ok=True)
+        return data, {"seed": int(p.get("seed") or 0), "model": "flux2-klein"}
 
     def picture(self, p: dict) -> tuple[bytes, dict]:
         import torch
@@ -710,8 +767,9 @@ class Gpu:
             end_name = f"{jid}-end.png"
             Image.open(io.BytesIO(base64.b64decode(c["endImage"]))).convert("RGB") \
                 .resize((c["width"], c["height"]), Image.LANCZOS).save(ROOT / "comfy" / "in" / end_name)
-        hist = run_prompt(clip_graph(c, name, f"clip/{jid}", end_name))
-        frames = frames_of(hist, "16")
+        hist = self._run_graph(clip_graph(c, name, f"clip/{jid}", end_name))
+        images = hist["outputs"]["16"]["images"]
+        frames = [ROOT / "comfy" / "out" / im.get("subfolder", "") / im["filename"] for im in images]
         fps = int(c.get("fps", 16))
         data = encode_frames(frames, fps)
         (ROOT / "comfy" / "in" / name).unlink(missing_ok=True)
@@ -734,7 +792,7 @@ class Gpu:
             (ROOT / "comfy" / "in" / prev).write_bytes(base64.b64decode(c["prevLatent"]))
         start = int(c.get("startBeat", 1))
         prefix = f"scene/{jid}"
-        hist = run_prompt(scene_graph(c, name, prefix, prev))
+        hist = self._run_graph(scene_graph(c, name, prefix, prev))
         fps = int(c.get("fps", 16))
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as z:
@@ -750,20 +808,6 @@ class Gpu:
             if f:
                 (ROOT / "comfy" / "in" / f).unlink(missing_ok=True)
         return buf.getvalue(), {"beats": len(c["beats"]), "startBeat": start, "fps": fps}
-
-
-def run_prompt(graph: dict) -> dict:
-    """Queue a graph on ComfyUI and wait for its history entry; a ComfyUI error is raised with its message."""
-    pid = http_json(f"http://127.0.0.1:{COMFY_PORT}/prompt", {"prompt": graph})["prompt_id"]
-    while True:
-        hist = http_json(f"http://127.0.0.1:{COMFY_PORT}/history/{pid}").get(pid)
-        status = (hist or {}).get("status", {})
-        if status.get("status_str") == "error":
-            msgs = [m for m in status.get("messages", []) if m and m[0] == "execution_error"]
-            raise RuntimeError(msgs[0][1].get("exception_message", "ComfyUI error") if msgs else "ComfyUI error")
-        if hist and hist.get("outputs") and status.get("completed", True):
-            return hist
-        time.sleep(1)
 
 
 def frames_of(hist: dict, node: str) -> list[Path]:
@@ -800,7 +844,7 @@ def boot(state: State) -> None:
         download(comfy, state)
         state.phase = "starting ComfyUI"
         proc = start_comfy(comfy)
-        gpu = Gpu(comfy, proc)
+        gpu = Gpu(comfy, state, proc)
         state.jobs = Jobs(gpu.run)
         threading.Thread(target=state.jobs.loop, daemon=True, name="gpu").start()
         state.phase, state.ready = "ready", True
@@ -819,6 +863,7 @@ def main(argv=None) -> int:
         clip_graph({"prompt": "test", "seed": 1, "width": 480, "height": 832, "frames": 81}, "x.png", "clip/x")
         scene_graph({"beats": [{"prompt": "a", "seed": 1}, {"prompt": "b", "seed": 2}], "width": 480, "height": 832},
                     "x.png", "scene/x")
+        flux_graph({"prompt": "test", "seed": 1, "width": 768, "height": 1344}, "pic/x")
         print("dry run OK")
         return 0
     state = State()
