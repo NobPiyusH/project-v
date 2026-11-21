@@ -118,6 +118,37 @@ public class E2eProvider implements GpuProvider {
         return com.projectv.gpu.PodSelfStop.wrapExit(jobArgv, maxRuntimeMinutes, idleMinutes, createdAt);
     }
 
+    /** Local checks on the real create body (start-script sizes, env characters) plus the read-only plan list (plan/image pairing). */
+    @Override
+    public Preflight preflight(GpuSpec spec, CreateRequest probe) {
+        if (!configured()) {
+            return new Preflight(false, List.of("not configured (E2E_API_KEY / E2E_AUTH_TOKEN missing)"));
+        }
+        List<String> checks = new ArrayList<>();
+        boolean ok = true;
+        try {
+            List<String> scripts = startScripts(probe);
+            int longest = scripts.stream().mapToInt(String::length).max().orElse(0);
+            checks.add("start scripts: " + scripts.size() + " piece(s), longest " + longest + " chars (limit used here " + SCRIPT_BYTES + ")");
+            if (longest > SCRIPT_BYTES) {
+                ok = false;
+                checks.add("FAIL: a start script is longer than " + SCRIPT_BYTES);
+            }
+        } catch (RuntimeException e) {
+            ok = false;
+            checks.add("FAIL: start script cannot be built: " + e.getMessage());
+        }
+        List<Quote> plans = quotes(spec);
+        if (plans.isEmpty()) {
+            ok = false;
+            checks.add("FAIL: no allowed plan with image '" + cfg.image() + "' in the live plan list: " + lastWhy);
+        } else {
+            checks.add("plan/image pairing: " + plans.size() + " plan(s) offered with image '" + cfg.image() + "', cheapest $"
+                    + "%.2f/h".formatted(plans.getFirst().hourlyUsd()));
+        }
+        return new Preflight(ok, checks);
+    }
+
     // ------------------------------------------------------------------------------------------------ quote
 
     @Override

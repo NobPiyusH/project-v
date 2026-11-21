@@ -321,6 +321,46 @@ public class DreamGpu {
         return BigDecimal.valueOf(hourly * seconds / 3600.0 * pricing.fx()).setScale(2, RoundingMode.HALF_UP);
     }
 
+    /** Each provider's state (configured / preflight / proven) for the GPU API. */
+    public java.util.List<java.util.Map<String, Object>> providerStatuses() {
+        return broker.providerStatuses();
+    }
+
+    /** Free pre-check with the real worker payload; never rents. */
+    public GpuProvider.Preflight preflight(String provider) {
+        return broker.preflight(provider, image, PodBoot.command(),
+                PodBoot.env(worker(), port, "/workspace/data", volumeId == null ? null : VOLUME_MOUNT), volumeId);
+    }
+
+    /** The owner-approved canary: one tiny rental of the provider's cheapest GPU that must pass the worker's /health, then ends. */
+    public java.util.Map<String, Object> canary(String provider) {
+        return broker.canary(provider, image, PodBoot.command(),
+                PodBoot.env(worker(), port, "/workspace/data", volumeId == null ? null : VOLUME_MOUNT), volumeId,
+                DreamGpu::workerHealth, 20 * 60, 10_000);
+    }
+
+    /** null = the worker answered /health ready; else why not. The address carries the token as http://worker:TOKEN@host:port. */
+    static String workerHealth(String endpoint) {
+        try {
+            java.net.URI u = java.net.URI.create(endpoint);
+            String token = u.getUserInfo() == null ? null : u.getUserInfo().replaceFirst("^[^:]*:", "");
+            java.net.URI clean = new java.net.URI(u.getScheme(), null, u.getHost(), u.getPort(), "/health", null, null);
+            java.net.http.HttpRequest.Builder rb = java.net.http.HttpRequest.newBuilder(clean).timeout(java.time.Duration.ofSeconds(10));
+            if (token != null && !token.isBlank()) {
+                rb.header("Authorization", "Bearer " + token);
+            }
+            java.net.http.HttpResponse<String> r = java.net.http.HttpClient.newHttpClient()
+                    .send(rb.build(), java.net.http.HttpResponse.BodyHandlers.ofString());
+            return r.statusCode() == 200 && r.body().replace(" ", "").contains("\"ready\":true")
+                    ? null : "HTTP " + r.statusCode() + " " + r.body().substring(0, Math.min(120, r.body().length()));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return "interrupted";
+        } catch (java.io.IOException | java.net.URISyntaxException | RuntimeException e) {
+            return e.getClass().getSimpleName();
+        }
+    }
+
     private byte[] worker() {
         // The backend runs from the repo root (scripts\start.ps1) but tests run from control-plane/: try the configured
         // path, then the same file relative to either folder, so the default works in both.
