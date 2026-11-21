@@ -50,6 +50,14 @@ each with a TODO naming what it needs (key, API shape).
 `VAST_SESSION_KEY` (`projectv.vast.session-key`) or, if empty, that file on every call (a fresh login works without a restart). The session key's
 lifetime is not documented. When Vast answers 401/403 on an account call, the GPU card shows "Vast 2FA session expired: run `vastai tfa login
 --method-type totp -c <code>`", the broker rents nothing, and the watchdog logs it once per distinct failure and destroys nothing.
+**Hands-free login (CEO decision 22 Nov 2026).** Set `VAST_TOTP_SECRET` (the base32 seed of the Vast authenticator) in `.env`. The adapter then logs in itself:
+`POST /api/v0/tfa/` with the normal key as Bearer and `{"tfa_method":"totp","code":"<6 digits>"}` returns `session_key` (RFC 6238 in `Totp.java`, plain Java).
+The session key lives in memory only. Login is lazy (first account call), repeated once per call on a 401/403, never more often than every 5 s. A rejected
+code is retried once in the next 30 s window; after two rejections login pauses 10 min and the card says why (failed 2FA attempts can lock the account).
+Seed, codes and session keys are never logged. Without the seed: `VAST_SESSION_KEY` or the CLI file, as above.
+**Security trade-off:** with the seed in `.env`, both factors (API key and TOTP) sit on the owner's laptop. Anyone who gets `.env` can log in to Vast, rent
+instances up to the prepaid balance, and destroy or read the studio's instances (their prompts and outputs); they cannot withdraw money or change the card
+unless the Vast account allows it with only that session (keep the prepaid balance small, $5). Keep `.env` out of backups and cloud sync.
 **Endpoints:** instance list and show use `GET /api/v1/instances/` (keyset paged, 25 per page; show = `select_filters={"id":{"eq":N}}`, since v1 has no
 by-id route). The v0 list answers 410 (deprecated). Create (`PUT /api/v0/asks/{id}/`) and destroy (`DELETE /api/v0/instances/{id}/`) are still v0 in the docs
 and answer with proper v0 error bodies live (checked read-only with invalid ids, 22 Nov); there is no v1 create/destroy.

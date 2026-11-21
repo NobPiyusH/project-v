@@ -54,6 +54,17 @@ public class VastProvider implements GpuProvider {
     private final String apiKey;
     /** Vast accounts with 2FA need a 2FA session key for instance and account calls (the normal key only works for offer search). */
     private final java.util.function.Supplier<String> sessionKey;
+    /** Base32 TOTP seed (VAST_TOTP_SECRET). With it the adapter logs in to Vast's 2FA itself; never logged, never sent anywhere but as a code. */
+    private final String totpSecret;
+    /** Session key from our own TOTP login. Memory only, never written to disk or logged. */
+    private volatile String autoSession = "";
+    private volatile long lastLoginAtMillis;
+    /** After a rejected code (twice) automatic login pauses until then, so a wrong seed cannot lock the account by looping. */
+    private volatile long loginBlockedUntilMillis;
+    /** Package-private for tests: gap between two logins, wait before the one retry after a rejected code, pause after a double rejection. */
+    volatile long minLoginGapMillis = 5_000;
+    volatile java.util.function.LongSupplier retryWaitMillis = () -> Totp.millisToNextWindow(System.currentTimeMillis()) + 500;
+    volatile long blockMillis = 10 * 60_000L;
     private final RestClient http;
     private final long pollMillis;
     /** First time each instance was seen (or created here): the fallback when Vast reports no start date. */
@@ -68,12 +79,19 @@ public class VastProvider implements GpuProvider {
     @Autowired
     public VastProvider(VastConfig cfg, @Value("${projectv.vast.base-url:https://console.vast.ai/api/v0}") String baseUrl,
                         @Value("${projectv.vast.api-key:}") String apiKey,
-                        @Value("${projectv.vast.session-key:}") String sessionKey) {
+                        @Value("${projectv.vast.session-key:}") String sessionKey,
+                        @Value("${projectv.vast.totp-secret:}") String totpSecret) {
         this(cfg, baseUrl, apiKey, sessionKeySource(sessionKey, Path.of(System.getProperty("user.home"), ".config", "vastai", "vast_tfa_key")),
-                client(), cfg.pollSeconds() * 1000L);
+                totpSecret, client(), cfg.pollSeconds() * 1000L);
     }
 
     VastProvider(VastConfig cfg, String baseUrl, String apiKey, java.util.function.Supplier<String> sessionKey, RestClient http, long pollMillis) {
+        this(cfg, baseUrl, apiKey, sessionKey, "", http, pollMillis);
+    }
+
+    VastProvider(VastConfig cfg, String baseUrl, String apiKey, java.util.function.Supplier<String> sessionKey, String totpSecret,
+                 RestClient http, long pollMillis) {
+        this.totpSecret = totpSecret == null ? "" : totpSecret.strip();
         this.sessionKey = sessionKey;
         this.cfg = cfg;
         this.baseUrl = baseUrl.replaceAll("/+$", "");
@@ -125,10 +143,75 @@ public class VastProvider implements GpuProvider {
         return apiKey.isEmpty() ? sessionKey.get() : apiKey;
     }
 
-    /** Key for instance and account calls: the 2FA session key; the normal key only when no session key exists (accounts without 2FA). */
+    /**
+     * Key for instance and account calls: our own TOTP session when {@code VAST_TOTP_SECRET} is set (logged in lazily here), else
+     * the 2FA session key from the setting or the CLI file, else the normal key (accounts without 2FA).
+     */
     private String accountKey() {
+        if (!totpSecret.isEmpty()) {
+            String k = autoSession;
+            return k.isEmpty() ? login(false) : k;
+        }
         String k = sessionKey.get();
         return k.isEmpty() ? apiKey : k;
+    }
+
+    /**
+     * {@code POST /api/v0/tfa/} with the normal key as Bearer and {@code {"tfa_method":"totp","code":"123456"}}; the reply has
+     * {@code session_key}. At most two attempts: a rejected code is retried once in the next 30 s window, then login pauses
+     * ({@link #blockMillis}) and the card says why: repeated failed 2FA attempts can lock the account. Nothing secret is logged.
+     */
+    private synchronized String login(boolean force) {
+        if (!force && !autoSession.isEmpty()) {
+            return autoSession; // another thread logged in while this one waited for the lock
+        }
+        long now = System.currentTimeMillis();
+        if (now < loginBlockedUntilMillis) {
+            throw new VastSessionExpired("Vast 2FA login paused after the code was rejected twice (check VAST_TOTP_SECRET and the laptop clock); "
+                    + "not retrying for " + (loginBlockedUntilMillis - now) / 1000 + " s to avoid locking the account. Or run `vastai tfa login --method-type totp -c <code>`");
+        }
+        long gap = minLoginGapMillis - (now - lastLoginAtMillis);
+        if (gap > 0) {
+            sleep(gap);
+        }
+        String why = null;
+        for (int attempt = 0; attempt < 2; attempt++) {
+            if (attempt > 0) {
+                sleep(retryWaitMillis.getAsLong()); // the next window gives a different code
+            }
+            lastLoginAtMillis = System.currentTimeMillis();
+            String code = Totp.code(totpSecret, lastLoginAtMillis / 1000, 6);
+            try {
+                Map<?, ?> r = http.post().uri(baseUrl + "/tfa/").contentType(MediaType.APPLICATION_JSON)
+                        .header("Authorization", "Bearer " + apiKey).body(Map.of("tfa_method", "totp", "code", code))
+                        .retrieve().body(Map.class);
+                if (r != null && r.get("session_key") instanceof String sk && !sk.isBlank()) {
+                    autoSession = sk.strip();
+                    loginBlockedUntilMillis = 0;
+                    log.info("Vast: logged in to 2FA with the TOTP seed");
+                    return autoSession;
+                }
+                why = "login answered without a session_key";
+            } catch (HttpClientErrorException e) {
+                why = "HTTP " + e.getStatusCode().value();
+            } catch (RuntimeException e) {
+                why = e.getClass().getSimpleName(); // network trouble: not a rejected code, but do not hammer either
+                break;
+            }
+        }
+        loginBlockedUntilMillis = System.currentTimeMillis() + blockMillis;
+        log.warn("Vast: 2FA login failed ({}); automatic login paused for {} s", why, blockMillis / 1000);
+        throw new VastSessionExpired("Vast 2FA login failed (" + why + "): the TOTP code was rejected twice. Check VAST_TOTP_SECRET and the laptop clock; "
+                + "automatic login is paused " + blockMillis / 60_000 + " min to avoid locking the account. Or run `vastai tfa login --method-type totp -c <code>`");
+    }
+
+    private static void sleep(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("interrupted while logging in to Vast");
+        }
     }
 
     @Override
@@ -547,12 +630,28 @@ public class VastProvider implements GpuProvider {
     private <T> T call(boolean account, java.util.function.Supplier<T> c) {
         try {
             return c.get();
-        } catch (HttpClientErrorException.Unauthorized | HttpClientErrorException.Forbidden e) {
-            if (account) {
-                throw new VastSessionExpired(SESSION_HELP + " (HTTP " + e.getStatusCode().value() + ": " + abbreviate(e.getResponseBodyAsString()) + ")");
+        } catch (HttpClientErrorException.Unauthorized | HttpClientErrorException.Forbidden first) {
+            if (!account) {
+                throw new IllegalStateException("Vast.ai refused the key (HTTP " + first.getStatusCode().value() + "): "
+                        + abbreviate(first.getResponseBodyAsString()) + " (check the key on cloud.vast.ai/manage-keys)");
             }
-            throw new IllegalStateException("Vast.ai refused the key (HTTP " + e.getStatusCode().value() + "): "
-                    + abbreviate(e.getResponseBodyAsString()) + " (check the key on cloud.vast.ai/manage-keys)");
+            HttpClientErrorException refused = first;
+            if (!totpSecret.isEmpty() && !autoSession.isEmpty()) {
+                // the session expired: log in again (at most once per call) and retry this call once
+                String stale = autoSession;
+                synchronized (this) {
+                    if (stale.equals(autoSession)) {
+                        autoSession = "";
+                    }
+                }
+                login(false);
+                try {
+                    return c.get();
+                } catch (HttpClientErrorException.Unauthorized | HttpClientErrorException.Forbidden again) {
+                    refused = again;
+                }
+            }
+            throw new VastSessionExpired(SESSION_HELP + " (HTTP " + refused.getStatusCode().value() + ": " + abbreviate(refused.getResponseBodyAsString()) + ")");
         }
     }
 

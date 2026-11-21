@@ -48,6 +48,13 @@ class VastProviderTest {
     volatile String instancesList = "{\"success\":true,\"instances\":[],\"next_token\":null}";
     volatile String instancesPage2 = "{\"success\":true,\"instances\":[],\"next_token\":null}";
     final AtomicInteger nextId = new AtomicInteger(777);
+    /** the 2FA login endpoint: status, the session key it hands out, and every request body it saw. */
+    volatile int tfaStatus = 200;
+    volatile String tfaIssues = "sess-1";
+    final List<String> tfaBodies = new CopyOnWriteArrayList<>();
+    final List<String> tfaAuth = new CopyOnWriteArrayList<>();
+    /** when set, instance calls need this exact session key (else 401 like a 2FA account). */
+    volatile String validSession = null;
 
     @BeforeEach
     void start() throws IOException {
@@ -68,6 +75,13 @@ class VastProviderTest {
             createdAsks.add(ask);
             send(ex, 200, "{\"success\":true,\"new_contract\":" + nextId.getAndIncrement() + "}");
         });
+        server.createContext("/api/v0/tfa/", ex -> {
+            record(ex);
+            tfaBodies.add(new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            tfaAuth.add(String.valueOf(ex.getRequestHeaders().getFirst("Authorization")));
+            send(ex, tfaStatus, tfaStatus == 200 ? "{\"id\":1,\"tfa_status\":\"enabled\",\"session_key\":\"" + tfaIssues + "\"}"
+                    : "{\"success\":false,\"msg\":\"invalid code\"}");
+        });
         // destroy stays v0 (v1 has no by-id route)
         server.createContext("/api/v0/instances/", ex -> {
             record(ex);
@@ -87,6 +101,10 @@ class VastProviderTest {
         server.createContext("/api/v1/instances/", ex -> {
             record(ex);
             String q = String.valueOf(ex.getRequestURI().getQuery());
+            if (validSession != null && !("Bearer " + validSession).equals(ex.getRequestHeaders().getFirst("Authorization"))) {
+                send(ex, 401, "{\"success\":false,\"msg\":\"requires Two Factor Authentication\"}");
+                return;
+            }
             if (listStatus != 200) {
                 send(ex, listStatus, "{\"success\":false,\"msg\":\"requires Two Factor Authentication\"}");
                 return;
@@ -435,5 +453,95 @@ class VastProviderTest {
         assertTrue(argv.get(2).contains("kill -TERM"));
         List<String> all = new ArrayList<>(argv);
         assertTrue(all.contains("w.py"));
+    }
+
+    // ---------------------------------------------------------------------------------------------- hands-free TOTP login
+
+    VastProvider totpProvider() {
+        String url = "http://127.0.0.1:" + server.getAddress().getPort() + "/api/v0";
+        VastProvider p = new VastProvider(cfg(2, 2), url, KEY, () -> "", TotpTest.SEED, RestClient.builder().build(), 5);
+        p.minLoginGapMillis = 0;
+        p.retryWaitMillis = () -> 10;
+        p.blockMillis = 60_000;
+        return p;
+    }
+
+    static String codeNow(long offsetSeconds) {
+        return Totp.code(TotpTest.SEED, System.currentTimeMillis() / 1000 + offsetSeconds, 6);
+    }
+
+    @Test
+    void logsInLazilyOnceWithTheNormalKeyAndUsesTheSessionKeyAfterwards() {
+        validSession = "sess-1";
+        VastProvider p = totpProvider();
+        offers = "[" + offer(1, "RTX 4090", 0.41, 0.98, 0.001) + "]";
+        p.quotes(SPEC);
+        assertEquals(0, tfaBodies.size(), "offer search needs no login");
+        assertEquals(1, p.listPods().size() + 1);
+        p.listPods();
+        assertEquals(1, tfaBodies.size(), "one login, then the session is reused");
+        assertEquals("Bearer " + KEY, tfaAuth.getFirst(), "login carries the normal API key");
+        String body = tfaBodies.getFirst();
+        assertTrue(body.contains("\"tfa_method\":\"totp\""), body);
+        assertTrue(body.contains("\"code\":\"" + codeNow(0) + "\"") || body.contains("\"code\":\"" + codeNow(-1) + "\"")
+                || body.contains("\"code\":\"" + codeNow(1) + "\""), "a 6-digit TOTP code for the current window");
+        assertFalse(body.contains(TotpTest.SEED), "the seed itself is never sent");
+        assertTrue(authHeaders.stream().filter(h -> !h.equals("Bearer " + KEY)).allMatch(h -> h.equals("Bearer sess-1")));
+    }
+
+    @Test
+    void expiredSessionIsRefreshedOnceAndTheCallRetried() {
+        validSession = "sess-1";
+        VastProvider p = totpProvider();
+        p.listPods();
+        validSession = "sess-2";      // Vast expired the first session
+        tfaIssues = "sess-2";
+        p.listPods();
+        assertEquals(2, tfaBodies.size(), "exactly one more login");
+        validSession = "sess-3";      // expired again and the login hands out a key that still fails: no loop
+        int before = tfaBodies.size();
+        assertThrows(VastProvider.VastSessionExpired.class, p::listPods);
+        assertTrue(tfaBodies.size() - before <= 1, "at most one login per call");
+    }
+
+    @Test
+    void rejectedCodeIsRetriedOnceInTheNextWindowThenLoginPausesWithAClearReason() {
+        tfaStatus = 401;
+        VastProvider p = totpProvider();
+        VastProvider.VastSessionExpired e = assertThrows(VastProvider.VastSessionExpired.class, p::listPods);
+        assertEquals(2, tfaBodies.size(), "the first try and one retry, never more");
+        assertTrue(e.getMessage().contains("rejected twice") && e.getMessage().contains("VAST_TOTP_SECRET"), e.getMessage());
+        VastProvider.VastSessionExpired again = assertThrows(VastProvider.VastSessionExpired.class, p::listPods);
+        assertEquals(2, tfaBodies.size(), "paused: no further login attempts while blocked");
+        assertTrue(again.getMessage().contains("paused"), again.getMessage());
+        assertFalse(e.getMessage().contains(TotpTest.SEED) || again.getMessage().contains(TotpTest.SEED));
+    }
+
+    @Test
+    void noSeedMeansNoLoginAttemptAndTheOldFallbackStillWorks() {
+        VastProvider p = provider(); // session key from the supplier, no seed
+        p.listPods();
+        assertEquals(0, tfaBodies.size());
+    }
+
+    @Test
+    void neitherTheSeedNorCodesNorSessionKeysAreLogged() {
+        ch.qos.logback.classic.Logger lg = (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(VastProvider.class);
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> app = new ch.qos.logback.core.read.ListAppender<>();
+        app.start();
+        lg.addAppender(app);
+        try {
+            validSession = "sess-1";
+            totpProvider().listPods();
+            tfaStatus = 401;
+            assertThrows(VastProvider.VastSessionExpired.class, () -> totpProvider().listPods());
+            assertFalse(app.list.isEmpty(), "the login and the failure are logged");
+            String all = app.list.stream().map(ch.qos.logback.classic.spi.ILoggingEvent::getFormattedMessage).reduce("", (a, b) -> a + "\n" + b);
+            for (String secret : List.of(TotpTest.SEED, "sess-1", KEY, SESSION, codeNow(-1), codeNow(0), codeNow(1))) {
+                assertFalse(all.contains(secret), "must not log: " + secret.substring(0, 3) + "...");
+            }
+        } finally {
+            lg.detachAppender(app);
+        }
     }
 }
