@@ -24,15 +24,6 @@ def scene_frames(beats: int) -> int:
     return BEAT_FRAMES + max(0, beats - 1) * NEW if beats > 0 else 0
 
 
-def beats_for(seconds: float, fps: int = 16) -> int:
-    """Beats needed for a scene of `seconds` (10 s: 3, 15 s: 4, 20 s: 5)."""
-    want = int(round(seconds * fps)) + 1
-    n = 1
-    while scene_frames(n) < want:
-        n += 1
-    return n
-
-
 def join_graph(beats: int, frames: int | None = None) -> str:
     """filter_complex joining inputs 0..beats-1 (one per beat) into [o]: linear 12-frame cross-fades at the joins,
     anchor frames dropped, cut to `frames` (None = keep every frame)."""

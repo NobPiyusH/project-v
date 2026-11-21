@@ -3,16 +3,12 @@
 Up to 3 lines of white outlined text with ONE emphasised word (larger, red by default), centred in the upper-middle
 third with safe margins for the phone UI, fading in and out. Drawn with libass (an .ass file), like the captions.
 The text is plain: ``THE CITY *FORGOT* HOW TO STAND`` (the word between asterisks is the emphasised one).
-Pure helpers (parse_hook, hook_lines, hook_ass) are unit-tested; apply_hook runs FFmpeg on a clip.
+Pure helpers (parse_hook, hook_lines, hook_ass) are unit-tested. dream/finish.py burns the .ass files in with filter_for.
 """
 
 from __future__ import annotations
 
 import re
-import subprocess
-from pathlib import Path
-
-from workers.common import ffmpeg_bin
 
 HOOK_SECONDS = 1.8
 FADE_IN_MS, FADE_OUT_MS = 250, 350
@@ -101,20 +97,6 @@ def filter_for(ass_name: str) -> str:
     """The FFmpeg filter that burns the .ass in. `ass_name` is a bare file name: FFmpeg runs in the file's folder, so no
     Windows drive letter ever reaches a filter option."""
     return rf"subtitles=filename='{ass_name}':fontsdir='C\:/Windows/Fonts'"
-
-
-def apply_hook(src: Path, dst: Path, text: str, width: int, height: int, color: str | None = None) -> bool:
-    """Burn the hook title into the first seconds of `src` -> `dst` (no sound change). False when there is no text."""
-    ass = hook_ass(text, width, height, color)
-    if ass is None:
-        return False
-    (dst.parent / "hook.ass").write_text(ass, encoding="utf-8")
-    proc = subprocess.run([ffmpeg_bin(), "-hide_banner", "-y", "-i", str(src), "-vf", filter_for("hook.ass"), "-c:v", "libx264",
-                           "-preset", "slow", "-crf", "17", "-pix_fmt", "yuv420p", "-c:a", "copy", str(dst)],
-                          cwd=dst.parent, capture_output=True, text=True, check=False)
-    if proc.returncode != 0:
-        raise RuntimeError("hook title failed: " + proc.stderr[-1500:])
-    return True
 
 
 # ---------------------------------------------------------------------------------------------- "Choose the path" end card

@@ -3,7 +3,6 @@
 import subprocess
 from pathlib import Path
 
-import pytest
 
 from workers.common import ffmpeg_bin, run_ffmpeg
 from workers.dream import finish as dream
@@ -70,14 +69,26 @@ def _frame_peak(path: Path, at: float) -> float:
     return float(out.split("YMAX=")[1].split()[0])
 
 
+
+def _burn_hook(src: Path, dst: Path, text: str, width: int, height: int) -> bool:
+    """What dream/finish.py does for the hook alone: write the .ass and burn it in with filter_for."""
+    ass = hook.hook_ass(text, width, height)
+    if ass is None:
+        return False
+    (dst.parent / "hook.ass").write_text(ass, encoding="utf-8")
+    run_ffmpeg(["-i", str(src), "-vf", hook.filter_for("hook.ass"), "-c:v", "libx264", "-crf", "17",
+                "-pix_fmt", "yuv420p", str(dst)], cwd=dst.parent)
+    return True
+
+
 def test_overlay_is_burned_into_the_first_seconds_only(tmp_path):
     src, dst = tmp_path / "src.mp4", tmp_path / "out.mp4"
     _clip(src)
-    assert hook.apply_hook(src, dst, "the city *forgot* how to stand", 270, 480) is True
+    assert _burn_hook(src, dst, "the city *forgot* how to stand", 270, 480) is True
     plain = _frame_peak(src, 0.9)
     assert _frame_peak(dst, 0.9) > plain + 100   # white text on a dark clip: the brightest pixel jumps while the title shows
     assert abs(_frame_peak(dst, 2.5) - _frame_peak(src, 2.5)) < 5   # gone after ~1.8 s
-    assert hook.apply_hook(src, tmp_path / "none.mp4", "  ", 270, 480) is False
+    assert _burn_hook(src, tmp_path / "none.mp4", "  ", 270, 480) is False
 
 
 def test_finish_burns_the_hook_only_when_asked(tmp_path, monkeypatch):

@@ -224,8 +224,7 @@ def test_stop_between_scenes(worker, monkeypatch):
 
 # ------------------------------------------------------------------------------------------- laptop assembly
 
-def test_beats_for_scene_lengths():
-    assert [SC.beats_for(s) for s in (10, 15, 20)] == [3, 4, 5]
+def test_scene_frames():
     assert SC.scene_frames(5) == 353 and SC.scene_frames(4) == 285 and SC.scene_frames(1) == 81
 
 

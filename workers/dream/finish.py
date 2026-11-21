@@ -282,7 +282,7 @@ def finish(req: dict, tmp: Path) -> dict:
         smoothed.append(dst)
         _beat({"smoothed": k + 1, "total": len(order)})
     durations = [media_duration(p) for p in smoothed]
-    synced, climax_at = 0, None
+    synced = 0
     if track:  # cut on the music: bar lines first, then beats; the climax cut nearest the music's rise
         beats = mm["beats"] if mm else track_beats(track, total_duration(durations, dissolve) + 2)
         prefer = {climax_slot - 1: mm["rise"]} if climax_slot and mm and mm["rise"] is not None else None
