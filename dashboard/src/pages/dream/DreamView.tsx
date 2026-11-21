@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { assetUrl } from '../../api'
-import { DREAM_STEPS, dreamApi, type DreamMode, type DreamStep } from '../../dreamApi'
+import { STEP_LABEL, DREAM_STEPS, dreamApi, type DreamMode, type DreamStep } from '../../dreamApi'
 import { usePoll } from '../../hooks'
 import { Evidence } from './Evidence'
 import { GpuCard } from './GpuCard'
@@ -13,7 +13,7 @@ import { ShotReview } from './ShotReview'
 import { ShotsGrid } from './ShotsGrid'
 import { StepTimeline } from './StepTimeline'
 import { DreamStatusBadge } from './DreamStatusBadge'
-import { EDIT_COLUMN, EDIT_SWITCHES, STEP_LABEL, errorText } from './shared'
+import { EDIT_COLUMN, EDIT_SWITCHES, errorText } from './shared'
 
 /** One Dream Short: step modes, the owner's actions for the current step, and every card below. */
 export function DreamView({ id }: { id: string }) {

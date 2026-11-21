@@ -1,5 +1,3 @@
-import type { DreamStep } from '../../dreamApi'
-
 export type EditKey = 'musicEdit' | 'ambience' | 'pacing'
 export const EDIT_SWITCHES: [EditKey, string][] = [
   ['musicEdit', 'Cut to the music (bars, rise, energy)'],
@@ -9,7 +7,6 @@ export const EDIT_SWITCHES: [EditKey, string][] = [
 export const EDIT_COLUMN: Record<EditKey, 'edit_music' | 'edit_ambience' | 'edit_pacing'> = {
   musicEdit: 'edit_music', ambience: 'edit_ambience', pacing: 'edit_pacing',
 }
-export const STEP_LABEL: Record<DreamStep, string> = { SCOUT: 'Scout', WRITE: 'Write', PICTURES: 'Pictures', CLIPS: 'Clips', MUSIC: 'Music', FINISH: 'Finish' }
 
 export const HOOK_COLOURS = ['red', 'yellow', 'orange', 'pink', 'cyan']
 

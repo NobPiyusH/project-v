@@ -1,7 +1,6 @@
 import { assetUrl } from '../../api'
-import { dreamApi, type DreamStep, type DreamSummary } from '../../dreamApi'
+import { STEP_LABEL, dreamApi, type DreamStep, type DreamSummary } from '../../dreamApi'
 import { DreamStatusBadge } from './DreamStatusBadge'
-import { STEP_LABEL } from './shared'
 
 /** The owner's Dream Shorts, newest first; a Short waiting on its clip cost can be approved from the row. */
 export function DreamList({ shorts, error, refresh }: { shorts: DreamSummary[] | null; error: string | null; refresh: () => void }) {

@@ -1,55 +1,13 @@
 import { useEffect, useState } from 'react'
 import { assetUrl } from '../api'
-import { DREAM_STEPS, type DreamStep } from '../dreamApi'
+import { autopilotApi, type Privacy, type Run, type Settings, type Status } from '../autopilotApi'
+import { DREAM_STEPS, STEP_LABEL, type DreamMode } from '../dreamApi'
 import { usePoll } from '../hooks'
 
 // Daily autopilot: settings, idea list, and each day's Short. A finished Short waits here until you tap Post.
 
-type StepMode = 'AUTO' | 'REVIEW' | 'MANUAL' | 'PRODUCER'
-type Privacy = 'private' | 'unlisted' | 'public'
-
-interface Settings {
-  enabled: boolean; startTime: string; startMode: 'AUTO' | 'REVIEW' | 'MANUAL'; reviewMinutes: number; dailyCapInr: number
-  stepModes: Record<DreamStep, StepMode>; look: string | null; shots: number; useScout: boolean; privacy: Privacy
-}
-interface Status { enabled: boolean; zone: string; now: string; waitingOn: string[]; ideasLeft: number; youtubeConnected: boolean }
-interface Idea { id: string; idea: string; look: string | null; source: 'owner' | 'scout'; used_at: string | null }
-interface Run {
-  id: string; run_date: string; status: string; message: string | null; idea: string | null; dream_short_id: string | null
-  title: string | null; description: string | null; hashtags: string | null; privacy: Privacy | null; youtube_id: string | null
-  final_asset_id: string | null; spent_inr: number; starts_at: string | null
-}
-
-async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const res = await fetch(`/api/autopilot${path}`, {
-    method, headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  })
-  if (!res.ok) {
-    const text = await res.text()
-    throw new Error(`${res.status} ${res.statusText}${text ? `: ${text}` : ''}`)
-  }
-  const text = await res.text()
-  return (text ? JSON.parse(text) : undefined) as T
-}
-
-export const autopilotApi = {
-  status: () => call<Status>('GET', ''),
-  settings: () => call<Settings>('GET', '/settings'),
-  save: (s: Settings) => call<Settings>('PUT', '/settings', s),
-  ideas: () => call<Idea[]>('GET', '/ideas'),
-  addIdea: (idea: string, look: string | null) => call<{ id: string }>('POST', '/ideas', { idea, look }),
-  deleteIdea: (id: string) => call<void>('DELETE', `/ideas/${id}`),
-  runs: () => call<Run[]>('GET', '/runs'),
-  start: (id: string) => call<void>('POST', `/runs/${id}/start`),
-  post: (id: string, b: { title: string; description: string; hashtags: string; privacy: Privacy }) => call<void>('POST', `/runs/${id}/post`, b),
-  dismiss: (id: string) => call<void>('POST', `/runs/${id}/dismiss`),
-  retryKit: (id: string) => call<void>('POST', `/runs/${id}/retry-kit`),
-}
-
 const LOOKS: [string, string][] = [['lonely', 'Lonely object'], ['drive', 'Drive-by'], ['walkthrough', 'Walk-through'],
   ['dreamcore', 'Dreamcore'], ['impossible', 'Impossible place']]
-const STEP_LABEL: Record<DreamStep, string> = { SCOUT: 'Scout', WRITE: 'Write', PICTURES: 'Pictures', CLIPS: 'Clips', MUSIC: 'Music', FINISH: 'Finish' }
 const RUN_TEXT: Record<string, [string, string]> = {
   WAITING_START: ['Waiting to start', 'b-warn'], RUNNING: ['Making it', 'b-info'], NEEDS_YOU: ['Needs you', 'b-warn'],
   FAILED: ['Failed', 'b-bad'], READY: ['Ready to post', 'b-ok'], POSTING: ['Uploading', 'b-info'], POSTED: ['Posted', 'b-ok'],
@@ -178,7 +136,7 @@ function SettingsCard({ status, onSaved }: { status: Status | undefined; onSaved
       <div className="row" style={{ marginTop: 10 }}>
         {DREAM_STEPS.map((step) => (
           <span key={step} className="pill">{STEP_LABEL[step]}{' '}
-            <select value={s.stepModes[step] ?? 'PRODUCER'} onChange={(e) => save({ ...s, stepModes: { ...s.stepModes, [step]: e.target.value as StepMode } })}>
+            <select value={s.stepModes[step] ?? 'PRODUCER'} onChange={(e) => save({ ...s, stepModes: { ...s.stepModes, [step]: e.target.value as DreamMode } })}>
               <option value="PRODUCER">AI Producer</option><option value="AUTO">Auto</option><option value="REVIEW">Review</option><option value="MANUAL">Manual</option>
             </select></span>))}
         <span className="pill">Post <select value="MANUAL" disabled title="Uploading always waits for your tap"><option value="MANUAL">Manual (your tap)</option></select></span>

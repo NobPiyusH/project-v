@@ -1,5 +1,4 @@
-import type { DreamDetail } from '../../dreamApi'
-import { STEP_LABEL } from './shared'
+import { STEP_LABEL, type DreamDetail } from '../../dreamApi'
 
 const IST: Intl.DateTimeFormatOptions = { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', second: '2-digit' }
 const ist = (t: string | null) => (t ? new Date(t).toLocaleTimeString('en-IN', IST) : '–')

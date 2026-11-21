@@ -1,8 +1,10 @@
-// Client for the Dream Shorts API (/api/dream). Kept apart from api.ts so the main studio's client is untouched.
+// Client for the Dream Shorts API (/api/dream) and the GPU broker (/api/gpu, /api/dream/{id}/gpu).
+import { request } from './http'
 
 export type DreamMode = 'AUTO' | 'REVIEW' | 'MANUAL' | 'PRODUCER'
 export type DreamStep = 'SCOUT' | 'WRITE' | 'PICTURES' | 'CLIPS' | 'MUSIC' | 'FINISH'
 export const DREAM_STEPS: DreamStep[] = ['SCOUT', 'WRITE', 'PICTURES', 'CLIPS', 'MUSIC', 'FINISH']
+export const STEP_LABEL: Record<DreamStep, string> = { SCOUT: 'Scout', WRITE: 'Write', PICTURES: 'Pictures', CLIPS: 'Clips', MUSIC: 'Music', FINISH: 'Finish' }
 
 export interface DreamSummary {
   id: string; idea: string; title: string | null; look: string; status: string; step: string | null
@@ -62,19 +64,7 @@ export interface NewDream {
 export interface IdeaPackIdea { id: string; title: string; concept: string; hook: string; camera: string; palette: string }
 export interface IdeaPack { id: string; name: string; look: string; description: string; ideas: IdeaPackIdea[] }
 
-async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const res = await fetch(`/api/dream${path}`, {
-    method,
-    headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  })
-  if (!res.ok) {
-    const text = await res.text()
-    throw new Error(`${res.status} ${res.statusText}${text ? `: ${text}` : ''}`)
-  }
-  const text = await res.text()
-  return (text ? JSON.parse(text) : undefined) as T
-}
+const call = <T>(method: string, path: string, body?: unknown) => request<T>(method, `/api/dream${path}`, body)
 
 export interface GpuOption { provider: string; gpu: string | null; key: string | null; stock: string; hourlyUsd: number; available: boolean; why: string | null }
 export interface GpuPick {
@@ -84,15 +74,7 @@ export interface GpuPick {
   estimate?: { hours: number; usd: number; hourlyUsd: number } // this Short's expected rental (same hours as the daily-cap check)
 }
 
-async function gpuCall<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const res = await fetch(path, {
-    method,
-    headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  })
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}: ${await res.text()}`)
-  return (await res.json()) as T
-}
+const gpuCall = request
 
 /** Today's studio GPU spend (UTC day) against the daily cap: booked rentals + the pod that is on now. */
 export interface GpuToday { spentUsd: number; bookedUsd: number; runningUsd: number; capUsd: number }
