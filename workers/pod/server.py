@@ -606,10 +606,40 @@ def fetch_kjnodes(comfy: Path) -> None:
                        check=True)
 
 
-def fetch_files(comfy: Path, state: State, files: dict, volume_dir: str) -> None:
-    """Puts each (repo, path, subfolder, size) of `files` into ComfyUI's models folder, from the volume when cached."""
+DOWNLOAD_TRIES = 3
+
+
+def hf_download(repo: str, path: str, local_dir: str, tries: int = DOWNLOAD_TRIES, sleep=time.sleep) -> Path:
+    """hf_hub_download with retries (21 Nov 2026: one Hugging Face xet hiccup, "File reconstruction error ... receiver
+    dropped", failed a whole paid step). Short backoff between tries; the last try turns xet off (HF_HUB_DISABLE_XET=1)
+    for a plain-HTTP download. Logs which try worked."""
     from huggingface_hub import hf_hub_download
 
+    for attempt in range(1, tries + 1):
+        plain = attempt == tries and tries > 1
+        old = os.environ.get("HF_HUB_DISABLE_XET")
+        if plain:
+            os.environ["HF_HUB_DISABLE_XET"] = "1"
+        try:
+            local = Path(hf_hub_download(repo, path, local_dir=local_dir))
+            log(f"{path}: downloaded on try {attempt}/{tries}" + (" (plain HTTP, xet off)" if plain else ""))
+            return local
+        except Exception as e:  # noqa: BLE001 - network trouble: try again, the last time without xet
+            log(f"{path}: download try {attempt}/{tries} failed: {type(e).__name__}: {e}"[:400])
+            if attempt == tries:
+                raise
+            sleep(5 * attempt)
+        finally:
+            if plain:
+                if old is None:
+                    os.environ.pop("HF_HUB_DISABLE_XET", None)
+                else:
+                    os.environ["HF_HUB_DISABLE_XET"] = old
+    raise RuntimeError("unreachable")
+
+
+def fetch_files(comfy: Path, state: State, files: dict, volume_dir: str) -> None:
+    """Puts each (repo, path, subfolder, size) of `files` into ComfyUI's models folder, from the volume when cached."""
     weights = ROOT / "weights"
     for i, (name, (repo, path, sub, size)) in enumerate(files.items(), 1):
         t = time.time()
@@ -619,7 +649,7 @@ def fetch_files(comfy: Path, state: State, files: dict, volume_dir: str) -> None
             local, how = cached, "volume"
         else:
             state.phase = f"downloading {i}/{len(files)} {name}"
-            local = Path(hf_hub_download(repo, path, local_dir=str(weights)))
+            local = hf_download(repo, path, str(weights))
             if local.stat().st_size != size:
                 raise RuntimeError(f"{name}: size {local.stat().st_size} != expected {size}")
             how = "huggingface"

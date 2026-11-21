@@ -1,3 +1,4 @@
+import os
 """Pod worker + client: no GPU, no network beyond localhost."""
 
 import json
@@ -614,3 +615,38 @@ def test_worker_token_is_taken_out_of_the_environment():
             "print(m.WORKER_TOKEN, 'SV_TOKEN' in os.environ)")
     out = subprocess.run([sys.executable, "-c", code], env={**os.environ, "SV_TOKEN": "abc"}, capture_output=True, text=True)
     assert out.stdout.split() == ["abc", "False"], out.stderr
+
+
+def test_weight_downloads_retry_and_fall_back_to_plain_http(monkeypatch, tmp_path):
+    import sys
+    import types
+    seen = []
+
+    def hf_hub_download(repo, path, local_dir):
+        seen.append(os.environ.get("HF_HUB_DISABLE_XET"))
+        if len(seen) < 3:
+            raise RuntimeError("File reconstruction error: Internal Writer Error: Failed to send data: receiver dropped")
+        f = tmp_path / path
+        f.write_bytes(b"w")
+        return str(f)
+    monkeypatch.setitem(sys.modules, "huggingface_hub", types.SimpleNamespace(hf_hub_download=hf_hub_download))
+    monkeypatch.delenv("HF_HUB_DISABLE_XET", raising=False)
+    logs = []
+    monkeypatch.setattr(S, "log", logs.append)
+    sleeps = []
+    assert S.hf_download("r", "a.safetensors", str(tmp_path), sleep=sleeps.append).name == "a.safetensors"
+    assert seen == [None, None, "1"], "xet off only on the last try"
+    assert sleeps == [5, 10] and "HF_HUB_DISABLE_XET" not in os.environ
+    assert any("try 3/3 (plain HTTP" in m for m in logs)
+
+
+def test_weight_download_gives_up_after_three_tries(monkeypatch, tmp_path):
+    import sys
+    import types
+    n = []
+    monkeypatch.setitem(sys.modules, "huggingface_hub", types.SimpleNamespace(
+        hf_hub_download=lambda *a, **k: n.append(1) or (_ for _ in ()).throw(OSError("down"))))
+    monkeypatch.setattr(S, "log", lambda m: None)
+    with pytest.raises(OSError):
+        S.hf_download("r", "a", str(tmp_path), sleep=lambda s: None)
+    assert len(n) == 3
