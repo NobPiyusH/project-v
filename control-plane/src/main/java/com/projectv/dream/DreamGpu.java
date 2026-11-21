@@ -185,6 +185,15 @@ public class DreamGpu {
         }
     }
 
+    /** Ends the shared pod for everyone, unless a Short using it has GPU power Manual (the owner keeps it on). */
+    public void releaseAllUnlessHeld(String why) {
+        if (!enabled || broker.openShortIds().stream().anyMatch(this::holdManual)) {
+            return;
+        }
+        log.info("GPU: ending the shared pod ({})", why);
+        broker.releaseAll(why);
+    }
+
     // ------------------------------------------------------------------------------------------- GPU power (owner, 20 Nov 2026)
 
     /** GPU power Manual: the pod stays on after the GPU steps until the owner turns it off or it sits idle. */

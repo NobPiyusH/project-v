@@ -156,4 +156,37 @@ class DreamBrokerRouteTest {
             others.forEach(id -> jdbc.sql("DELETE FROM dream_short WHERE id = :id").param("id", id).update());
         }
     }
+
+    @Test
+    void theSharedPodEndsAsSoonAsNoShortWaitsForGpuWork() {
+        UUID a = UUID.randomUUID();
+        UUID b = UUID.randomUUID();
+        for (UUID id : List.of(a, b)) {
+            jdbc.sql("INSERT INTO dream_short (id, idea, status) VALUES (:id, 'x', 'RUNNING')").param("id", id).update();
+            jdbc.sql("""
+                            INSERT INTO dream_shot (id, dream_short_id, ord, scene, picture_prompt, motion_prompt)
+                            VALUES (:id, :d, 0, 'scene', 'picture prompt', 'walk forward')
+                            """).param("id", UUID.randomUUID()).param("d", id).update();
+        }
+        try {
+            dreams.status(a, "PICTURES", "RUNNING", null);
+            dreams.status(b, "PICTURES", "RUNNING", null);
+            dreams.pictureRequest(a, null, null);
+            dreams.pictureRequest(b, null, null);
+            int ended = terminated.size();
+
+            dreams.status(a, "CLIPS", "WAITING_REVIEW", null); // a's clips are done; b is still at work
+            assertEquals(ended, terminated.size());
+            dreams.status(b, "PICTURES", "WAITING_REVIEW", null); // goes on to clips by itself: keep the pod
+            assertEquals(ended, terminated.size());
+            dreams.status(b, "CLIPS", "WAITING_COST", null); // waiting for the owner only: nobody needs the pod now
+            assertEquals(ended + 1, terminated.size());
+            assertEquals(0, jdbc.sql("SELECT count(*) FROM gpu_pod_lease WHERE released_at IS NULL")
+                    .query(Integer.class).single(), "the lease is released with the pod");
+        } finally {
+            for (UUID id : List.of(a, b)) {
+                jdbc.sql("UPDATE dream_short SET status = 'CANCELLED' WHERE id = :id").param("id", id).update();
+            }
+        }
+    }
 }

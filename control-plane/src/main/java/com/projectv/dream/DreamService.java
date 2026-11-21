@@ -1354,6 +1354,34 @@ public class DreamService {
             evidence.event(id, step, "failure", null, message, null);
         }
         releaseGpuIfDone(id, step, status);
+        releaseGpuIfNobodyWaits();
+    }
+
+    /**
+     * Step:status pairs that will use the shared pod soon by themselves: working on (or queued for) a GPU step, on the
+     * free steps before the pictures, or in a review window that goes on to a GPU step by itself. Anything waiting for
+     * the owner (Manual, cost OK, Retry) or past the clips is not: the pod is not kept on for it.
+     */
+    static final List<String> GPU_SOON = List.of("SCOUT:RUNNING", "SCOUT:WAITING_REVIEW", "WRITE:RUNNING",
+            "WRITE:WAITING_REVIEW", "PICTURES:RUNNING", "PICTURES:WAITING_BATCH", "PICTURES:WAITING_REVIEW",
+            "CLIPS:RUNNING", "CLIPS:WAITING_BATCH");
+
+    /**
+     * Shut down at empty (21 Nov 2026): when no Short will use the shared pod soon, it ends now instead of sitting
+     * through review windows and the in-pod idle tail (that guard stays the safety net, rule 8). GPU power Manual on
+     * any Short using it keeps it on, as before.
+     */
+    private void releaseGpuIfNobodyWaits() {
+        if (gpu == null || gpu.usersOnPod() == 0) {
+            return;
+        }
+        int soon = jdbc.sql("""
+                        SELECT count(*) FROM dream_short
+                        WHERE (step || ':' || status) IN (:k) AND updated_at > now() - interval '2 hours'
+                        """).param("k", GPU_SOON).query(Integer.class).single();
+        if (soon == 0) {
+            gpu.releaseAllUnlessHeld("no Short is waiting for GPU work");
+        }
     }
 
     public void startClipBatch(UUID id) {
