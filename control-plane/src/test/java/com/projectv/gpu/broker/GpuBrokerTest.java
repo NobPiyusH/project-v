@@ -36,6 +36,7 @@ class GpuBrokerTest {
         final List<String> created = new ArrayList<>();
         final List<String> terminated = new ArrayList<>();
         List<String> lastArgv;
+        Map<String, String> lastEnv;
         State state = State.RUNNING;
         boolean createThenFail = false;
         boolean listFails = false;
@@ -67,6 +68,7 @@ class GpuBrokerTest {
             }
             created.add(req.name());
             lastArgv = req.bootArgv();
+            lastEnv = req.env();
             String podId = id + "-pod-" + created.size();
             if (createThenFail) { // the provider made the pod, the reply timed out
                 pods.add(new Pod(podId, req.name(), "RUNNING", hourly, NOW, NOW));
@@ -135,6 +137,28 @@ class GpuBrokerTest {
         records = new Records();
         spent = new HashMap<>();
         caps = new HashMap<>(Map.of("runpod", 5.0, "jarvislabs", 5.0, "modal", 0.0));
+    }
+
+    @Test
+    void workerTokenGoesIntoTheEnvAndTheAddressForTokenProviders() {
+        GpuBroker b = broker(Clock.fixed(NOW, ZoneOffset.UTC));
+        WorkerAuth auth = new WorkerAuth("test-secret".getBytes(), java.util.Set.of("runpod"));
+        b.setAuth(auth);
+        GpuBroker.Rental r = b.acquire(shortId, "video.i2v.dream", "img", List.of("python", "worker.py"), Map.of("SV_PORT", "8000"), null);
+        String name = r.instance().name();
+        assertEquals(auth.token(name), runpod.lastEnv.get("SV_TOKEN"), "the pod gets the token for its own name");
+        assertEquals("8000", runpod.lastEnv.get("SV_PORT"), "the rest of the env is kept");
+        assertEquals("https://worker:" + auth.token(name) + "@x", r.instance().endpoint(), "the Python side gets it inside the address");
+        assertNotEquals(auth.token(name), auth.token(name + "x"), "one token per rental");
+    }
+
+    @Test
+    void noTokenForProvidersThatDidNotAskForOne() {
+        GpuBroker b = broker(Clock.fixed(NOW, ZoneOffset.UTC));
+        b.setAuth(new WorkerAuth("test-secret".getBytes(), java.util.Set.of("vast")));
+        GpuBroker.Rental r = b.acquire(shortId, "video.i2v.dream", "img", List.of("python", "worker.py"), Map.of("SV_PORT", "8000"), null);
+        assertFalse(runpod.lastEnv.containsKey("SV_TOKEN"));
+        assertEquals("https://x", r.instance().endpoint());
     }
 
     GpuBroker.Rental acquire(GpuBroker b) {

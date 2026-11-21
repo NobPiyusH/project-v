@@ -526,3 +526,91 @@ def test_flux_fetches_once_and_never_frees_comfy(monkeypatch, tmp_path):
         (tmp_path / "comfy" / "out" / "pic" / "x.png").write_bytes(b"PNG")
         assert gpu.flux_picture({"prompt": "p", "seed": 1})[0] == b"PNG"
     assert fetched == [S.FLUX_FILES] and not freed and len(graphs) == 2
+
+
+# ---------------------------------------------------------------------------- per-rental bearer token (Vast.ai, RunPod)
+
+def _authed_worker(token="s3cret-token"):
+    state = S.State()
+    state.ready, state.phase = True, "ready"
+    state.jobs = S.Jobs(lambda kind, p: (b"PNG", {}))
+    srv = S.ThreadingHTTPServer(("127.0.0.1", 0), S.make_handler(state, token))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return state, srv, srv.server_address[1]
+
+
+def test_authorized_helper():
+    assert S.authorized(None, "")                       # no token set: open, as before
+    assert S.authorized("Bearer abc", "abc")
+    assert not S.authorized(None, "abc")
+    assert not S.authorized("Bearer abd", "abc")
+    assert not S.authorized("abc", "abc")               # must be the Bearer scheme
+    assert not S.authorized("Bearer ", "abc")
+
+
+def test_worker_with_token_rejects_everything_but_live():
+    state, srv, port = _authed_worker()
+    try:
+        base = f"http://127.0.0.1:{port}"
+        assert urllib.request.urlopen(base + "/live", timeout=5).status == 200   # bare liveness, open
+        for method, path in (("GET", "/health"), ("GET", "/ready"), ("GET", "/"), ("GET", "/jobs/x"), ("POST", "/picture"),
+                             ("POST", "/clip"), ("POST", "/scene")):
+            req = urllib.request.Request(base + path, data=b"{}" if method == "POST" else None, method=method)
+            with pytest.raises(urllib.error.HTTPError) as e:
+                urllib.request.urlopen(req, timeout=5)
+            assert e.value.code == 401, path
+        wrong = urllib.request.Request(base + "/health", headers={"Authorization": "Bearer nope"})
+        with pytest.raises(urllib.error.HTTPError) as e:
+            urllib.request.urlopen(wrong, timeout=5)
+        assert e.value.code == 401
+    finally:
+        srv.shutdown()
+
+
+def test_unauthorized_request_does_not_touch_heartbeat(tmp_path, monkeypatch):
+    hb = tmp_path / "hb"
+    monkeypatch.setattr(S, "HEARTBEAT", str(hb))
+    state, srv, port = _authed_worker()
+    try:
+        base = f"http://127.0.0.1:{port}"
+        with pytest.raises(urllib.error.HTTPError):
+            urllib.request.urlopen(base + "/health", timeout=5)
+        assert not hb.exists()                           # a scanner must not keep the rented GPU alive
+        ok = urllib.request.Request(base + "/health", headers={"Authorization": "Bearer s3cret-token"})
+        assert urllib.request.urlopen(ok, timeout=5).status == 200
+        assert hb.exists()
+    finally:
+        srv.shutdown()
+
+
+def test_client_sends_token_from_url_userinfo_and_runs_a_job():
+    state, srv, port = _authed_worker()
+    try:
+        threading.Thread(target=lambda: [state.jobs.work_one() for _ in range(1)], daemon=True).start()
+        base = f"http://worker:s3cret-token@127.0.0.1:{port}"
+        assert client.health(base)["ready"] is True
+        data, info = client.run_once(base, "picture", {"prompt": "x", "width": 768, "height": 1344, "seed": 1}, sleep=lambda s: None)
+        assert data == b"PNG"
+        bad = client.health(f"http://worker:wrong@127.0.0.1:{port}")
+        assert bad["ready"] is False and bad["phase"] == "failed"   # a pod that refuses our token is never waited for
+    finally:
+        srv.shutdown()
+
+
+def test_split_token():
+    assert client.split_token("http://worker:abc123@1.2.3.4:41000") == ("http://1.2.3.4:41000", "abc123")
+    assert client.split_token("https://id-8000.proxy.runpod.net/health") == ("https://id-8000.proxy.runpod.net/health", None)
+    assert client.split_token("http://worker:tok@[::1]:8000/x?y=1") == ("http://[::1]:8000/x?y=1", "tok")
+
+
+def test_worker_token_is_taken_out_of_the_environment():
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+    src = Path(S.__file__)
+    code = ("import os,sys,importlib.util;"
+            f"s=importlib.util.spec_from_file_location('w',r'{src}');m=importlib.util.module_from_spec(s);s.loader.exec_module(m);"
+            "print(m.WORKER_TOKEN, 'SV_TOKEN' in os.environ)")
+    out = subprocess.run([sys.executable, "-c", code], env={**os.environ, "SV_TOKEN": "abc"}, capture_output=True, text=True)
+    assert out.stdout.split() == ["abc", "False"], out.stderr

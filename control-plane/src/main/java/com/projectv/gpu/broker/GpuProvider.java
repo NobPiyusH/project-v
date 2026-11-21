@@ -41,6 +41,14 @@ public interface GpuProvider extends PodApi {
 
     boolean enabledByDefault();
 
+    /**
+     * The pod's command wrapped with this provider's in-pod guard. Default: {@link com.projectv.gpu.PodSelfStop#wrap} (the
+     * pod deletes itself with its own RunPod key). Providers whose pods must hold no account key (Vast.ai) override it.
+     */
+    default List<String> guard(List<String> jobArgv, int maxRuntimeMinutes, int idleMinutes, java.time.Instant createdAt) {
+        return com.projectv.gpu.PodSelfStop.wrap(jobArgv, maxRuntimeMinutes, idleMinutes, createdAt);
+    }
+
     /** The cheapest option in stock (or an unavailable quote saying why not). */
     Quote quote(GpuSpec spec);
 
