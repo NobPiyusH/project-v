@@ -295,9 +295,21 @@ public class DreamShortWorkflowImpl implements DreamShortWorkflow {
             return null; // nothing it judges here: passes like AUTO
         }
         String text = summary + " " + advice.summary();
-        if (advice.decisionId() != null && producer.decides(dreamId)) {
-            if ("approve".equals(advice.verdict())) {
-                producer.markActed(advice.decisionId(), "approved");
+        // Version 1: the owner gets only PRODUCER_WINDOW to answer; then the Producer decides on its own.
+        boolean timed = Workflow.getVersion("dream-producer-window", Workflow.DEFAULT_VERSION, 1) == 1;
+        boolean acts = advice.decisionId() != null && producer.decides(dreamId);
+        if (timed && !acts) {
+            // It may only advise: give the owner the short window first.
+            if (ownerAnswers(step, text + " Approve, or Redo with notes. I decide in 30 s if you don't.")) {
+                return take(step);
+            }
+            acts = true; // no answer: it decides alone from here (a failed review has no verdict: it just goes on)
+        }
+        if (acts) {
+            if (advice.decisionId() == null || "approve".equals(advice.verdict())) {
+                if (advice.decisionId() != null) {
+                    producer.markActed(advice.decisionId(), "approved");
+                }
                 message = text;
                 return null;
             }
@@ -307,11 +319,32 @@ public class DreamShortWorkflowImpl implements DreamShortWorkflow {
                 List<String> shots = producer.shotIds(dreamId, advice.weakItems());
                 return new Redo(step, shots, advice.redoNotes());
             }
+            // Unsure, or out of redo rounds / budget.
+            if (timed) {
+                if (ownerAnswers(step, text + " Approve, or Redo with notes. I go on in 30 s if you don't.")) {
+                    producer.markActed(advice.decisionId(), "asked");
+                    return take(step);
+                }
+                producer.markActed(advice.decisionId(), "approved");
+                message = text + " (No answer in 30 s: went on with the best version.)";
+                return null;
+            }
             producer.markActed(advice.decisionId(), "asked");
         }
         show(step, "WAITING", text + " Approve, or Redo with notes.");
         Workflow.await(() -> decided(step) || modeOf(step) == StageMode.AUTO);
         return take(step);
+    }
+
+    private static final Duration PRODUCER_WINDOW = Duration.ofSeconds(30);
+
+    /** Waits the Producer's short window for the owner. True when the owner answered (or switched the step to Auto). */
+    private boolean ownerAnswers(DreamStep step, String text) {
+        deadline = Instant.ofEpochMilli(Workflow.currentTimeMillis()).plus(PRODUCER_WINDOW).toString();
+        show(step, "WAITING", text);
+        boolean answered = Workflow.await(PRODUCER_WINDOW, () -> decided(step) || modeOf(step) == StageMode.AUTO);
+        deadline = null;
+        return answered;
     }
 
     /** The Producer's review as advice; null when it judges nothing here. A failed review never fails the step. */
