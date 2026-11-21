@@ -362,12 +362,13 @@ def _pod(req: dict, base: str, video_id: str) -> tuple[list[dict], bool]:
             # Reuse it; a chained next shot still starts from its last frame.
             uri = f"s3://{BUCKET}/{clip_key(video_id, j)}"
             r = {"uri": uri, "seconds": 0, "mode": j["mode"], "fps": 16, "frames": int(j["numFrames"])}
+            reusable = True
             if chain:
                 try:
-                    made = {j["shotNumber"]: get_bytes(uri)}
+                    made[j["shotNumber"]] = get_bytes(uri)  # add to the frames kept so far, never replace them
                 except Exception:  # noqa: BLE001 - unreadable: render it again instead
-                    made = {}
-            if not chain or made:
+                    reusable = False
+            if reusable:
                 clips.append(_clip(video_id, j, r))
                 continue
         fps = 16

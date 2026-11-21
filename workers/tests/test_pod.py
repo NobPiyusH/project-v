@@ -426,3 +426,28 @@ def test_batch_order_never_starves_the_other_kind():
     t[0] = S.Jobs.SWITCH_AFTER_S + 1          # p1 has waited long enough
     jobs.work_one(False)
     assert ran == ["c1", "c2", "p1"]
+
+
+def test_retry_chain_keeps_earlier_frames_when_a_saved_clip_is_unreadable(monkeypatch):
+    saved2 = "videos/v/clips/dream/shot002-take1.mp4"
+    monkeypatch.setattr(C, "exists", lambda key: key == saved2)
+
+    def get(uri):
+        if uri.endswith(saved2):
+            raise OSError("unreadable")
+        return b"png"
+    monkeypatch.setattr(C, "get_bytes", get)
+    monkeypatch.setattr(C, "put_bytes", lambda key, data, ct: f"s3://b/{key}")
+    monkeypatch.setattr(C, "_stop_requested", lambda *a: False)
+    monkeypatch.setattr(C, "_post", lambda *a: None)
+    monkeypatch.setattr(C, "last_frame_png", lambda mp4, clean=False: b"LAST:" + mp4)
+    sent = []
+    monkeypatch.setattr(client, "run", lambda url, kind, payload, ready, beat=None: (sent.append(payload) or (b"NEWMP4", {"seconds": 70})))
+    base = {"kind": "dream", "mode": "fast", "prompt": "walk", "width": 480, "height": 832, "numFrames": 81, "seed": 5, "take": 1}
+    jobs = [{**base, "shotId": "aaaaaaaa-1", "shotNumber": 1, "imageUri": "s3://b/p1.png"},
+            {**base, "shotId": "bbbbbbbb-2", "shotNumber": 2}]
+    clips, _ = C._pod({"gpuUrl": "https://g.example/", "jobs": jobs, "chain": True}, "http://127.0.0.1:8080", "v")
+    import base64
+    assert len(sent) == 2, "shot 1 is rendered, and so is shot 2 (its saved file could not be read)"
+    assert base64.b64decode(sent[1]["image"]) == b"LAST:NEWMP4", "shot 2 still starts from shot 1's last frame"
+    assert all(c["uri"] for c in clips)
