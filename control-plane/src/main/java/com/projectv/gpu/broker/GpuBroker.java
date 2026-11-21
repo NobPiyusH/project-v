@@ -54,6 +54,8 @@ public class GpuBroker {
     private final GpuPodLimits limits;
     private final Clock clock;
     private final PreferenceStore prefs;
+    /** Per-rental worker tokens (Vast.ai always, RunPod by config); OFF in tests that never asked for them. */
+    private WorkerAuth auth = WorkerAuth.OFF;
     /** The one shared pod (null = none); changed only inside the synchronized methods, read lock-free. */
     private volatile Rental shared;
     /** The Shorts using the shared pod, and since when. A Short that detached keeps its used seconds in {@link #usedSeconds}. */
@@ -67,6 +69,11 @@ public class GpuBroker {
     public GpuBroker(List<GpuProvider> providers, BrokerConfig config, GpuWallet wallet, BrokerRecords records,
                      PodLeases leases, PodEvents events, GpuPodLimits.FromConfig limits, PreferenceStore prefs) {
         this(providers, config, wallet, records, leases, events, limits.limits, Clock.systemUTC(), prefs);
+    }
+
+    @Autowired(required = false)
+    public void setAuth(WorkerAuth auth) {
+        this.auth = auth;
     }
 
     public GpuBroker(List<GpuProvider> providers, BrokerConfig config, GpuWallet wallet, BrokerRecords records,
@@ -107,7 +114,7 @@ public class GpuBroker {
                 continue;
             }
             GpuProvider.Instance inst = new GpuProvider.Instance(l.provider(), l.podId(), l.name(), l.hourlyUsd(), l.gpu(),
-                    p.endpointFor(l.podId(), config.port()));
+                    auth.decorate(l.provider(), l.name(), p.endpointFor(l.podId(), config.port())));
             Rental r = new Rental(l.dreamShortId(), inst, l.createdAt());
             if (shared != null) {
                 // Older builds rented one pod per Short; only ONE shared pod is kept. The others end now and are booked to their Short.
@@ -250,6 +257,9 @@ public class GpuBroker {
             row.put("stock", q.stock());
             row.put("gpu", q.gpu());
             row.put("hourlyUsd", q.hourlyUsd());
+            if (q.detail() != null && !q.detail().isBlank()) {
+                row.put("detail", q.detail()); // e.g. Vast: the host's country and machine id
+            }
         }
         if (why != null) {
             row.put("skipped", why);
@@ -290,6 +300,7 @@ public class GpuBroker {
         List<UUID> carried = List.of();
         if (existing != null) {
             if (!gone(existing)) {
+                existing = withEndpoint(existing);
                 attach(shortId);
                 leases.heartbeat(existing.instance().id());
                 return existing;
@@ -343,10 +354,11 @@ public class GpuBroker {
             Instant now = clock.instant();
             String name = limits.prefix() + id + "-" + shortId.toString().substring(0, 8) + "-"
                     + UUID.randomUUID().toString().substring(0, 4);
-            List<String> argv = PodSelfStop.wrap(workerArgv, limits.maxRuntimeMinutes(), limits.idleMinutes(), now);
+            List<String> argv = p.guard(workerArgv, limits.maxRuntimeMinutes(), limits.idleMinutes(), now);
             GpuProvider.Instance inst;
             try {
-                inst = p.create(new GpuProvider.CreateRequest(name, image, config.diskGb(), argv, env, config.port(), volumeId, q));
+                inst = p.create(new GpuProvider.CreateRequest(name, image, config.diskGb(), argv,
+                        auth.env(id, name, env), config.port(), volumeId, q));
             } catch (RuntimeException ex) {
                 // The call may have failed after the provider created the pod (timeout on the reply): look it up by its
                 // generated name and adopt it before any other create, or it would run unleased and unbooked.
@@ -368,6 +380,8 @@ public class GpuBroker {
                 log.warn("GPU broker: {} create reported '{}' but pod {} exists; adopting it", id, ex.getMessage(), found.id());
                 inst = found;
             }
+            inst = new GpuProvider.Instance(inst.provider(), inst.id(), inst.name(), inst.hourlyUsd(), inst.gpu(),
+                    auth.decorate(id, inst.name(), inst.endpoint()));
             try {
                 leases.open(id, inst.id(), inst.name(), "Dream Short " + shortId, shortId, inst.hourlyUsd(), inst.gpu());
             } catch (RuntimeException ex) { // never keep a pod we cannot lease
@@ -404,6 +418,22 @@ public class GpuBroker {
                 .map(r -> r.get("provider") + (r.get("gpu") == null ? "" : " " + r.get("gpu")) + " (" + r.get("skipped") + ")").toList();
         records.decision(shortId, capability, considered, null, reason);
         throw new NoGpuAvailableException(reason);
+    }
+
+    /** A rental rebuilt after a restart may not know its address yet (Vast maps the port late): ask the provider again. */
+    private Rental withEndpoint(Rental r) {
+        GpuProvider.Instance i = r.instance();
+        GpuProvider p = providers.get(i.provider());
+        if (i.endpoint() != null || p == null) {
+            return r;
+        }
+        String ep = auth.decorate(i.provider(), i.name(), p.endpointFor(i.id(), config.port()));
+        if (ep == null) {
+            return r;
+        }
+        Rental fixed = new Rental(r.shortId(), new GpuProvider.Instance(i.provider(), i.id(), i.name(), i.hourlyUsd(), i.gpu(), ep), r.createdAt());
+        shared = fixed;
+        return fixed;
     }
 
     /** Cheapest live quote that could be rented right now (configured, in stock, inside its wallet); read-only. For estimates. */

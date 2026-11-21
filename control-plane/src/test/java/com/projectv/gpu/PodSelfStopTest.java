@@ -30,6 +30,23 @@ class PodSelfStopTest {
     }
 
     @Test
+    void exitGuardHoldsNoProviderKeyAndOnlyEndsTheWorker() {
+        Instant created = Instant.parse("2026-11-21T12:00:00Z");
+        List<String> argv = PodSelfStop.wrapExit(List.of("python", "-c", "x"), 120, 15, created);
+        assertEquals(List.of("bash", "-c"), argv.subList(0, 2));
+        assertEquals(List.of("python", "-c", "x"), argv.subList(4, argv.size()));
+        String s = argv.get(2);
+        assertTrue(s.contains("DEADLINE=" + (created.getEpochSecond() + 7200) + ";") && s.contains("IDLE=900;"));
+        for (String forbidden : List.of("RUNPOD", "runpodctl", "curl", "API_KEY", "Authorization", "vast")) {
+            assertTrue(!s.contains(forbidden), "no provider call or key in the in-pod guard: " + forbidden);
+        }
+        assertTrue(s.contains("kill -TERM \"$JOB\""), "it ends the worker process");
+        assertTrue(s.contains("wait \"$JOB\"") && s.contains("exit \"$rc\""), "the container exits when the worker ends");
+        assertTrue(s.contains("nvidia-smi"), "a busy GPU counts as not idle");
+        assertThrows(IllegalArgumentException.class, () -> PodSelfStop.wrapExit(List.of(), 10, 5, created));
+    }
+
+    @Test
     void shellStringQuotesSafely() {
         assertEquals("'bash' '-c' 'echo '\"'\"'hi'\"'\"''", PodSelfStop.asShellString(List.of("bash", "-c", "echo 'hi'")));
     }

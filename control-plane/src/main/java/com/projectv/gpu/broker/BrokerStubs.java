@@ -3,7 +3,7 @@ package com.projectv.gpu.broker;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-/** Thin placeholders for the later adapters (owner: Jarvislabs, CloudRift next; Vast.ai, Shadeform, Modal later). */
+/** Thin placeholders for the later adapters (owner: Jarvislabs, CloudRift next; Shadeform, Modal later; Vast.ai is built, see VastProvider). */
 @Configuration
 class BrokerStubs {
 
@@ -15,11 +15,6 @@ class BrokerStubs {
     @Bean
     GpuProvider cloudriftProvider() {
         return new StubProvider("cloudrift", "REST https://api.cloudrift.ai, X-API-Key, {version,data} bodies; key not in .env yet");
-    }
-
-    @Bean
-    GpuProvider vastProvider() {
-        return new StubProvider("vast", "no key yet");
     }
 
     @Bean

@@ -16,11 +16,14 @@ import java.util.Map;
 public class GpuWatchdogController {
 
     private final PodWatchdog watchdog;
+    private final PodWatchdog vastWatchdog;
     private final PodLeases.Jdbc leases;
     private final PodEvents.Jdbc events;
 
-    public GpuWatchdogController(PodWatchdog watchdog, PodLeases.Jdbc leases, PodEvents.Jdbc events) {
+    public GpuWatchdogController(PodWatchdog watchdog, @org.springframework.beans.factory.annotation.Qualifier("vastWatchdog") PodWatchdog vastWatchdog,
+                                 PodLeases.Jdbc leases, PodEvents.Jdbc events) {
         this.watchdog = watchdog;
+        this.vastWatchdog = vastWatchdog;
         this.leases = leases;
         this.events = events;
     }
@@ -30,6 +33,7 @@ public class GpuWatchdogController {
         Map<String, Object> out = new HashMap<>();
         out.put("limits", watchdog.limits());
         out.put("lastSweep", watchdog.last()); // null until the first sweep
+        out.put("lastSweepVast", vastWatchdog.last()); // Vast.ai instances (null until the first sweep)
         out.put("leases", leases.recent(20));
         out.put("terminations", events.recent(20));
         return out;

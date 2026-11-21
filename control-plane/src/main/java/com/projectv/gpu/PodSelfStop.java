@@ -44,6 +44,55 @@ public final class PodSelfStop {
         return List.copyOf(argv);
     }
 
+    /**
+     * The guard for providers where the pod must hold no account key (Vast.ai). Same triggers (deadline, idle, job exit),
+     * but the action only ends the worker process, so the container exits. The real kill is the control plane's destroy
+     * call ({@code GpuBroker} release, {@code PodWatchdog}); an exited Vast instance still bills its disk until then.
+     */
+    public static List<String> wrapExit(List<String> jobArgv, int maxRuntimeMinutes, int idleMinutes, Instant createdAt) {
+        if (jobArgv == null || jobArgv.isEmpty()) {
+            throw new IllegalArgumentException("job command is empty");
+        }
+        if (maxRuntimeMinutes <= 0 || idleMinutes <= 0) {
+            throw new IllegalArgumentException("max runtime and idle minutes must be positive");
+        }
+        long deadline = createdAt.getEpochSecond() + maxRuntimeMinutes * 60L;
+        List<String> argv = new ArrayList<>(List.of("bash", "-c", exitScript(deadline, idleMinutes * 60L), "projectv-guard"));
+        argv.addAll(jobArgv);
+        return List.copyOf(argv);
+    }
+
+    static String exitScript(long deadlineEpoch, long idleSeconds) {
+        return """
+                DEADLINE=%d; IDLE=%d; HB=%s
+                touch "$HB"
+                "$@" &
+                JOB=$!
+                endjob() {
+                  echo "$(date -u +%%FT%%TZ) projectv guard: $1, ending the worker (the control plane destroys the instance)"
+                  kill -TERM "$JOB" 2>/dev/null; sleep 20; kill -KILL "$JOB" 2>/dev/null
+                }
+                gpu_busy() {
+                  u=$(nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits 2>/dev/null | sort -n | tail -1)
+                  [ -n "$u" ] && [ "$u" -ge 5 ]
+                }
+                (
+                  while kill -0 "$JOB" 2>/dev/null; do
+                    now=$(date +%%s)
+                    if [ "$now" -ge "$DEADLINE" ]; then endjob "max runtime reached"; break; fi
+                    if gpu_busy; then touch "$HB"; fi
+                    last=$(stat -c %%Y "$HB" 2>/dev/null || echo 0)
+                    if [ $((now - last)) -ge "$IDLE" ]; then endjob "idle for $((now - last)) s"; break; fi
+                    sleep 30
+                  done
+                ) >>%s 2>&1 &
+                wait "$JOB"
+                rc=$?
+                echo "$(date -u +%%FT%%TZ) projectv guard: worker ended (exit $rc)" >>%s 2>&1
+                exit "$rc"
+                """.formatted(deadlineEpoch, idleSeconds, HEARTBEAT, LOG, LOG);
+    }
+
     /** The same command as one shell string (for tools that take a single start-command string). */
     public static String asShellString(List<String> argv) {
         StringBuilder sb = new StringBuilder();

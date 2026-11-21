@@ -7,6 +7,7 @@ imported on the box after `boot()` installed them.
 
 At start: install deps, fetch ComfyUI (pinned tag), download weights from Hugging Face (Apache-2.0; CLAUDE.md rule 9)
 onto the container disk, start ComfyUI on 127.0.0.1. Serves on [::]:PORT (IPv6, for the Container Gateway):
+  GET  /live                200 {"alive": true}, never needs the token (bare liveness, no information)
   GET  /health              200 {"ready": true} once ready, else 503 {"ready": false, "phase": ...}
   POST /picture             {prompt, seed, width, height, model?}                 -> 202 {"id": job}
                             model: "zimage" (default) or "flux2-klein" (FLUX.2 klein 4B on ComfyUI, fetched on first use)
@@ -17,6 +18,8 @@ onto the container disk, start ComfyUI on 127.0.0.1. Serves on [::]:PORT (IPv6, 
                             KJNodes and fetches the SVI LoRAs (~2.5 GB), so normal Shorts never pay for them.
   GET  /jobs/<id>           {"state": queued|running|done|failed, "seconds", "error", ...}
   GET  /jobs/<id>/result    the PNG or MP4 bytes (404 until done)
+With SV_TOKEN set, every other route answers 401 without "Authorization: Bearer <token>" (constant-time compare), and an
+unauthorised request does not touch the idle heartbeat (a port scanner must not keep a rented GPU alive).
 Jobs are async: the gateway's timeouts are capped and a first clip can take minutes. One GPU job at a time.
 
   python server.py --dry-run      # no GPU, no download: print the plan, build a clip graph, exit 0
@@ -26,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import hmac
 import zipfile
 import io
 import json
@@ -48,6 +52,11 @@ COMFY_TARBALL = f"https://github.com/comfyanonymous/ComfyUI/archive/refs/tags/{C
 ROOT = Path(os.environ.get("SV_ROOT", "/data"))
 PORT = int(os.environ.get("SV_PORT", "8000"))
 COMFY_PORT = 8188
+# Per-rental bearer token (set by the control plane in SV_TOKEN). With it, every route except the bare /live needs
+# "Authorization: Bearer <token>" (a public Vast.ai port is open to the whole internet). Without it the worker stays
+# open, as before (RunPod proxy pods of older builds). Taken out of the environment at once so ComfyUI and anything
+# else started from here never inherits it.
+WORKER_TOKEN = os.environ.pop("SV_TOKEN", "")
 
 # Same files as the fp8 benchmark (workers/bench/wan_fp8, checked on Hugging Face 20 Nov 2026; sizes in bytes).
 COMFY_REPO = "Comfy-Org/Wan-2.2"
@@ -416,10 +425,29 @@ class State:
         self.jobs: Jobs | None = None
 
 
-def make_handler(state: State):
+def authorized(header: str | None, token: str) -> bool:
+    """True when no token is required, or the header is exactly "Bearer <token>" (constant-time compare)."""
+    if not token:
+        return True
+    prefix = "Bearer "
+    if not header or not header.startswith(prefix):
+        return False
+    return hmac.compare_digest(header[len(prefix):].encode(), token.encode())
+
+
+def make_handler(state: State, token: str | None = None):
+    required = WORKER_TOKEN if token is None else token
+
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, fmt, *args):  # quiet: the gateway polls /health often
             pass
+
+        def _auth(self, path: str) -> bool:
+            """Answers 401 and returns False when the request has no valid token (only /live is open)."""
+            if authorized(self.headers.get("Authorization"), required):
+                return True
+            self._json(401, {"error": "unauthorized"})
+            return False
 
         def _json(self, status: int, body: dict) -> None:
             data = json.dumps(body).encode()
@@ -430,8 +458,12 @@ def make_handler(state: State):
             self.wfile.write(data)
 
         def do_GET(self):  # noqa: N802
-            touch_heartbeat()
             path = self.path.split("?")[0].rstrip("/")
+            if path == "/live":
+                return self._json(200, {"alive": True})
+            if not self._auth(path):
+                return
+            touch_heartbeat()
             if path in ("/health", "/ready", ""):
                 body = {"ready": state.ready, "phase": state.phase, "error": state.error}
                 return self._json(200 if state.ready else 503, body)
@@ -454,8 +486,10 @@ def make_handler(state: State):
             return self._json(404, {"error": "not found"})
 
         def do_POST(self):  # noqa: N802
-            touch_heartbeat()
             path = self.path.split("?")[0].rstrip("/")
+            if not self._auth(path):
+                return
+            touch_heartbeat()
             if path not in ("/clip", "/picture", "/scene"):
                 return self._json(404, {"error": "not found"})
             if not state.ready or not state.jobs:

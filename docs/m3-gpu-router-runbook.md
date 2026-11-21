@@ -40,8 +40,37 @@ the `routing_decision` row). Fix the cap or wait for stock, then Retry. Never le
 for `projectv-*` pods and terminate by hand.
 
 ## Adapter status
-RunPod: built (create/status unverified live). Jarvislabs, CloudRift, Vast.ai, Shadeform, Modal: stubs in `BrokerStubs.java`,
+RunPod: built (create/status unverified live). Vast.ai: built 21 Nov 2026 (`VastProvider`; search checked live read-only, create/show/destroy
+checked against docs.vast.ai only, see "Vast.ai" below). Jarvislabs, CloudRift, Shadeform, Modal: stubs in `BrokerStubs.java`,
 each with a TODO naming what it needs (key, API shape).
+
+## Vast.ai (owner decision 21 Nov 2026; strangers' machines, so security first)
+**Key:** `VAST_API_KEY` in `.env`. It needs instance read + write rights (cloud.vast.ai/manage-keys). On 21 Nov the saved key could search offers
+but every account call (`GET /instances/`, `/users/current/`) answered 401 "requires Two Factor Authentication": fix the key (or turn on 2FA and
+create a new full-access key) before any test. Until `listPods` works the broker refuses to rent on Vast (the watchdog start check lists first), and
+the dashboard option says why.
+
+**Safety design**
+1. *No secret on the instance.* The create body has: image, label `projectv-vast-...`, disk, launch mode `args` (no SSH, no Jupyter), the guard command, and
+   env `SV_BOOT_*` (worker source), `SV_PORT`, `SV_ROOT`, `SV_TOKEN`, plus `-p 8000:8000`. Never the Vast, RunPod, S3 or Gemini keys. Vast adds its own
+   per-instance `CONTAINER_API_KEY` (controls only that instance); do NOT set "account environment variables" on cloud.vast.ai (they are injected into every container).
+2. *Worker token.* `WorkerAuth`: token = HMAC(secret, pod name), passed as `SV_TOKEN`; the worker answers 401 to everything except `/live`
+   (constant-time compare; an unauthorised request does not even touch the idle heartbeat). The pod address handed to Python is
+   `http://worker:<token>@ip:port`; `workers/pod/client.py` turns it into `Authorization: Bearer`. Secret = `POD_TOKEN_SECRET` or derived from the provider keys.
+   RunPod pods get the same token (`POD_TOKEN_RUNPOD=false` turns it off for RunPod only). The token stops outsiders; it does NOT hide anything from the host:
+   the host machine can read every prompt, picture and clip on it. Keep private material (reference photos of people) off Vast.
+3. *Teardown is ours.* `terminate` = `DELETE /instances/{id}/`. The in-pod guard (`PodSelfStop.wrapExit`) only ends the worker (container exits); the
+   broker release and a second `PodWatchdog` bean (`vastWatchdog`, label prefix `projectv-`) destroy the instance, including exited ones. Never-running
+   instances are destroyed after `startTimeoutSeconds` (480, under the watchdog's 10 min lease grace) and the next offer is tried; `status()` maps
+   exited / offline / unknown / 404 to GONE so the existing replace path rents again.
+4. *Offer filter (all in config/providers.yaml, `providers.vast`).* On-demand, verified, reliability >= 0.97, 1 GPU, gpu_name in RTX 4090 / 5090 / L40S / A6000,
+   >= 24 GB VRAM, >= 48 GB RAM, disk >= 90 GB, download >= 500 Mb/s, a direct public port. Price = the live `dph_total` (disk included via `allocated_storage`)
+   plus the host's own internet price per GB (Vast bills it; some hosts ask $50+/TB, which would cost more than the GPU) spread over 0.75 h; hosts above `maxBandwidthUsd` are skipped.
+   The RoutingDecision candidate row carries the host's country and machine id. Cap: `monthlyCapUsd: 5`; the shared $3.50/day cap still applies first.
+5. *Blocking create.* Vast gives the public port only once the instance runs (image pull), so `create` waits up to 480 s for it (the broker lock is held meanwhile).
+
+**Unverified (needs the first paid test):** create body acceptance (`runtype: args` with an array, the long `env` string), the show/list/destroy response shapes with a working key,
+the address/port mapping field names on a running instance, whether the instance list needs paging, bandwidth cost really billed per GB, that RunPod's proxy passes the `Authorization` header.
 
 ## How a Short runs on the broker
 1. Writing step: `DreamGpu.warm` rents the cheapest pod so the ~10 min download overlaps the writing (best effort).

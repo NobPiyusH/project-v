@@ -18,25 +18,40 @@ import java.time.Clock;
 public class PodWatchdogScheduler {
 
     @Bean
+    @org.springframework.context.annotation.Primary
     PodWatchdog podWatchdog(PodApi api, PodLeases leases, PodEvents events, GpuPodLimits.FromConfig limits) {
         return new PodWatchdog(api, leases, events, limits.limits, Clock.systemUTC());
+    }
+
+    /** Vast.ai instances are swept too (same studio-label rule): the in-pod guard on Vast only ends the worker, this destroys. */
+    @Bean
+    PodWatchdog vastWatchdog(com.projectv.gpu.broker.VastProvider vast, PodLeases leases, PodEvents events,
+                             GpuPodLimits.FromConfig limits) {
+        return new PodWatchdog(vast, leases, events, limits.limits, Clock.systemUTC());
     }
 
     @Configuration
     @ConditionalOnProperty(name = "projectv.gpu.watchdog.scheduler", havingValue = "true", matchIfMissing = true)
     static class Tick {
-        private final PodWatchdog watchdog;
+        private final java.util.List<PodWatchdog> watchdogs;
 
-        Tick(PodWatchdog watchdog) {
-            this.watchdog = watchdog;
+        Tick(PodWatchdog only) {
+            this(java.util.List.of(only));
+        }
+
+        @org.springframework.beans.factory.annotation.Autowired
+        Tick(java.util.List<PodWatchdog> watchdogs) {
+            this.watchdogs = watchdogs;
         }
 
         @Scheduled(initialDelay = 20_000, fixedDelayString = "#{${projectv.gpu.watchdog.poll-seconds:180} * 1000}")
         public void tick() {
-            try {
-                watchdog.sweep(); // already never throws; belt and braces so the schedule can't die
-            } catch (RuntimeException e) {
-                org.slf4j.LoggerFactory.getLogger(PodWatchdogScheduler.class).warn("GPU watchdog tick failed: {}", e.getMessage());
+            for (PodWatchdog watchdog : watchdogs) { // one per provider (RunPod, Vast.ai)
+                try {
+                    watchdog.sweep(); // already never throws; belt and braces so the schedule can't die
+                } catch (RuntimeException e) {
+                    org.slf4j.LoggerFactory.getLogger(PodWatchdogScheduler.class).warn("GPU watchdog tick failed: {}", e.getMessage());
+                }
             }
         }
     }

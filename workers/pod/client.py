@@ -4,7 +4,10 @@ The control plane owns the rented pod (create, lease, delete; com.projectv.gpu.b
 worker to be ready and runs jobs on it. A preempted or reallocated instance comes back empty (new disk, new job table):
 a job that vanishes or a dropped connection means "wait for ready again and submit the same job again", at most
 RETRIES times per item, then the item is reported failed (the step then waits for the owner, rule 2b).
-No key is needed for RunPod's proxy; an optional POD_AUTH_HEADER ("Name: value") is sent when a provider needs one, never logged.
+Per-rental token: the control plane hands out the pod address as ``http://worker:<token>@host:port`` (the broker's
+WorkerAuth); every call here strips that userinfo and sends ``Authorization: Bearer <token>`` instead. An address
+without userinfo is called as before (old pods, tests). An optional POD_AUTH_HEADER ("Name: value") is still honoured.
+The token is never logged here.
 """
 
 from __future__ import annotations
@@ -13,6 +16,7 @@ import json
 import os
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 RETRIES = 2
@@ -56,9 +60,26 @@ def _headers(extra: dict | None = None) -> dict:
     return h
 
 
+def split_token(url: str) -> tuple[str, str | None]:
+    """("http://worker:TOKEN@host:8000/x") -> ("http://host:8000/x", "TOKEN"); no userinfo -> (url, None)."""
+    parts = urllib.parse.urlsplit(url)
+    if parts.password is None and parts.username is None:
+        return url, None
+    host = parts.hostname or ""
+    if ":" in host:  # IPv6 literal
+        host = f"[{host}]"
+    netloc = host + (f":{parts.port}" if parts.port else "")
+    token = urllib.parse.unquote(parts.password or parts.username or "")
+    return urllib.parse.urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment)), token or None
+
+
 def _call(url: str, body: dict | None = None, timeout: float = 60) -> tuple[int, bytes]:
     data = json.dumps(body).encode() if body is not None else None
-    req = urllib.request.Request(url, data=data, headers=_headers({"Content-Type": "application/json"} if data else None),
+    url, token = split_token(url)
+    extra = {"Content-Type": "application/json"} if data else {}
+    if token:
+        extra["Authorization"] = f"Bearer {token}"
+    req = urllib.request.Request(url, data=data, headers=_headers(extra or None),
                                  method="POST" if data is not None else "GET")
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
@@ -74,6 +95,8 @@ def health(base: str) -> dict:
         status, body = _call(f"{base}/health", timeout=15)
     except NotReady as e:
         return {"ready": False, "phase": str(e)}
+    if status == 401:  # wrong or missing token: this pod can never be used from here, do not wait 30 minutes
+        return {"ready": False, "phase": "failed", "error": f"worker refused the token (HTTP 401)"}
     try:
         h = json.loads(body or b"{}")
     except ValueError:
