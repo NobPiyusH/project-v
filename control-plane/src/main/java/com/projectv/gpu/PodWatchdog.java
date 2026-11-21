@@ -37,6 +37,8 @@ public class PodWatchdog {
     private final GpuPodLimits limits;
     private final Clock clock;
     private volatile Report last;
+    /** The error text of the last failed sweep: the same failure (e.g. an expired Vast 2FA session) is logged once, not every sweep. */
+    private volatile String lastSweepError;
 
     public PodWatchdog(PodApi api, PodLeases leases, PodEvents events, GpuPodLimits limits, Clock clock) {
         this.api = api;
@@ -60,9 +62,13 @@ public class PodWatchdog {
         Report r;
         try {
             r = doSweep(now);
+            lastSweepError = null;
         } catch (RuntimeException e) {
-            log.warn("GPU watchdog: could not list {} pods ({}); studio pods are unchecked until the next sweep "
-                    + "(their in-pod self-stop still applies)", api.provider(), e.getMessage());
+            if (!String.valueOf(e.getMessage()).equals(lastSweepError)) { // log once per distinct failure; nothing is destroyed on a failed list
+                log.warn("GPU watchdog: could not list {} pods ({}); studio pods are unchecked until the next sweep "
+                        + "(their in-pod self-stop still applies)", api.provider(), e.getMessage());
+            }
+            lastSweepError = String.valueOf(e.getMessage());
             r = new Report(now, limits.dryRun(), api.configured(), 0, 0, List.of(), List.of(),
                     e.getClass().getSimpleName() + ": " + e.getMessage());
         }

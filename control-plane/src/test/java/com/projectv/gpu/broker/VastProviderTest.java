@@ -27,6 +27,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class VastProviderTest {
 
     static final String KEY = "vast-key-must-never-reach-an-instance";
+    static final String SESSION = "vast-2fa-session-key-must-never-reach-an-instance";
     static final GpuProvider.GpuSpec SPEC = new GpuProvider.GpuSpec(List.of("ignored"), 24, 48, 80);
 
     HttpServer server;
@@ -44,7 +45,8 @@ class VastProviderTest {
     final Map<String, List<String>> script = new ConcurrentHashMap<>();
     volatile int listStatus = 200;
     volatile int destroyStatus = 200;
-    volatile String instancesList = "{\"instances\":[]}";
+    volatile String instancesList = "{\"success\":true,\"instances\":[],\"next_token\":null}";
+    volatile String instancesPage2 = "{\"success\":true,\"instances\":[],\"next_token\":null}";
     final AtomicInteger nextId = new AtomicInteger(777);
 
     @BeforeEach
@@ -66,26 +68,44 @@ class VastProviderTest {
             createdAsks.add(ask);
             send(ex, 200, "{\"success\":true,\"new_contract\":" + nextId.getAndIncrement() + "}");
         });
+        // destroy stays v0 (v1 has no by-id route)
         server.createContext("/api/v0/instances/", ex -> {
             record(ex);
-            String path = ex.getRequestURI().getPath();
-            String id = path.replaceAll(".*/instances/?(\\d*)/?", "$1");
-            if ("DELETE".equals(ex.getRequestMethod())) {
-                if (destroyStatus == 200) {
-                    destroyed.add(id);
-                    send(ex, 200, "{\"success\":true}");
-                } else {
-                    send(ex, destroyStatus, "{\"success\":false,\"msg\":\"nope\"}");
-                }
-            } else if (id.isEmpty()) {
-                send(ex, listStatus, listStatus == 200 ? instancesList
-                        : "{\"success\":false,\"msg\":\"requires Two Factor Authentication\"}");
-            } else if (!script.containsKey(id)) {
-                send(ex, 404, "{\"success\":false,\"error\":\"not_found\"}");
+            String id = ex.getRequestURI().getPath().replaceAll(".*/instances/?(\\d*)/?", "$1");
+            if (!"DELETE".equals(ex.getRequestMethod())) {
+                send(ex, 410, "{\"error\":\"deprecated_endpoint\",\"msg\":\"/api/v0/instances/ is deprecated. Use /api/v1/instances/ instead.\"}");
+            } else if (listStatus != 200) {
+                send(ex, listStatus, "{\"success\":false,\"msg\":\"requires Two Factor Authentication\"}");
+            } else if (destroyStatus == 200) {
+                destroyed.add(id);
+                send(ex, 200, "{\"success\":true}");
             } else {
+                send(ex, destroyStatus, "{\"success\":false,\"msg\":\"nope\"}");
+            }
+        });
+        // list and show are v1: GET /api/v1/instances/?limit=..&after_token=..&select_filters={"id":{"eq":N}}
+        server.createContext("/api/v1/instances/", ex -> {
+            record(ex);
+            String q = String.valueOf(ex.getRequestURI().getQuery());
+            if (listStatus != 200) {
+                send(ex, listStatus, "{\"success\":false,\"msg\":\"requires Two Factor Authentication\"}");
+                return;
+            }
+            java.util.regex.Matcher m = java.util.regex.Pattern.compile("\"id\":\\{\"eq\":(\\d+)\\}").matcher(q);
+            if (m.find()) {
+                String id = m.group(1);
                 List<String> steps = script.get(id);
-                int n = showCalls.computeIfAbsent(id, k -> new AtomicInteger()).getAndIncrement();
-                send(ex, 200, "{\"instances\":" + steps.get(Math.min(n, steps.size() - 1)) + "}");
+                if (steps == null) {
+                    send(ex, 200, "{\"success\":true,\"total_instances\":0,\"instances\":[],\"next_token\":null}");
+                } else {
+                    int n = showCalls.computeIfAbsent(id, k -> new AtomicInteger()).getAndIncrement();
+                    send(ex, 200, "{\"success\":true,\"total_instances\":1,\"instances\":[{\"id\":" + id + "," + steps.get(Math.min(n, steps.size() - 1)).substring(1)
+                            + "],\"next_token\":null}");
+                }
+            } else if (q.contains("after_token=p2")) {
+                send(ex, 200, instancesPage2);
+            } else {
+                send(ex, 200, instancesList);
             }
         });
         server.start();
@@ -116,7 +136,7 @@ class VastProviderTest {
 
     VastProvider provider(String key, VastConfig cfg) {
         String url = "http://127.0.0.1:" + server.getAddress().getPort() + "/api/v0";
-        return new VastProvider(cfg, url, key, RestClient.builder().build(), 5);
+        return new VastProvider(cfg, url, key, () -> key.isEmpty() ? "" : SESSION, RestClient.builder().build(), 5);
     }
 
     VastProvider provider() {
@@ -231,7 +251,9 @@ class VastProviderTest {
         for (String forbidden : List.of("RUNPOD", "API_KEY", "S3_", "GEMINI", "AWS_", "SECRET", "ssh_key", "SSH_PUBLIC_KEY", "jupyter")) {
             assertFalse(createBody.toUpperCase().contains(forbidden.toUpperCase()), forbidden + " must not be in the create body");
         }
-        assertTrue(authHeaders.stream().allMatch(h -> h.equals("Bearer " + KEY)), "every Vast call carries the bearer key");
+        assertFalse(createBody.contains(SESSION), "the 2FA session key never goes to an instance");
+        assertEquals("Bearer " + KEY, authHeaders.getFirst(), "offer search uses the normal key");
+        assertTrue(authHeaders.stream().skip(1).allMatch(h -> h.equals("Bearer " + SESSION)), "create, show and destroy use the 2FA session key");
     }
 
     @Test
@@ -334,9 +356,9 @@ class VastProviderTest {
 
     @Test
     void listPodsMapsLabelStatusAndCostAndTheWatchdogCanSeeStudioInstances() {
-        instancesList = "{\"instances\":[{\"id\":11,\"label\":\"projectv-vast-aaaa-bbbb\",\"actual_status\":\"running\",\"dph_total\":0.42,"
+        instancesList = "{\"success\":true,\"instances\":[{\"id\":11,\"label\":\"projectv-vast-aaaa-bbbb\",\"actual_status\":\"running\",\"dph_total\":0.42,"
                 + "\"start_date\":1795000000.5},{\"id\":12,\"label\":\"my-own-box\",\"actual_status\":\"loading\",\"dph_total\":1.5},"
-                + "{\"id\":13,\"label\":null,\"actual_status\":null,\"dph_total\":0.1}]}";
+                + "{\"id\":13,\"label\":null,\"actual_status\":null,\"dph_total\":0.1}],\"next_token\":null}";
         List<com.projectv.gpu.PodApi.Pod> pods = provider().listPods();
         assertEquals(3, pods.size());
         assertEquals("11", pods.get(0).id());
@@ -351,11 +373,47 @@ class VastProviderTest {
     }
 
     @Test
-    void keyWithoutInstanceRightsGivesAClearReasonSoNothingIsRentedBlind() {
+    void listPodsFollowsThePagesOfTheV1List() {
+        instancesList = "{\"success\":true,\"instances\":[{\"id\":1,\"label\":\"projectv-vast-a\",\"actual_status\":\"running\",\"dph_total\":0.4}],\"next_token\":\"p2\"}";
+        instancesPage2 = "{\"success\":true,\"instances\":[{\"id\":2,\"label\":\"projectv-vast-b\",\"actual_status\":\"exited\",\"dph_total\":0.4}],\"next_token\":null}";
+        List<com.projectv.gpu.PodApi.Pod> pods = provider().listPods();
+        assertEquals(List.of("1", "2"), pods.stream().map(com.projectv.gpu.PodApi.Pod::id).toList());
+        assertEquals("EXITED", pods.get(1).status(), "exited instances are listed so the watchdog destroys them");
+        assertTrue(requests.stream().allMatch(r -> r.startsWith("GET /api/v1/instances")), "list uses v1, never the deprecated v0 list: " + requests);
+    }
+
+    @Test
+    void expiredOrMissingTwoFactorSessionGivesAClearReasonAndNothingIsRentedOrDestroyedBlind() {
         listStatus = 401;
         IllegalStateException e = assertThrows(IllegalStateException.class, () -> provider().listPods());
-        assertTrue(e.getMessage().contains("refused the key") && e.getMessage().contains("instance read + write"), e.getMessage());
-        assertFalse(e.getMessage().contains(KEY));
+        assertTrue(e instanceof VastProvider.VastSessionExpired, e.getMessage());
+        assertTrue(e.getMessage().startsWith("Vast 2FA session expired: run `vastai tfa login --method-type totp -c <code>`"), e.getMessage());
+        assertFalse(e.getMessage().contains(KEY) || e.getMessage().contains(SESSION));
+        listStatus = 403;
+        assertTrue(assertThrows(IllegalStateException.class, () -> provider().listPods()) instanceof VastProvider.VastSessionExpired);
+        // destroy and the status check say the same; status() never turns a login problem into "GONE" (the broker would replace a healthy pod)
+        assertTrue(assertThrows(IllegalStateException.class, () -> provider().terminate("5")) instanceof VastProvider.VastSessionExpired);
+        assertTrue(assertThrows(IllegalStateException.class, () -> provider().status("5")) instanceof VastProvider.VastSessionExpired);
+    }
+
+    @Test
+    void searchWithABadNormalKeyKeepsTheOldMessage() {
+        server.removeContext("/api/v0/bundles/");
+        server.createContext("/api/v0/bundles/", ex -> send(ex, 401, "{\"success\":false,\"msg\":\"bad key\"}"));
+        IllegalStateException e = assertThrows(IllegalStateException.class, () -> provider().quotes(SPEC));
+        assertTrue(e.getMessage().contains("refused the key") && !(e instanceof VastProvider.VastSessionExpired), e.getMessage());
+    }
+
+    @Test
+    void sessionKeyComesFromTheSettingElseTheVastCliFileAndIsReadFreshEachTime(@org.junit.jupiter.api.io.TempDir java.nio.file.Path dir) throws Exception {
+        java.nio.file.Path f = dir.resolve("vast_tfa_key");
+        var fromFile = VastProvider.sessionKeySource("", f);
+        assertEquals("", fromFile.get(), "no file, no setting: empty");
+        java.nio.file.Files.writeString(f, "abc123\r\n");
+        assertEquals("abc123", fromFile.get());
+        java.nio.file.Files.writeString(f, "newer");
+        assertEquals("newer", fromFile.get(), "a fresh `vastai tfa login` is used without a restart");
+        assertEquals("fromsetting", VastProvider.sessionKeySource(" fromsetting ", f).get(), "the setting wins over the file");
     }
 
     @Test
