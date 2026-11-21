@@ -62,6 +62,17 @@ fails, so the adapter quotes every allowed plan and the broker tries the next on
 - Infra credit: **₹2,000** (a promotional coupon, ~$21; spent from this). `gpu_and_higher_plans_enabled: true`: GPU plans are allowed.
 - Resource quota: capped at 10 nodes, 0 used. The node list is empty.
 
+## Cheapest suitable GPU (>= 24 GB VRAM, >= 48 GB RAM, as the studio spec asks)
+**A40 48 GB, `GDC3.A40-16.100GB`, ₹96/h** (= $1.02/h; $1.20/h with GST). A ~25 min test: ₹40 = **$0.43** before GST,
+**₹47.2 = $0.50** with GST. The adapter sorts quotes cheapest first, so A40 is tried before L40S (₹102/h, 60 vCPU, faster CPU side).
+The L4 (₹49/h) is not in the allowed plan list (24 GB is the bare minimum and 110 GB RAM is fine, but it is untested for SVI).
+
+## Adapter status (22 Nov 2026)
+`E2eProvider` + `E2eConfig` + `E2eProviderTest` (fake server) are in; `./gradlew :control-plane:test` passes (331 tests). Config:
+`pricing.gpuBroker.providers.e2e` in config/providers.yaml (monthly cap $5, plans, INR rate, GST); `order` lists `e2e`; `.env.example`
+has `E2E_API_KEY`, `E2E_AUTH_TOKEN`, `E2E_PROJECT_ID`. `enabledByDefault` is false until a real node has run.
+`dailyCapUsd` is still 5.00: the $10 approval reached this session only second-hand, so the owner/CTO must raise it themselves.
+
 ## Price per test and recommendation
 SVI resume test, ~25-35 min on a node (boot + image pull + weights ~42 GB + run); billing runs from create to delete:
 - **L40S (48 GB), recommended**: ₹102/h = $1.09/h; 30 min = ₹51 = **$0.54, $0.64 with GST**. Plenty of VRAM, 60 vCPU / 220 GB RAM, fast.

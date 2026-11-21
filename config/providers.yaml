@@ -194,7 +194,7 @@ pricing:
   # M3 GPU broker (docs/plans/m3-gpu-router.md): rented GPUs for Dream Shorts. Caps only, never prices (rule 7: hourly
   # rates are read live from each provider). 0 = blocked: the owner raises one when he says yes. Modal keeps its own cap below.
   gpuBroker:
-    order: [runpod, jarvislabs, cloudrift, vast, shadeform, modal]   # tie-break only: the cheapest live price in stock and inside its cap wins
+    order: [runpod, jarvislabs, cloudrift, vast, e2e, shadeform, modal]   # tie-break only: the cheapest live price in stock and inside its cap wins
     totalCapUsd: 8               # all rented GPUs together per month (owner, 20 Nov 2026: 8)
     dailyCapUsd: 5.00            # all studio GPU spend per UTC day, booked rentals + the running pod (owner: 3.50 on 21 Nov 2026, raised to 5.00 the same evening while testing); 0 = off
     providers:
@@ -217,6 +217,19 @@ pricing:
         pollSeconds: 5
         offerAttempts: 2
         priceSlack: 1.25              # a replacement offer may cost at most this times the quoted price
+      # E2E Networks (Delhi VMs, INR plans; docs/e2e-provider-notes.md). Limits and estimates only: the hourly price is the live plan price + GST.
+      e2e:
+        monthlyCapUsd: 5
+        location: Delhi
+        image: Ubuntu-22.04-GPU       # 22.04 ships Docker + NVIDIA toolkit
+        inrPerUsd: 94
+        gstPercent: 18
+        publicPort: 443               # the default security group opens 80 and 443
+        startTimeoutSeconds: 540
+        plans:
+          - { sku: "GDC3.L40S-60.220GB_v1", gpu: "L40S", vramGb: 48 }
+          - { sku: "GDC3.A40-16.100GB", gpu: "A40", vramGb: 48 }
+          - { sku: "GDC3.A10080-16.115GB", gpu: "A100-80GB", vramGb: 80 }
       shadeform:  { monthlyCapUsd: 0 }
     gpuPreference: ["NVIDIA GeForce RTX 4090", "NVIDIA GeForce RTX 5090", "NVIDIA RTX A6000", "NVIDIA L40S"]   # >= 24 GB, fp8 Wan
     minVramGb: 24
