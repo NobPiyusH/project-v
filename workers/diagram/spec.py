@@ -174,7 +174,7 @@ def fallback_spec(title: str, lines: list[str] | None = None, duration: float = 
 
 AMBIENT_PULSE = ("box", "layer", "circle", "dots_grid", "particles", "rgb_mix", "callout")
 AMBIENT_FLOW = ("beam", "line", "arrow")
-TEXT_SCALE = 1.3          # on-screen words were too small at 2K: larger type (min 34, max 72)
+TITLE_SIZE, LABEL_MIN_SIZE = 40, 28  # one title size for every diagram; floating labels at least 28
 PULSE_PERIOD = 2.0        # seconds per gentle breathing cycle
 MAX_TOTAL_STEPS = 240
 
@@ -195,9 +195,9 @@ def enrich_motion(spec: dict) -> dict:
         out["elements"] = [e for e in out["elements"] if e["id"] not in gone]
         out["steps"] = [s for s in out.get("steps", []) if s.get("target") not in gone]
     els, steps = out["elements"], out.setdefault("steps", [])
-    for e in els:  # only the title and the caption (top and bottom edge) grow; bigger labels overlapped each other
-        if e.get("text") and e["type"] == "text" and abs(float(e.get("y", 0))) >= 2.9:
-            e["size"] = min(72, max(34, round(float(e.get("size", 26)) * TEXT_SCALE)))
+    for e in els:  # every title is the same size; floating labels get a modest floor (bigger ones overlapped each other)
+        if e.get("text") and e["type"] == "text":
+            e["size"] = TITLE_SIZE if float(e.get("y", 0)) >= 2.9 else max(int(e.get("size", 26)), LABEL_MIN_SIZE)
     appears = {s["target"] for s in steps if s.get("do") in ("show", "draw")}
     if els and all(e["id"] in appears and not e.get("visible") for e in els):
         first = next((e for e in els if e["type"] == "text"), els[0])

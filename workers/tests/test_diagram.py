@@ -133,7 +133,7 @@ def test_enrich_motion_keeps_the_directors_steps_and_leaves_no_second_still():
     assert any(s["do"] == "flow" and s["target"] == "beam" for s in out["steps"])
     assert any(s["do"] == "pulse" and s["target"] == "gun" for s in out["steps"])
     assert all(_active(out["steps"], t / 2) for t in range(1, 15)), "something must move every half second"
-    assert next(e for e in out["elements"] if e["id"] == "head")["size"] >= 34  # larger type
+    assert next(e for e in out["elements"] if e["id"] == "head")["size"] == 40  # one title size
     assert out["steps"] == enrich_motion(spec)["steps"]  # deterministic
 
 
