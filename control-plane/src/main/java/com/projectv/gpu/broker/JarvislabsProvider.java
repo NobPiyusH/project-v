@@ -116,6 +116,18 @@ public class JarvislabsProvider implements GpuProvider {
             ok = false;
             checks.add("FAIL: instance name longer than 40 characters");
         }
+        try {
+            Map<?, ?> b = asMap(call(List.of("balance"), null));
+            double bal = num(b.get("balance"));
+            checks.add("read-only balance: " + bal + " " + str(b.get("currency")) + " (min " + cfg.minBalance() + ")");
+            if (bal < cfg.minBalance()) {
+                ok = false;
+                checks.add("FAIL: balance below the minimum; a zero balance pauses instances and can delete their data");
+            }
+        } catch (RuntimeException e) {
+            ok = false;
+            checks.add("FAIL: balance check: " + e.getMessage());
+        }
         List<Quote> q = quotes(spec);
         if (q.isEmpty()) {
             ok = false;
@@ -160,7 +172,7 @@ public class JarvislabsProvider implements GpuProvider {
                 continue;
             }
             String kind = str(row.get("workload_type"));
-            double price = num(row.get("price_per_hour"));
+            double price = toUsd(num(row.get("price_per_hour")), str(row.get("currency")));
             String reject = allowed.vramGb() < spec.minVramGb() ? "too little VRAM" : num(row.get("free")) < 1 ? "none free"
                     : price <= 0 ? "no live price" : !kind.isEmpty() && !kind.equalsIgnoreCase("container") ? "not a container template GPU" : null;
             if (reject != null) {
@@ -169,7 +181,7 @@ public class JarvislabsProvider implements GpuProvider {
             }
             String region = str(row.get("region"));
             out.add(new Quote("jarvislabs", true, "FREE " + (int) num(row.get("free")), type + "|" + region, price,
-                    "%s in %s, $%.2f/h (per-GPU vs per-instance unverified; we rent 1 GPU)".formatted(type, region, price)));
+                    "%s in %s, $%.2f/h (live list converted from the account currency; GST not confirmed in it)".formatted(type, region, price)));
         }
         out.sort(Comparator.comparingDouble(Quote::hourlyUsd));
         lastWhy = !out.isEmpty() ? "" : why.isEmpty() ? "no allowed GPU in the JarvisLabs list" : "every GPU was rejected: " + why.keySet();
@@ -351,6 +363,11 @@ public class JarvislabsProvider implements GpuProvider {
 
     private String scrub(String s) {
         return apiKey.isEmpty() ? s : s.replace(apiKey, "***");
+    }
+
+    /** The live list is in the account currency; INR (the owner's account) is converted with the configured rate. */
+    private double toUsd(double amount, String currency) {
+        return "INR".equalsIgnoreCase(currency) ? amount / cfg.inrPerUsd() : amount;
     }
 
     private static String abbreviate(String s) {

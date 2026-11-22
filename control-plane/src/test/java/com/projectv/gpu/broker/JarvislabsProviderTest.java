@@ -23,6 +23,7 @@ class JarvislabsProviderTest {
             + "{\"gpu_type\":\"A100\",\"region\":\"IN2\",\"free\":2,\"price_per_hour\":0.89,\"workload_type\":\"container\"},"
             + "{\"gpu_type\":\"L4\",\"region\":\"IN2\",\"free\":5,\"price_per_hour\":0.44,\"workload_type\":\"container\"},"
             + "{\"gpu_type\":\"RTX-PRO6000\",\"region\":\"IN1\",\"free\":0,\"price_per_hour\":2.19,\"workload_type\":\"container\"}]";
+    String balance = "{\"balance\":500.0,\"grants\":0.0,\"currency\":\"INR\"}";
     String instance = "{\"machine_id\":777,\"name\":\"projectv-jarvislabs-aaaa\",\"status\":\"Running\",\"cost\":0.89,"
             + "\"endpoints\":[\"abc123.jarvislabs.net\"]}";
 
@@ -32,6 +33,7 @@ class JarvislabsProviderTest {
             stdins.add(stdin);
             return switch (args.getFirst()) {
                 case "gpus" -> gpus;
+                case "balance" -> balance;
                 case "create", "get" -> instance;
                 case "list" -> "[" + instance + "]";
                 case "destroy" -> "{\"destroyed\":true}";
@@ -134,5 +136,18 @@ class JarvislabsProviderTest {
         gpus = "[]";
         assertFalse(provider(KEY).preflight(SPEC, r).ok());
         assertFalse(provider("").preflight(SPEC, r).ok());
+    }
+
+    @Test
+    void inrPricesAreConvertedToUsdAndALowBalanceFailsThePreflight() {
+        gpus = "[{\"gpu_type\":\"A100\",\"region\":\"IN2\",\"free\":2,\"price_per_hour\":84.24,\"workload_type\":\"container\",\"currency\":\"INR\"}]";
+        JarvislabsProvider p = provider(KEY);
+        assertEquals(84.24 / 94, p.quote(SPEC).hourlyUsd(), 1e-9);
+        GpuProvider.CreateRequest r = new GpuProvider.CreateRequest("projectv-jarvislabs-preflight", "img", 80, List.of("python"),
+                Map.of("SV_BOOT_00", "A"), 8000, null, null);
+        assertTrue(p.preflight(SPEC, r).ok());
+        assertTrue(calls.contains("balance"));
+        balance = "{\"balance\":5.0,\"grants\":0.0,\"currency\":\"INR\"}";
+        assertFalse(provider(KEY).preflight(SPEC, r).ok());
     }
 }

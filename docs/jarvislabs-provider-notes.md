@@ -27,7 +27,27 @@ A30 0.41 / 0.29. L4 0.44 / 0.29. **No RTX 4090, L40S or A6000 is listed**, so ou
 small for fp8 Wan plus text encoder headroom? unverified) or A100 40GB at $0.89, which is dearer than RunPod/Vast 4090s. Prices must
 come live from `jl gpus` / `gpu_availability()` (rule 7); these are for the owner's orientation only. (An earlier note said "A100 40GB Rs84/h".)
 
-## NOT documented (would need a live, key-holding test)
+## Live read-only check (22 Nov 2026, SDK `jarvislabs` 0.2.19, key in the child env only; no instance created, nothing rented)
+- **The account bills in INR.** `jl gpus` prices are rupees per hour; `account.currency()` says "INR"; balance read as 500.0 (INR, grants 0).
+  The first adapter treated them as USD: fixed (helper returns `currency`, Java converts with `inrPerUsd` 94 in `config/providers.yaml`).
+  GST is not stated in the list prices: unverified (E2E adds 18% on top; if Jarvislabs does too, the real cost is 18% higher).
+- Live rows (container, per GPU, Rs/h = USD at 94): A30 38.88 = $0.41 (2 free, IN2); L4 41.31 = $0.44 (7 free, IN2); **A100 40GB 84.24 = $0.90
+  (2 free, IN2)**; A100-80GB 140.94 = $1.50 (0 free); RTX-PRO6000 96GB 207.36 = $2.21 (1 free, IN1); H200 434.97 = $4.63. H100 listed for VM only.
+  Prices match the pricing page, so the page's figures are per GPU.
+- Templates on the account: pytorch, fastai, automatic, axolotl, comfyui, fooocus, ollama, tensorflow, vm, ... **No custom Docker image field exists**
+  in `instances.create` (only template, script_id, script_args, arguments, http_ports, fs_id). So our warm image `projectv-pod:comfy-v0.45.0`
+  cannot be used: a container boots a stock template and the startup script must install ComfyUI + models itself (cold start, like the
+  29-minute RunPod path), unless models sit on an attached persistent filesystem (`fs_id`) or the home folder (only `<home>` survives resume; destroy deletes it).
+- Reachability (SDK source + skill doc): container `endpoints[0]` is an HTTPS URL for port 6006, public; more via `http_ports` "7860,8080" in order.
+  Our worker must listen on 6006 (done via `SV_PORT`). VMs have no HTTPS URLs (SSH only): not usable, so the adapter is container-only.
+- No SSH needed; the account key never goes on the node (the script holds worker env only). Startup scripts are stored on the account: the helper
+  removes ours after destroy. Spot (`is_spot`) exists for containers, not used.
+- Still unverified: whether the pytorch template has enough disk/CUDA for our worker without the warm image; how long the cold install takes;
+  startup-script size limit; endpoint URL pattern/auth; billing between create and Running; whether `destroy` is synchronous; GST.
+- Cost reality: cold boot at A100 Rs 84/h (~$0.90) vs RunPod/Vast 4090 warm boots. Auto only picks it when it is the cheapest live price including
+  nothing for boot time, so expect it to be chosen over a 4090 only when 4090s are out of stock; the canary will show the real boot time.
+
+## NOT documented (earlier note; items 1 and part of 2 and 4 are answered above) (would need a live, key-holding test)
 1. **Any REST endpoints, base URL, auth header and JSON field names** for list / create / status / destroy. The only HTTP base URL in the docs is the
    token-priced model API (`models.jarvislabs.net/v1`), which is not instance control.
 2. **Custom container image or env vars at create.** None found. Our worker ships as a boot payload in env vars (`SV_BOOT_*`); here it would

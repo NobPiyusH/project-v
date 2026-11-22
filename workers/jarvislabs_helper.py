@@ -4,7 +4,9 @@ JarvisLabs documents no REST API for instances, only the `jarvislabs` Python SDK
 adapter shells out to this file. The API key comes from the JL_API_KEY environment variable (never argv, never printed). Run with:
     uv run --with jarvislabs python workers/jarvislabs_helper.py <command>
 Commands (the request, when there is one, is JSON on stdin):
-    gpus                      -> [{gpu_type, region, free, price_per_hour, vram, workload_type}]
+    gpus                      -> [{gpu_type, region, free, price_per_hour, vram, workload_type, currency}]  (price is in the ACCOUNT currency:
+                                 the owner's account is INR, so 84.24 means Rs 84.24/h, not USD; the Java side converts)
+    balance                   -> {balance, grants, currency}   (read-only)
     list                      -> [instance...]
     get <id>                  -> instance
     create  {name, gpu_type, region, storage, template, http_ports, script}  -> instance (blocks until Running)
@@ -43,11 +45,16 @@ def main(argv: list[str]) -> dict | list:
     with Client() as c:  # key from JL_API_KEY
         if cmd == "gpus":
             out = []
+            cur = c.account.currency()
             for g in c.account.gpu_availability():
                 d = g.model_dump()
                 out.append({"gpu_type": d.get("gpu_type"), "region": d.get("region"), "free": d.get("num_free_devices"),
-                            "price_per_hour": d.get("price_per_hour"), "vram": d.get("vram"), "workload_type": d.get("workload_type")})
+                            "price_per_hour": d.get("price_per_hour"), "vram": d.get("vram"), "workload_type": d.get("workload_type"),
+                            "currency": cur})
             return out
+        if cmd == "balance":
+            b = c.account.balance()
+            return {"balance": b.balance, "grants": b.grants, "currency": c.account.currency()}
         if cmd == "list":
             return [inst(i) for i in c.instances.list()]
         if cmd == "get":
