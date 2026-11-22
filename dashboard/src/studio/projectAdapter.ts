@@ -4,7 +4,7 @@
 import { api, type CostRow, type Mode, type ProducerDecision, type Production, type StageInfo, type VideoDetail, type VideoSummary } from '../api'
 import type { Run } from '../autopilotApi'
 import { DREAM_STEPS, STEP_LABEL, dreamApi, type DreamDetail, type DreamMode, type DreamStep, type DreamSummary } from '../dreamApi'
-import { latestRuns } from '../pages/VideoDetail'
+import { latestRuns } from '../pages/stageRuns'
 
 export type Kind = 'short' | 'video'
 

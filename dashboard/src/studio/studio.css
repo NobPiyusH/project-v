@@ -7,7 +7,9 @@
 .sv-nav a:hover { text-decoration: none; color: var(--text); }
 .sv-nav a.on { background: var(--surface-2); color: var(--text); }
 .sv-top .spacer { flex: 1; }
-.sv-main { max-width: 980px; margin: 0 auto; padding: 20px 16px 72px; display: grid; gap: 14px; }
+.sv-main { max-width: 980px; margin: 0 auto; padding: 20px 16px 72px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
+.sv-main > * { min-width: 0; }
+.sv-main .card { overflow-x: auto; }
 .sv-main h1 { font-size: 1.4rem; margin: 2px 0; }
 .sv-chips { display: flex; gap: 8px; flex-wrap: wrap; }
 .sv-chip { padding: 7px 14px; border-radius: 99px; background: none; font-weight: 500; }
@@ -67,7 +69,9 @@ details.sv-adv > summary { cursor: pointer; color: var(--accent); font-weight: 6
   .sv-main { padding: 14px 12px 72px; }
   .sv-row .thumb { width: 44px; height: 58px; } .sv-row .thumb.wide { width: 76px; height: 43px; }
   .sv-row .side { font-size: 0.75rem; }
-  .sv-stg { flex-basis: 62px; font-size: 0.72rem; }
+  .sv-stg { flex: 1 0 36px; font-size: 0.62rem; }
+  .sv-stg small { display: none; }
+  .sv-stg.waiting small, .sv-stg.failed small { display: block; font-size: 0.58rem; }
   .hide-xs { display: none; }
 }
 

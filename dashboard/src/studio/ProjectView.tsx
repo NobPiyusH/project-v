@@ -102,7 +102,7 @@ export function ProjectView({ view, actions, shotIds = [], onChanged, extraHead,
       {view.live && (
         <section className="card row small">
           <span className="muted">All remaining stages</span>
-          <ModeSwitch value={(view.allMode ?? 'AUTO') as Mode} onChange={(m) => void setModes(() => actions.setAllModes(m))} />
+          <ModeSwitch value={(view.allMode ?? '') as Mode} onChange={(m) => void setModes(() => actions.setAllModes(m))} />
           {view.allMode == null && <span className="muted">(mixed: set per stage in Advanced)</span>}
           {view.allMode === 'REVIEW' && <span className="muted">you get {view.reviewMinutes} min at each stage</span>}
           {modeErr && <span className="error">{modeErr}</span>}
@@ -122,7 +122,7 @@ export function ProjectView({ view, actions, shotIds = [], onChanged, extraHead,
             <div className="sv-kv">{view.costLines.slice(0, 8).map((c) => (
               <div key={c.label} style={{ display: 'contents' }}><span>{c.label}</span><span className="num">{inr(c.inr)}{c.estimated ? '*' : ''}</span></div>))}</div>
           )}
-          {view.costLines.some((c) => c.estimated) && <p className="muted small" style={{ marginBottom: 0 }}>* estimated GPU time</p>}
+          {view.costLines.some((c) => c.estimated) && <p className="muted small" style={{ marginBottom: 0 }}>* estimated, not yet billed</p>}
         </section>
       </div>
       {view.outputs.length > 0 && (

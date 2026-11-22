@@ -7,6 +7,7 @@ import { fmtTime, usePoll } from '../hooks'
 import { CreativeCard } from './CreativeCard'
 import { AnimaticCard, ResearchCard, StoryCard } from './ProductionCards'
 import { Storyboard } from './Storyboard'
+import { latestRuns } from './stageRuns'
 
 interface Modes { default: Mode; stages: Record<string, Mode> }
 
@@ -226,15 +227,6 @@ export function VideoDetail({ id, stages }: { id: string; stages: StageInfo[] })
       )}
     </>
   )
-}
-
-export function latestRuns(runs: StageRun[]): Record<string, StageRun> {
-  const out: Record<string, StageRun> = {}
-  for (const r of runs) {
-    const cur = out[r.stage]
-    if (!cur || r.attempt >= cur.attempt) out[r.stage] = r
-  }
-  return out
 }
 
 export function StageRow(props: {
