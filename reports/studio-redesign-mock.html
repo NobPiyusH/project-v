@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Studio Redesign Mock</title>
+<style>
+:root{--bg:#0e1014;--card:#171a21;--line:#262b35;--text:#e8eaf0;--mute:#8b93a5;--acc:#7c9cff;--ok:#4fc38a;--warn:#f0b54a;--bad:#ef6b6b}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 system-ui,Segoe UI,sans-serif}
+header{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap;position:sticky;top:0;background:var(--bg);z-index:2}
+.brand{font-weight:700}nav{display:flex;gap:4px}nav a{padding:6px 12px;border-radius:8px;color:var(--mute);text-decoration:none;cursor:pointer}
+nav a.on{background:var(--card);color:var(--text)}.sp{flex:1}.pill{font-size:12px;padding:3px 8px;border-radius:99px;background:var(--card);border:1px solid var(--line);color:var(--mute)}
+.dot{background:var(--warn);color:#000;border-radius:99px;padding:0 6px;font-size:11px;margin-left:4px}
+main{max-width:980px;margin:0 auto;padding:16px}section{display:none}section.on{display:block}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px}
+h1{font-size:22px;margin:4px 0 12px}h2{font-size:16px;margin:0 0 10px}.mute{color:var(--mute);font-size:13px}
+textarea{width:100%;min-height:110px;background:#0b0d11;color:var(--text);border:1px solid var(--line);border-radius:10px;padding:12px;font:inherit}
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}.chip{padding:7px 14px;border-radius:99px;border:1px solid var(--line);cursor:pointer;background:none;color:var(--text);font:inherit}
+.chip.on{border-color:var(--acc);background:#1d2540}button.b{padding:9px 16px;border-radius:9px;border:1px solid var(--line);background:#20242e;color:var(--text);cursor:pointer;font:inherit}
+button.p{background:var(--acc);border-color:var(--acc);color:#0b0d11;font-weight:600}
+.row{display:flex;gap:12px;align-items:center;padding:10px;border-radius:10px;cursor:pointer}.row:hover{background:#1c2029}
+.thumb{width:54px;height:72px;border-radius:8px;flex:none;background:linear-gradient(160deg,#2a3a6a,#0d1424)}
+.thumb.v{width:96px;height:54px;background:linear-gradient(160deg,#5a4a1a,#1a1408)}.grow{flex:1;min-width:0}.t{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.badge{font-size:11px;padding:2px 7px;border-radius:6px;background:#232838;color:var(--mute)}
+.st-ok{color:var(--ok)}.st-w{color:var(--warn)}.st-r{color:var(--acc)}
+.tl{display:flex;gap:0;overflow-x:auto;padding:6px 0}.stg{flex:1;min-width:76px;text-align:center;font-size:12px;position:relative;cursor:pointer}
+.stg i{display:block;width:16px;height:16px;border-radius:50%;margin:0 auto 6px;border:2px solid var(--line);background:var(--bg)}
+.stg.d i{background:var(--ok);border-color:var(--ok)}.stg.w i{background:var(--warn);border-color:var(--warn)}.stg.s i{border-style:dashed}.stg.s{color:var(--mute)}
+.stg:not(:last-child)::after{content:"";position:absolute;top:8px;left:calc(50% + 10px);right:calc(-50% + 10px);height:2px;background:var(--line)}
+.player{aspect-ratio:9/16;max-height:420px;margin:0 auto;border-radius:12px;background:radial-gradient(circle at 50% 35%,#ffdca0 0,#c08040 6%,#203050 30%,#060a14 80%);display:flex;align-items:flex-end;justify-content:center;padding:12px;color:#fff;font-size:13px}
+.player.v{aspect-ratio:9/16;background:radial-gradient(circle at 40% 50%,#d6ff7a 0,#5a8a20 4%,#102010 30%,#03060a 80%)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:8px}.grid div{aspect-ratio:9/16;border-radius:8px;background:linear-gradient(150deg,#2b3550,#10141f)}
+.next{border-color:var(--warn)}.btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:14px}@media(max-width:700px){.two{grid-template-columns:1fr}}
+.toggle{display:inline-flex;border:1px solid var(--line);border-radius:9px;overflow:hidden}.toggle button{background:none;border:0;color:var(--mute);padding:6px 12px;cursor:pointer;font:inherit}.toggle .on{background:#232838;color:var(--text)}
+table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:7px 6px;border-bottom:1px solid var(--line);text-align:left}
+select{background:#0b0d11;color:var(--text);border:1px solid var(--line);border-radius:6px;padding:3px}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}.adv{display:none}.advon .adv{display:block}.advon .simp{display:none}
+details summary{cursor:pointer;color:var(--acc)}.note{font-size:12px;color:var(--mute);border-left:3px solid var(--acc);padding-left:8px;margin:6px 0}
+</style></head><body>
+<header><span class="brand">◆ Project V</span>
+<nav><a data-go="create">Create</a><a data-go="studio" class="on">Studio<span class="dot">1</span></a><a data-go="settings">Settings</a></nav>
+<span class="sp"></span><span class="pill">Today ₹27 · Month ₹1,184</span><span class="pill">Backend ● on</span></header>
+<main>
+<p class="note">Static mock for owner review. Data copied from a real Short (lighthouse, 21 Nov) and a real Video (fireflies, 18 Nov); titles, totals and shot counts are real; the "waiting" state, Producer quote, per-stage cost split and Settings figures are illustrative. Nothing here calls the backend.</p>
+
+<section id="create"><h1>Create</h1><div class="card">
+<textarea placeholder="Your idea…">A quiet lighthouse on a black rock at dusk, warm light in its window, calm sea. The camera drifts toward it, the lamp turns on, the first stars appear.</textarea>
+<div class="chips" data-group="prod"><button class="chip on">Short</button><button class="chip">Video</button><button class="chip">Story</button></div>
+<div class="chips" data-group="ch"><button class="chip">Science</button><button class="chip on">Dreamscapes</button></div>
+<p class="mute">About ₹25 · 20-40 min · 4 shots · Auto (you can step in at any stage)</p>
+<details><summary>Advanced options</summary><table>
+<tr><td>Look</td><td><select><option>unfiltered</option></select></td><td>Quality</td><td><select><option>480p preview</option><option>1080p</option></select></td></tr>
+<tr><td>Shots</td><td><select><option>4</option></select></td><td>Picture model</td><td><select><option>FLUX.2 klein</option></select></td></tr>
+<tr><td>GPU</td><td><select><option>auto (cheapest)</option></select></td><td>Stage modes</td><td><select><option>All Auto</option><option>All Review 10 min</option><option>Producer</option></select></td></tr>
+<tr><td>Hook title</td><td><input type="checkbox"></td><td>Chain shots / Paths</td><td><input type="checkbox"> <input type="checkbox"></td></tr></table></details>
+<div class="btns"><button class="b p">Make it</button><button class="b">Add to Autopilot queue</button></div></div></section>
+
+<section id="studio" class="on"><h1>Studio</h1>
+<div class="chips" data-group="f"><button class="chip on">All</button><button class="chip">Needs you · 1</button><button class="chip">Running</button><button class="chip">Done</button><button class="chip">Shorts</button><button class="chip">Videos</button></div>
+<div class="card" style="padding:6px">
+<div class="row" data-open="short"><div class="thumb"></div><div class="grow"><div class="t">A quiet lighthouse on a black rock</div><div class="mute"><span class="badge">Short</span> <span class="st-w">● Waiting for you: approve the clips</span></div></div><div class="mute">₹26.87<br>1 h</div></div>
+<div class="row" data-open="video"><div class="thumb v"></div><div class="grow"><div class="t">The Secret Light of Fireflies: Cold Chemistry &amp; Summer Magic</div><div class="mute"><span class="badge">Video</span> <span class="st-ok">● Done · 23 shots</span></div></div><div class="mute">₹300.89<br>4 d</div></div>
+<div class="row"><div class="thumb"></div><div class="grow"><div class="t">A woman in her thirties with red hair…</div><div class="mute"><span class="badge">Short</span> <span class="st-ok">● Done · ready to post</span> <button class="b" style="padding:2px 8px">Post</button></div></div><div class="mute">₹26.87<br>14 h</div></div>
+<div class="row"><div class="thumb v"></div><div class="grow"><div class="t">Midnight Descent: 4 km into the Abyss</div><div class="mute"><span class="badge">Video</span> <span class="st-ok">● Done · 26 shots</span></div></div><div class="mute">₹312.63<br>5 d</div></div>
+</div></section>
+
+<section id="project"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><a class="mute" data-go="studio" style="cursor:pointer">← Studio</a><span class="sp"></span>
+<div class="toggle"><button id="vs" class="on">Simple</button><button id="va">Advanced</button></div></div>
+<h1 id="ptitle"></h1><p class="mute" id="psub"></p>
+<div class="card"><div class="tl" id="tl"></div></div>
+<div id="pbody"></div></section>
+
+<section id="settings"><h1>Settings</h1>
+<div class="tabs chips" data-group="set"><button class="chip on">GPU</button><button class="chip">Providers</button><button class="chip">Routing</button><button class="chip">Budget</button><button class="chip">Autopilot</button><button class="chip">Producer rules</button><button class="chip">Lessons</button></div>
+<div class="two"><div class="card"><h2>GPU</h2><table><tr><th>Provider</th><th>State</th><th></th></tr>
+<tr><td>RunPod 4090 (warm image)</td><td class="st-ok">ready · no pod running</td><td><button class="b">Preflight</button></td></tr>
+<tr><td>Vast.ai</td><td class="st-ok">ready</td><td><button class="b">Preflight</button></td></tr>
+<tr><td>Daily GPU cap</td><td>$3.50</td><td></td></tr><tr><td>Idle shutdown</td><td>10 min</td><td></td></tr></table>
+<p class="mute">Live pod logs (was the top-bar "GPU logs" button) open here.</p></div>
+<div class="card"><h2>Budget</h2><table><tr><td>Gemini month</td><td>₹612 / ₹1,000</td></tr><tr><td>AICredits fallback</td><td>₹18 / ₹150</td></tr><tr><td>Short target</td><td>under ₹20</td></tr></table></div></div>
+<p class="mute">Providers, Routing, Autopilot, Producer rules and Lessons are today's pages, unchanged, under these tabs.</p></section>
+</main>
+<script>
+const P={
+short:{title:"A quiet lighthouse on a black rock",sub:"Short · Dreamscapes · 4 shots · 480p preview → 1080x1920 · ₹26.87 so far",v:false,
+ stages:[["Idea","s"],["Script","d"],["Voice","s"],["Music","d"],["Pictures","d"],["Clips","w"],["Edit",""],["Package",""],["Publish",""]],
+ next:{t:"Clips are ready: 4 clips, 17.8 s",p:"Producer: “Shot 3 beam sweep is smooth; shot 2 drifts a little fast. Approve.”"},
+ modes:{Idea:"Auto",Script:"Auto",Music:"Auto",Pictures:"Auto",Clips:"Review 10 min",Edit:"Auto",Package:"Auto",Publish:"Manual"},
+ cost:[["Script (Gemini)","₹0.40"],["Pictures FLUX.2 klein (RunPod 4090)","₹6.10"],["Clips Wan+SVI (RunPod 4090)","₹19.80"],["Music: your track","₹0"],["Edit + RIFE (laptop)","₹0.57"]]},
+video:{title:"The Secret Light of Fireflies: Cold Chemistry & Summer Magic",sub:"Video · Science · 60 s vertical · shorts_punchy · 23 shots · ₹300.89",v:true,
+ stages:[["Idea","d"],["Script","d"],["Voice","d"],["Music","d"],["Pictures","d"],["Clips","d"],["Edit","d"],["Package","d"],["Publish","d"]],
+ next:null,
+ modes:{Idea:"Auto",Script:"Review 10 min",Voice:"Review 10 min",Music:"Auto",Pictures:"Producer",Clips:"Producer",Edit:"Auto",Package:"Auto",Publish:"Manual"},
+ cost:[["Plan, research, script","₹14.20"],["Voice","₹9.60"],["Music (Lyria)","₹11.00"],["Keyframes","₹38.40"],["Clips","₹214.30"],["Edit + package","₹13.39"]]}};
+let cur="short",adv=false;
+function go(id){document.querySelectorAll("section").forEach(s=>s.classList.toggle("on",s.id===id));document.querySelectorAll("nav a").forEach(a=>a.classList.toggle("on",a.dataset.go===id||(id==="project"&&a.dataset.go==="studio")));scrollTo(0,0)}
+function render(){const p=P[cur];ptitle.textContent=p.title;psub.textContent=p.sub;
+ tl.innerHTML=p.stages.map(([n,s])=>`<div class="stg ${s}"><i></i>${n}${s==="s"?"<br><span class=mute>skipped</span>":""}</div>`).join("");
+ const nx=p.next?`<div class="card next"><h2>⏳ Needs you: ${p.next.t}</h2><p class="mute">${p.next.p}</p><div class="btns"><button class="b p">Approve</button><button class="b">Redo with a note</button><button class="b">Retry</button><button class="b">Continue without it</button></div><p class="mute">If you do nothing, it continues by itself in 8 min (Review mode).</p></div>`:`<div class="card"><h2 class="st-ok">✓ Finished</h2><div class="btns"><button class="b p">Download</button><button class="b">Open publishing kit</button><button class="b">Redo a stage…</button></div></div>`;
+ const simple=`<div class="simp">${nx}<div class="two"><div class="card"><div class="player ${p.v?"v":""}">▶ ${p.v?"Final master":"Latest preview"}</div></div><div class="card"><h2>What was made</h2><div class="grid">${"<div></div>".repeat(p.v?8:4)}</div><p class="mute">Pictures · Clips · Music · Captions — tap to open</p></div></div></div>`;
+ const advanced=`<div class="adv">${nx}<div class="card"><h2>Stage modes</h2><table>${Object.entries(p.modes).map(([k,v])=>`<tr><td>${k}</td><td><select>${["Auto","Review 10 min","Manual","Producer"].map(o=>`<option ${o===v?"selected":""}>${o}</option>`).join("")}</select></td></tr>`).join("")}</table></div>
+ <div class="two"><div class="card"><h2>Shots</h2><div class="grid">${"<div></div>".repeat(p.v?8:4)}</div><p class="mute">Per shot: prompt, keyframe versions, clip versions, redo (today's Storyboard / ClipsCard / ShotsGrid).</p></div>
+ <div class="card"><h2>Cost &amp; routing</h2><table>${p.cost.map(([a,b])=>`<tr><td>${a}</td><td>${b}</td></tr>`).join("")}</table></div></div>
+ <div class="card"><h2>More (today's cards, unchanged)</h2><p class="mute">${p.v?"Script editor · Producer card + rules · Creative review · Quality checks · Routing":"GPU card (pick / hold / off) · Hook · Paths · Scout · Quality check · Evidence · Lessons"}</p></div></div>`;
+ pbody.innerHTML=simple+advanced;document.getElementById("project").classList.toggle("advon",adv)}
+document.addEventListener("click",e=>{const g=e.target.closest("[data-go]");if(g)go(g.dataset.go);
+ const o=e.target.closest("[data-open]");if(o){cur=o.dataset.open;render();go("project")}
+ const c=e.target.closest(".chip");if(c){c.parentElement.querySelectorAll(".chip").forEach(x=>x.classList.remove("on"));c.classList.add("on")}});
+vs.onclick=()=>{adv=false;vs.classList.add("on");va.classList.remove("on");render()};va.onclick=()=>{adv=true;va.classList.add("on");vs.classList.remove("on");render()};
+render();
+</script></body></html>
