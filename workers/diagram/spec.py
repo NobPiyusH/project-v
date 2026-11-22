@@ -174,7 +174,7 @@ def fallback_spec(title: str, lines: list[str] | None = None, duration: float = 
 
 AMBIENT_PULSE = ("box", "layer", "circle", "dots_grid", "particles", "rgb_mix", "callout")
 AMBIENT_FLOW = ("beam", "line", "arrow")
-TITLE_SIZE, LABEL_MIN_SIZE, X_LABEL = 40, 28, 5.3  # one title size for every diagram; floating labels at least 28
+TITLE_SIZE, LABEL_MIN_SIZE, X_LABEL, X_FRAME = 40, 28, 5.3, 6.9  # one title size for every diagram; floating labels at least 28
 PULSE_PERIOD = 2.0        # seconds per gentle breathing cycle
 MAX_TOTAL_STEPS = 240
 
@@ -208,7 +208,8 @@ def enrich_motion(spec: dict) -> dict:
     for e in els:  # every title is the same size; floating labels get a modest floor (bigger ones overlapped each other)
         if e.get("text") and e["type"] == "text" and e not in tops[:1]:
             e["size"] = max(int(e.get("size", 26)), LABEL_MIN_SIZE)
-            e["x"] = max(-X_LABEL, min(X_LABEL, float(e["x"])))  # keep labels inside the frame
+            half = len(e["text"]) * 0.09  # about half the printed width in scene units at size 28
+            e["x"] = max(-(X_FRAME - half), min(X_FRAME - half, float(e["x"])))  # keep labels inside the frame
     labels = sorted((e for e in els if e["type"] == "text" and e not in tops[:1]), key=lambda e: (round(float(e["y"]), 1), float(e["x"])))
     for a, b in zip(labels, labels[1:]):  # labels on the same line must not touch: push the right one along
         if abs(float(a["y"]) - float(b["y"])) < 0.4:
