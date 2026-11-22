@@ -43,6 +43,8 @@ public class DreamGpu {
     private final boolean enabled;
     private final String workerFile;
     private final String image;
+    /** Warm-start image (docker/pod/Dockerfile); blank = OFF, the plain image + boot install is used. */
+    private final String warmImage;
     private final String volumeId;
     private final int readyTimeoutMinutes;
     private final int port;
@@ -56,7 +58,7 @@ public class DreamGpu {
     public DreamGpu(GpuBroker broker, org.springframework.jdbc.core.simple.JdbcClient jdbc, PreferenceStore prefs, Pricing pricing,
                     String provider, String workerFile, String image, String volumeId, int readyTimeoutMinutes, int port,
                     double secondsPerPicture, double secondsPer81Frames, double startSeconds, double worstCaseHourlyUsd) {
-        this(broker, jdbc, prefs, pricing, provider, workerFile, image, volumeId, readyTimeoutMinutes, port, secondsPerPicture,
+        this(broker, jdbc, prefs, pricing, provider, workerFile, image, volumeId, "", readyTimeoutMinutes, port, secondsPerPicture,
                 secondsPer81Frames, startSeconds, worstCaseHourlyUsd, RentalEstimate.DEFAULT);
     }
 
@@ -66,6 +68,7 @@ public class DreamGpu {
                     @Value("${projectv.gpu.pod-worker-file:workers/pod/server.py}") String workerFile,
                     @Value("${projectv.gpu.pod-image:runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404}") String image,
                     @Value("${projectv.gpu.pod-volume-id:}") String volumeId,
+                    @Value("${projectv.gpu.warm-image:}") String warmImage,
                     @Value("${projectv.gpu.pod-ready-minutes:30}") int readyTimeoutMinutes,
                     @Value("${projectv.gpu.pod-port:8000}") int port,
                     @Value("${projectv.gpu.seconds-per-picture:10}") double secondsPerPicture,
@@ -83,6 +86,7 @@ public class DreamGpu {
         this.enabled = "broker".equalsIgnoreCase(provider);
         this.workerFile = workerFile;
         this.image = image;
+        this.warmImage = warmImage == null || warmImage.isBlank() ? null : warmImage.strip();
         this.volumeId = volumeId == null || volumeId.isBlank() ? null : volumeId;
         this.readyTimeoutMinutes = readyTimeoutMinutes;
         this.port = port;
@@ -151,9 +155,23 @@ public class DreamGpu {
 
     /** Opens (or returns) the Short's pod. Throws when no provider can serve (the step then waits for the owner). */
     public Session session(UUID dreamId) {
-        GpuBroker.Rental r = broker.acquire(dreamId, "video.i2v.dream", image, PodBoot.command(),
-                PodBoot.env(worker(), port, "/workspace/data", volumeId == null ? null : VOLUME_MOUNT), volumeId, pick(dreamId), rentalHours(dreamId));
+        GpuBroker.Rental r = broker.acquire(dreamId, "video.i2v.dream", podImage(), PodBoot.command(),
+                podEnv(), volumeId, pick(dreamId), rentalHours(dreamId));
         return new Session(r.instance().endpoint(), readyTimeoutMinutes * 60);
+    }
+
+    /** Where docker/pod/Dockerfile bakes ComfyUI (not under /workspace, which a provider volume may cover). */
+    static final String WARM_ROOT = "/opt/projectv";
+
+    /** The pod's env: worker payload and, with a warm-start image, where it keeps ComfyUI. */
+    java.util.Map<String, String> podEnv() {
+        return PodBoot.env(worker(), port, "/workspace/data", volumeId == null ? null : VOLUME_MOUNT,
+                warmImage == null ? null : WARM_ROOT);
+    }
+
+    /** The image every provider rents: the warm-start image when configured, else the plain one (current boot path). */
+    public String podImage() {
+        return warmImage != null ? warmImage : image;
     }
 
     /** The Short's GPU choice: Auto (default) or Manual with the owner's pick. */
@@ -338,14 +356,12 @@ public class DreamGpu {
 
     /** Free pre-check with the real worker payload; never rents. */
     public GpuProvider.Preflight preflight(String provider) {
-        return broker.preflight(provider, image, PodBoot.command(),
-                PodBoot.env(worker(), port, "/workspace/data", volumeId == null ? null : VOLUME_MOUNT), volumeId);
+        return broker.preflight(provider, podImage(), PodBoot.command(), podEnv(), volumeId);
     }
 
     /** The owner-approved canary: one tiny rental of the provider's cheapest GPU that must pass the worker's /health, then ends. */
     public java.util.Map<String, Object> canary(String provider, double maxUsd) {
-        return broker.canary(provider, image, PodBoot.command(),
-                PodBoot.env(worker(), port, "/workspace/data", volumeId == null ? null : VOLUME_MOUNT), volumeId,
+        return broker.canary(provider, podImage(), PodBoot.command(), podEnv(), volumeId,
                 DreamGpu::workerHealth, 20 * 60, 10_000, maxUsd);
     }
 

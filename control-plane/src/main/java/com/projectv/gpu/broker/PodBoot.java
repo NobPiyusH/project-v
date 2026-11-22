@@ -27,6 +27,14 @@ public final class PodBoot {
 
     /** As above; {@code volumeMount} (where the provider mounts the persistent volume) becomes SV_VOLUME when set. */
     public static Map<String, String> env(byte[] workerSource, int port, String root, String volumeMount) {
+        return env(workerSource, port, root, volumeMount, null);
+    }
+
+    /**
+     * As above; {@code bakedRoot} (where a warm-start image has ComfyUI + nodes, see docker/pod/Dockerfile) becomes SV_BAKED.
+     * The worker uses it only when its pinned ComfyUI is there, so a stale image still boots the old way.
+     */
+    public static Map<String, String> env(byte[] workerSource, int port, String root, String volumeMount, String bakedRoot) {
         Deflater d = new Deflater(Deflater.BEST_COMPRESSION);
         d.setInput(workerSource);
         d.finish();
@@ -50,6 +58,9 @@ public final class PodBoot {
         env.put("HF_HUB_DISABLE_XET", "1");
         if (volumeMount != null && !volumeMount.isBlank()) {
             env.put("SV_VOLUME", volumeMount);
+        }
+        if (bakedRoot != null && !bakedRoot.isBlank()) {
+            env.put("SV_BAKED", bakedRoot);
         }
         return env;
     }

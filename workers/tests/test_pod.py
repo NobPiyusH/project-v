@@ -699,6 +699,19 @@ def test_fetch_files_retries_each_weight(monkeypatch, tmp_path):
 
 # ------------------------------------------------------------------------------------------- boot timing (22 Nov 2026)
 
+def test_baked_comfy_is_used_only_when_present_and_on_the_pinned_tag(tmp_path):
+    assert S.baked_comfy("") is None
+    assert S.baked_comfy(str(tmp_path)) is None  # nothing baked
+    old = tmp_path / "ComfyUI-v0.0.1"
+    old.mkdir()
+    (old / "main.py").write_text("")
+    assert S.baked_comfy(str(tmp_path)) is None  # an image baked for another tag is not used
+    new = tmp_path / f"ComfyUI-{S.COMFY_TAG}"
+    new.mkdir()
+    (new / "main.py").write_text("")
+    assert S.baked_comfy(str(tmp_path)) == new
+
+
 def test_boot_timeline_records_marks_and_download_speed():
     t = [1000.0]
     tl = S.BootTimeline(clock=lambda: t[0])

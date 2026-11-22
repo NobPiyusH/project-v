@@ -575,7 +575,24 @@ def install() -> None:
         subprocess.run([sys.executable, "-m", "pip", "install", "-q", *PIP], check=True)
 
 
+BAKED = os.environ.get("SV_BAKED", "")   # warm-start image: ComfyUI + KJNodes + Python deps were installed at build time
+
+
+def baked_comfy(baked: str | None = None) -> Path | None:
+    """The ComfyUI of a warm-start image (docker/pod/Dockerfile) when it is there AND is the pinned tag, else None
+    (a tag bump without an image rebuild falls back to the normal fetch, so the old image never runs a stale ComfyUI)."""
+    b = BAKED if baked is None else baked
+    if not b:
+        return None
+    p = Path(b) / f"ComfyUI-{COMFY_TAG}"
+    return p if (p / "main.py").exists() else None
+
+
 def fetch_comfy() -> Path:
+    warm = baked_comfy()
+    if warm is not None:
+        log(f"using the ComfyUI baked into the image: {warm}")
+        return warm
     comfy = ROOT / f"ComfyUI-{COMFY_TAG}"
     if not (comfy / "main.py").exists():
         log(f"fetching ComfyUI {COMFY_TAG}")
@@ -969,7 +986,15 @@ def boot(state: State) -> None:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Project V pod GPU worker")
     ap.add_argument("--dry-run", action="store_true", help="print the plan and build a graph; no GPU, no download")
+    ap.add_argument("--bake", action="store_true",
+                    help="image build step: install deps, ComfyUI and KJNodes into SV_ROOT (no weights, no GPU), exit")
     args = ap.parse_args(argv)
+    if args.bake:
+        ROOT.mkdir(parents=True, exist_ok=True)
+        install()
+        fetch_kjnodes(fetch_comfy())
+        print(f"baked ComfyUI {COMFY_TAG} + KJNodes into {ROOT}")
+        return 0
     if args.dry_run:
         print(json.dumps(plan(), indent=1))
         clip_graph({"prompt": "test", "seed": 1, "width": 480, "height": 832, "frames": 81}, "x.png", "clip/x")

@@ -38,5 +38,7 @@ class PodBootTest {
         assertEquals("python", PodBoot.command().get(0));
         assertFalse(env.containsKey("SV_VOLUME"));
         assertEquals("/workspace", PodBoot.env(src, 8000, "/workspace/data", "/workspace").get("SV_VOLUME"));
+        assertFalse(env.containsKey("SV_BAKED"), "warm start is off unless asked for");
+        assertEquals("/opt/projectv", PodBoot.env(src, 8000, "/workspace/data", null, "/opt/projectv").get("SV_BAKED"));
     }
 }
