@@ -84,7 +84,7 @@ export function ProducerCard({ videoId }: { videoId: string }) {
 }
 
 /** Rules it learned from your notes (and rules you add): you can edit, switch off or delete each. */
-function ProducerRules() {
+export function ProducerRules() {
   const { data: rules, refresh } = usePoll(api.producerRules, 30000)
   const [text, setText] = useState('')
   const [stage, setStage] = useState('')

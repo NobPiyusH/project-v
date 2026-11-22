@@ -2,13 +2,14 @@ import { api } from '../api'
 import { usePoll } from '../hooks'
 import { RouterCard } from './Routing'
 
-export function Providers() {
+/** `withRouter` is false in the new Settings, which shows the router on its own Routing tab. */
+export function Providers({ withRouter = true }: { withRouter?: boolean }) {
   const { data: providers, error } = usePoll(api.providers, 10000)
   const { data: styles } = usePoll(api.styles, 60000)
 
   return (
     <>
-      <RouterCard />
+      {withRouter && <RouterCard />}
       <section className="card">
         <div className="card-head">
           <h2>All providers</h2>
