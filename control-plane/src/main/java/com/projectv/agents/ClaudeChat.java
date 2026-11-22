@@ -22,8 +22,8 @@ import java.util.stream.Collectors;
 public class ClaudeChat {
 
     public static final String PREFIX = "claude:";
-    /** Hard ceiling per call (output + thinking): ~$0.08 on Sonnet 5.5. */
-    static final long MAX_TOKENS = 8_000;
+    /** Hard ceiling per call (output + thinking): ~$0.16 on Sonnet 5.5. Raised from 8,000 on 22 Nov 2026: a 26-shot plan with diagram specs was cut off. */
+    static final long MAX_TOKENS = 16_000;
 
     public record Result<T>(T entity, String model, long inputTokens, long outputTokens) {
     }
