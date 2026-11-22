@@ -612,6 +612,7 @@ def fetch_comfy() -> Path:
 
 
 VOLUME = os.environ.get("SV_VOLUME", "")   # optional persistent (RunPod global) volume: weights are cached there
+ZIMAGE_MIN_FREE_GB = 60                   # pre-download Z-Image only with this much free disk after Wan
 ZIMAGE_PATH = ZIMAGE_REPO                  # becomes a local snapshot folder once downloaded / found on the volume
 
 
@@ -726,6 +727,14 @@ def download(comfy: Path, state: State) -> None:
 
     fetch_files(comfy, state, FILES, "wan-fp8")
     t = time.time()
+    # An 80 GB container disk holds Wan (45 GB) plus FLUX.2 klein and its text encoder (16 GB) but not Z-Image (31 GB) too:
+    # with too little room Z-Image is left to download on first use (ZIMAGE_PATH stays the repo id) instead of filling the disk
+    # and failing the FLUX download (22 Nov 2026, "No space left on device").
+    free_gb = shutil.disk_usage(ROOT).free / 1e9
+    if not (VOLUME and (Path(VOLUME) / "zimage-turbo" / ".complete").exists()) and free_gb < ZIMAGE_MIN_FREE_GB:
+        log(f"Z-Image Turbo not pre-downloaded: only {free_gb:.0f} GB free (needs {ZIMAGE_MIN_FREE_GB} GB); it loads on first use")
+        state.timeline.download("Z-Image-Turbo (snapshot)", 0, 0.0, "skipped: low disk")
+        return
     marker = Path(VOLUME) / "zimage-turbo" / ".complete" if VOLUME else None
     if marker is not None and marker.exists():
         state.phase = "using volume copy of Z-Image Turbo"
