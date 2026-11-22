@@ -29,3 +29,8 @@ CTO notes: 10-13 are one program (a Python-only studio on serverless GPU). Do it
 ## Owner follow-up, 23 Nov 2026
 - Item 5: run an A/B of FLUX.2 klein vs Z-Image Turbo on the "lonely" look (same prompts, owner judges by eye, a few cents on a pod already running), THEN decide the default. Until then FLUX stays the default for Video; Z-Image stays for Dream Shorts "lonely".
 - Item 10: "do as needful, but later the code base will increase": agreed, the cost of the Java-to-Python move grows with the codebase, so start soon. Plan: right after the television video, write the migration plan (scope, order of stages, tests, stop rule, branch), get the owner's go, then migrate one stage at a time, old path kept until the Python one passes its tests and he approves.
+
+## Added 23 Nov 2026
+- **Earshot test** (https://github.com/Leonxlnx/earshot, MIT, CPU-only sound-effect generator, 922 designs; README read only, not installed): after the television video, small test on 5 shots: compare its effects with the current SFX step, owner judges by ear; also try its "listen/timeline" to check music/voice mix. Base install ~350 MB, listening models ~1.1 GB download / 2.2 GB on disk (put on E:). If preferred: optional SFX source behind a switch.
+- **Fix list noted today:** Director diagram-spec callout fields (x,y = text, tx,ty = target) were swapped in some specs; DIAGRAM_SPEC parse failure falls back to a text card (shot 20); mojibake "Â°" in text from an upstream encoding bug; AI creative review wrongly flags diagram shots as "missing image prompts"; Keyframes summary label fixed (6dd3cb6).
+- **Music/voice sync check** on the final cut: loudness voice vs music, silence gaps, music ending with the voice, caption timing; owner then listens.
