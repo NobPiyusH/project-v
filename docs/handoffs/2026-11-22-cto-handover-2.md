@@ -46,3 +46,10 @@ Gendu = CEO (decides what and why, judges by eye and ear, approves every spend, 
 - Test new providers with preflight + canary only; do not pin manual picks on unproven providers.
 - Docker Desktop stops on this laptop: check it first when the backend is unreachable.
 - Usage: this chat reached about 500k tokens; each new turn after a cache miss re-reads it. Start fresh chats from handovers like this one; archive finished sessions; avoid many parallel Opus sessions.
+
+## Update, 22 Nov late evening
+- Television video cost so far: Rs 187 (about $2.0) of the **$4 hard cap** (owner raised it from $3). About half was waste: the duplicate video b3989771 (Rs 57), the cut-off SHOT_PLAN loop (Rs ~33 extra), a second song. DIAGRAM_SPEC makes 2.3 Gemini calls per shot (23 calls for about 10 shots, Rs 61.6): being investigated by session `cost-cuts` (branch `claude/cost-cuts-*`, flags default OFF, merge only after the television video ends, never restart the backend while it runs). GPU part still ahead: estimate $1.0-1.7.
+- Shot plan for d3e53cd1 needed a manual Retry once (a timeout left it FAILED awaiting the owner; a backend restart does NOT retry it).
+- E: drive (WD_BLACK SN7100, 931 GB, empty) is installed. Owner approved moving things from C: to E: AFTER the television video: uv cache + model caches, Docker data, `reports\`, and `Downloads` (148 GB, copy then verify then junction). C: has 16 GB free. Worktree cleanup freed almost nothing (uv hardlinks). Real Real-ESRGAN test on E:	oolsealesrgan (7-9 s per 480x832 frame at 4x on the laptop, use `-g 1 -t 128` for the NVIDIA card); a rented GPU is the way for real upscaling; no upscale stage built yet.
+- Owner asked about matching an `ai.dreamscape00` style Reel (AI video, not Blender); not started.
+- Usage: this chat was about 500k tokens; owner asked to switch to a fresh chat after the television video. Read this note and the memory index first.
