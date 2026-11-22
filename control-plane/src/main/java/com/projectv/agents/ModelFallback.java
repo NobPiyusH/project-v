@@ -78,7 +78,24 @@ public final class ModelFallback {
         throw new IllegalStateException("unreachable");
     }
 
+    /**
+     * A paid answer that hit the output ceiling is not a model outage: asking weaker fallback models for the same big
+     * structured answer wastes money and gives a worse result (22 Nov 2026: three cut-off Sonnet shot plans, each paid).
+     * It fails at once with a clear message; the owner retries (or the shot plan split, projectv.cost.shot-plan-split-tokens, avoids it).
+     */
+    static boolean isCutOff(Throwable t) {
+        for (Throwable c = t; c != null; c = c.getCause()) {
+            if (String.valueOf(c.getMessage()).toLowerCase(Locale.ROOT).contains("was cut off")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     static boolean isModelProblem(Throwable t) {
+        if (isCutOff(t)) {
+            return false;
+        }
         for (Throwable c = t; c != null; c = c.getCause()) {
             String m = String.valueOf(c.getMessage()).toLowerCase(Locale.ROOT);
             if (m.contains("no longer available") || m.contains("not found") || m.contains("404")

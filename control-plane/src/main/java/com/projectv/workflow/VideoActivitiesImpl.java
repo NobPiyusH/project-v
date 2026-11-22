@@ -382,11 +382,26 @@ public class VideoActivitiesImpl implements VideoActivities {
         return production.saveAnimatic(UUID.fromString(videoId), result);
     }
 
+    /** "Attempt 2 of SHOT_PLAN: earlier attempts already cost Rs 41.3 (5 calls)", shown on the running stage; null when nothing was spent. */
+    private String secondRunWarning(UUID id, Stage stage, int attempt) {
+        try {
+            return ledger.stageSummary(id).stream().filter(r -> stage.name().equals(r.get("stage"))).findFirst()
+                    .map(r -> "Attempt %d: earlier attempts of this stage already cost Rs %s (%s calls).".formatted(attempt,
+                            ((java.math.BigDecimal) r.get("inr")).setScale(1, java.math.RoundingMode.HALF_UP), r.get("calls")))
+                    .orElse(null);
+        } catch (RuntimeException e) {
+            return null; // a warning must never break a stage
+        }
+    }
+
     @Override
     public void recordStage(String videoId, Stage stage, int attempt, StageMode mode, String status, String summary,
                             String artifactJson, String ownerNotes) {
         UUID id = UUID.fromString(videoId);
         boolean done = !status.equals("RUNNING") && !status.equals("WAITING_APPROVAL");
+        if (status.equals("RUNNING") && attempt > 1 && summary == null) {
+            summary = secondRunWarning(id, stage, attempt); // the owner sees what a repeat is about to cost
+        }
         jdbc.sql("""
                         INSERT INTO stage_run (id, video_id, stage, attempt, mode, status, summary, artifact_json, owner_notes, finished_at)
                         VALUES (:rid, :vid, :stage, :attempt, :mode, :status, :summary, CAST(:artifact AS jsonb), :notes,

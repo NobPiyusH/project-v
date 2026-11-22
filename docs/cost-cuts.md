@@ -31,6 +31,19 @@ quality risk, so it is **not built**. The cost is in running the stage twice, wh
 
 Not touched: Claude effort per purpose already exists (`CLAUDE_EFFORT_OVERRIDES`, also off).
 
+## Bug-fix guards (ON by default, no flag) and the second batch of flags
+
+| Cause (TV video, 22 Nov) | Root cause | Fix | Test |
+|---|---|---|---|
+| Duplicate video (Rs ~57) | `POST /videos` had no check: the same prompt was created again 8 min later while the first was PAUSED. (No Java code resumes a paused video at startup; Temporal only replays.) | A video with the exact same prompt still CREATED/RUNNING/WAITING/PAUSED within 60 min is refused (409) with its id; `allowDuplicate=true` in the body overrides (needed for deliberate A/B pairs). | `DuplicateVideoGuardTest` |
+| SHOT_PLAN cut off, then looped through weak models (~Rs 11 each, 3x) | `ClaudeChat` throws "unavailable: ... was cut off" and `ModelFallback` treated "unavailable" as a model outage, so the same big answer was bought again from weaker models | A cut-off never hops model; it fails at once with a clear message. The split (flag) is the recovery. | `ModelFallbackTest.aCutOffAnswerDoesNotHopToTheNextModel` |
+| Second song (Rs ~11) | A full re-run executed MUSIC with the music already stored | A stored `music_cue` is always reused in a full run (even with the reuse flag off, and even if the script was re-made); an owner redo (Reject / REDO_WITH) still makes new music | `StageReuseTest.musicIsReusedEvenWithTheFlagOff...` |
+| Worker added a field Java did not know, workflow wedged | Temporal's default JSON reader rejects unknown fields | Temporal client uses `LenientConverters` (unknown fields ignored on read, writing unchanged) | `WorkerContractTest` (every `MediaActivities` result record and its nested records), `workers/tests/test_java_contract.py` (stock_fetch keys vs the Java records; a new worker key must be added to the record or listed in EXTRA) |
+
+Flags added (off): `COST_AUTO_RETRY_TIMEOUT` (`projectv.cost.auto-retry-timeout`): when no model answered within the time limit, the call is tried once more instead of leaving the stage FAILED for a manual Retry (`LlmTimeoutRetryTest`).
+Warning before a repeat (always on, display only): a stage starting attempt 2+ shows "earlier attempts of this stage already cost Rs X (N calls)" as its running summary.
+The Python key check covers stock_fetch only; the other activities are covered by the Java unknown-field test, add a `check(record, payload)` case per activity when its test has a stub.
+
 ## Seeing where the money went
 
 `GET /api/videos/{id}` now has `costByStage`: per stage (biggest first) its calls, total Rs and the purposes inside it

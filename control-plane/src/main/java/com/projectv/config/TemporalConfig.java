@@ -29,7 +29,8 @@ public class TemporalConfig {
     @Bean
     public WorkflowClient workflowClient(WorkflowServiceStubs stubs,
                                          @Value("${projectv.temporal.namespace}") String namespace) {
-        return WorkflowClient.newInstance(stubs, WorkflowClientOptions.newBuilder().setNamespace(namespace).build());
+        return WorkflowClient.newInstance(stubs, WorkflowClientOptions.newBuilder().setNamespace(namespace)
+                .setDataConverter(LenientConverters.dataConverter()).build());
     }
 
     @Bean

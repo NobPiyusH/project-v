@@ -82,7 +82,7 @@ public class ApiController {
     }
 
     public record CreateVideoRequest(@NotBlank @Size(max = 4000) String prompt, StageMode defaultMode,
-                                     Map<Stage, StageMode> modes, Integer reviewMinutes) {
+                                     Map<Stage, StageMode> modes, Integer reviewMinutes, Boolean allowDuplicate) {
     }
 
     public record ReviewRequest(int minutes) {
@@ -111,7 +111,8 @@ public class ApiController {
 
     @PostMapping("/videos")
     public ResponseEntity<Map<String, Object>> create(@Valid @RequestBody CreateVideoRequest req) {
-        UUID id = videos.create(new VideoService.CreateVideo(req.prompt(), req.defaultMode(), req.modes(), req.reviewMinutes()));
+        UUID id = videos.create(new VideoService.CreateVideo(req.prompt(), req.defaultMode(), req.modes(), req.reviewMinutes(),
+                Boolean.TRUE.equals(req.allowDuplicate())));
         return ResponseEntity.status(HttpStatus.CREATED).body(Map.of("id", id));
     }
 

@@ -45,7 +45,9 @@ public class StageReuse {
     }
 
     public Optional<StageResult> reusable(UUID videoId, Stage stage) {
-        if (!enabled || !UPSTREAM.containsKey(stage)) {
+        // Music is the exception: a second song is never paid for while the Video holds its music (always on, bug-fix guard).
+        boolean music = stage == Stage.MUSIC;
+        if ((!enabled && !music) || !UPSTREAM.containsKey(stage)) {
             return Optional.empty();
         }
         Long output = jdbc.sql("SELECT count(*) FROM " + OUTPUT_TABLE.get(stage) + " WHERE video_id = :v") // constant table names
@@ -67,7 +69,7 @@ public class StageReuse {
             return Optional.empty();
         }
         java.time.Instant made = ((java.sql.Timestamp) last.get("finished_at")).toInstant();
-        for (Stage up : UPSTREAM.get(stage)) {
+        for (Stage up : music ? List.<Stage>of() : UPSTREAM.get(stage)) { // an owner who wants new music redoes MUSIC itself
             for (Map<String, Object> r : runs(videoId, up)) {
                 if (ACCEPTED.contains((String) r.get("status")) && !isReuse(r) && r.get("finished_at") != null
                         && ((java.sql.Timestamp) r.get("finished_at")).toInstant().isAfter(made)) {

@@ -13,6 +13,16 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 class ModelFallbackTest {
 
     @Test
+    void aCutOffAnswerDoesNotHopToTheNextModel() {
+        List<String> tried = new CopyOnWriteArrayList<>();
+        assertThrows(ExecutionException.class, () -> ModelFallback.run(ModelFallback.models("claude:claude-sonnet-5-5", "gemini-3.6-flash"), 5, "SHOT_PLAN", m -> {
+            tried.add(m);
+            throw new IllegalStateException("unavailable: claude:claude-sonnet-5-5 answer was cut off (token limit); tokens 3489/16000");
+        }));
+        assertEquals(List.of("claude:claude-sonnet-5-5"), tried, "no weaker model is paid to redo it");
+    }
+
+    @Test
     void retiredModelFallsBackToTheNext() throws Exception {
         List<String> tried = new CopyOnWriteArrayList<>();
         var a = ModelFallback.run(ModelFallback.models("gemini-2.5-flash", "gemini-3.6-flash"), 5, "test", m -> {

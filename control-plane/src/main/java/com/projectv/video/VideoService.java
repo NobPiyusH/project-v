@@ -15,6 +15,7 @@ import tools.jackson.databind.ObjectMapper;
 import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Optional;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.UUID;
@@ -63,11 +64,32 @@ public class VideoService {
         this.json = json;
     }
 
-    public record CreateVideo(String prompt, StageMode defaultMode, Map<Stage, StageMode> modes, Integer reviewMinutes) {
+    public record CreateVideo(String prompt, StageMode defaultMode, Map<Stage, StageMode> modes, Integer reviewMinutes,
+                              boolean allowDuplicate) {
+        public CreateVideo(String prompt, StageMode defaultMode, Map<Stage, StageMode> modes, Integer reviewMinutes) {
+            this(prompt, defaultMode, modes, reviewMinutes, false);
+        }
+    }
+
+    /** A video with the same prompt, still in production, started this recently, is a duplicate (22 Nov 2026: a second TV video cost Rs 57 of text stages). */
+    static final int DUPLICATE_WINDOW_MINUTES = 60;
+
+    /** Returns the id of an in-production video with this exact prompt started within the window, if any. */
+    Optional<UUID> duplicateOf(String prompt) {
+        return jdbc.sql("""
+                        SELECT id FROM video WHERE prompt = :p AND status IN ('CREATED','RUNNING','WAITING','PAUSED')
+                        AND created_at > now() - make_interval(mins => :w) ORDER BY created_at DESC LIMIT 1
+                        """).param("p", prompt).param("w", DUPLICATE_WINDOW_MINUTES).query(UUID.class).optional();
     }
 
     /** Not transactional on purpose: the row must be committed before the workflow's first activity reads it. */
     public UUID create(CreateVideo req) {
+        if (!req.allowDuplicate()) {
+            duplicateOf(req.prompt().strip()).ifPresent(other -> {
+                throw new IllegalStateException("A video with this exact prompt is already in production (" + other
+                        + "). Finish, pause or delete it first, or send allowDuplicate=true if you really want a second one (it pays for every text stage again).");
+            });
+        }
         UUID id = UUID.randomUUID();
         String workflowId = "video-" + id;
         StageMode defaultMode = req.defaultMode() == null ? StageMode.AUTO : req.defaultMode();

@@ -79,6 +79,22 @@ public class Llm {
 
     /** Same as {@link #call(UUID, String, String, String, Class, String)} but also says which model answered. */
     public <T> Answer<T> callWithModel(UUID videoId, String purpose, String system, String user, Class<T> type, String preferred) {
+        return callWithModel(videoId, purpose, system, user, type, preferred, false);
+    }
+
+    /**
+     * projectv.cost.auto-retry-timeout (default off): a call where no model answered within the time limit is tried ONCE more,
+     * so a transient stall does not leave the stage FAILED waiting for a manual Retry (22 Nov 2026: SHOT_PLAN).
+     */
+    @Value("${projectv.cost.auto-retry-timeout:false}")
+    private boolean retryTimeout;
+
+    void setRetryTimeout(boolean on) {
+        this.retryTimeout = on;
+    }
+
+    private <T> Answer<T> callWithModel(UUID videoId, String purpose, String system, String user, Class<T> type, String preferred,
+                                        boolean retried) {
         preferred = stageModel(stageModels, purpose, preferred);
         ChatModel cm = chatModel.getIfAvailable();
         if (cm == null) {
@@ -141,6 +157,10 @@ public class Llm {
             T fb = aicredits.retry(videoId, purpose, models, e, system, user, type);
             if (fb != null) {
                 return new Answer<>(fb, "aicredits");
+            }
+            if (retryTimeout && !retried) {
+                org.slf4j.LoggerFactory.getLogger(Llm.class).warn("{}: no model answered within {}s, one automatic retry", purpose, timeoutSeconds);
+                return callWithModel(videoId, purpose, system, user, type, preferred, true);
             }
             throw new IllegalStateException(purpose + ": no model in " + models + " answered within " + timeoutSeconds + "s");
         } catch (InterruptedException e) {

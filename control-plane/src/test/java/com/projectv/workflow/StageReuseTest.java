@@ -58,6 +58,21 @@ class StageReuseTest {
     }
 
     @Test
+    void musicIsReusedEvenWithTheFlagOffAndEvenIfTheScriptWasRemade() {
+        run(Stage.MUSIC, 1, "AUTO_PASSED", "Score 120s", "2026-11-22T10:00:00Z");
+        run(Stage.SCRIPT, 1, "AUTO_PASSED", "script", "2026-11-22T11:00:00Z");
+        UUID asset = new com.projectv.assets.AssetStore(jdbc).create(new com.projectv.assets.AssetStore.NewAsset(video, "audio",
+                "s3://b/m.wav", "audio/wav", null, null, 10.0, "gemini_api", "lyria", null, null,
+                com.projectv.assets.AssetStore.LICENCE_GEMINI, true));
+        jdbc.sql("INSERT INTO music_cue (id, video_id, asset_id, bpm, beat_times_json, sections_json) VALUES (:id, :v, :a, 100, CAST('[]' AS jsonb), CAST('{}' AS jsonb))")
+                .param("id", UUID.randomUUID()).param("v", video).param("a", asset).update();
+        assertTrue(new StageReuse(jdbc, false).reusable(video, Stage.MUSIC).isPresent());
+        concept();
+        run(Stage.CONCEPT, 1, "AUTO_PASSED", "ok", "2026-11-22T10:00:00Z");
+        assertTrue(new StageReuse(jdbc, false).reusable(video, Stage.CONCEPT).isEmpty(), "other stages stay behind the flag");
+    }
+
+    @Test
     void offByDefaultNeverReuses() {
         concept();
         run(Stage.CONCEPT, 1, "AUTO_PASSED", "done", "2026-11-22T10:00:00Z");
