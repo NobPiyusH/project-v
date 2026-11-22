@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { api, assetUrl, type ClipKind, type ImagePolicy, type Production, type ShotRow } from '../api'
 import { usePoll } from '../hooks'
 import { STATE_LABEL, Takes } from './ClipsCard'
-import { PolicySelect, ShotEditor } from './ProductionView'
+import { PolicySelect, ShotEditor } from './ProductionCards'
 
 type View = 'image' | 'draft' | 'final' | 'footage'
 

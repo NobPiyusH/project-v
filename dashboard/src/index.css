@@ -119,8 +119,6 @@ button.ok { color: var(--ok); }
 table { width: 100%; border-collapse: collapse; }
 th, td { text-align: left; padding: 9px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
 th { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); font-weight: 600; }
-tr.clickable { cursor: pointer; }
-tr.clickable:hover td { background: var(--surface-2); }
 
 .stages { display: grid; gap: 8px; }
 .stage {

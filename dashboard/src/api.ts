@@ -1,4 +1,5 @@
 // Typed client for the control-plane REST API (/api, proxied by Vite in dev).
+import { request } from './http'
 
 export type Mode = 'AUTO' | 'REVIEW' | 'MANUAL' | 'PRODUCER'
 
@@ -144,19 +145,7 @@ export interface ShotVersion { id: string; created_at: string; provider: string;
 
 export const assetUrl = (id: string) => `/api/assets/${id}/content`
 
-async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const res = await fetch(`/api${path}`, {
-    method,
-    headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  })
-  if (!res.ok) {
-    const text = await res.text()
-    throw new Error(`${res.status} ${res.statusText}${text ? `: ${text}` : ''}`)
-  }
-  const text = await res.text()
-  return (text ? JSON.parse(text) : undefined) as T
-}
+const call = <T>(method: string, path: string, body?: unknown) => request<T>(method, `/api${path}`, body)
 
 /** Studio power (served by the dashboard's own dev server, so it works while the backend is down). */
 export interface StudioStatus { controlPlane: boolean; worker: boolean; busy: string | null; lastOutput: string }
@@ -197,21 +186,24 @@ export interface GpuPods { configured: boolean; pods: GpuPod[]; error?: string }
 export interface GpuLogLine { ts: string; source: string; line: string }
 export interface GpuLogPage { lines: GpuLogLine[]; next: string | null; error: string | null }
 
+/** This month's spend against the studio's caps (top bar meters). */
+export interface Budget {
+  geminiCapInr: number; geminiSpentInr: number; geminiRemainingInr: number; gpuCapInr: number; gpuSpentInr: number
+  claudeCapInr?: number; claudeSpentInr?: number
+  modal?: { meteredUsd: number; creditsUsedUsd: number; billedUsd: number; freeCreditUsd: number; creditLeftUsd: number; fxInrPerUsd: number; fetchedAt: string }
+}
+
 export const api = {
   gpuPods: () => call<GpuPods>('GET', '/gpu/pods'),
   gpuLogs: (id: string, since: string | null) =>
     call<GpuLogPage>('GET', `/gpu/pods/${encodeURIComponent(id)}/logs${since ? `?since=${encodeURIComponent(since)}` : '?tail=150'}`),
-  system: () => call<{ planner: string }>('GET', '/system'),
   stages: () => call<StageInfo[]>('GET', '/stages'),
   styles: () => call<StylePreset[]>('GET', '/styles'),
   providers: () => call<Provider[]>('GET', '/providers'),
-  ledger: () => call<Record<string, unknown>[]>('GET', '/ledger'),
   videos: () => call<VideoSummary[]>('GET', '/videos'),
   video: (id: string) => call<VideoDetail>('GET', `/videos/${id}`),
   production: (id: string) => call<Production>('GET', `/videos/${id}/production`),
-  budget: () => call<{ geminiCapInr: number; geminiSpentInr: number; geminiRemainingInr: number; gpuCapInr: number; gpuSpentInr: number;
-    claudeCapInr?: number; claudeSpentInr?: number
-    modal?: { meteredUsd: number; creditsUsedUsd: number; billedUsd: number; freeCreditUsd: number; creditLeftUsd: number; fxInrPerUsd: number; fetchedAt: string } }>('GET', '/budget'),
+  budget: () => call<Budget>('GET', '/budget'),
   createVideo: (prompt: string, defaultMode: Mode, modes: Record<string, Mode>, reviewMinutes: number) =>
     call<{ id: string }>('POST', '/videos', { prompt, defaultMode, modes, reviewMinutes }),
   setReviewMinutes: (id: string, minutes: number) => call<void>('PUT', `/videos/${id}/review-minutes`, { minutes }),
