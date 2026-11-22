@@ -211,6 +211,11 @@ public class ProductionService {
         return shotStage.videoOfShot(shotId);
     }
 
+    /** Lets go of the rented GPU pod after a keyframe batch (no-op unless provider-keyframes=broker). */
+    public void releaseGpu(UUID videoId, String why) {
+        shotStage.releaseGpu(videoId, why);
+    }
+
     public StageResult saveKeyframes(UUID videoId, KeyframeRequest request, KeyframeResult r) {
         return shotStage.saveKeyframes(videoId, request, r);
     }

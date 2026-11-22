@@ -33,8 +33,15 @@ public interface BrokerRecords {
             this.pricing = pricing;
         }
 
+        private boolean isDream(UUID id) {
+            return jdbc.sql("SELECT count(*) FROM dream_short WHERE id = :d").param("d", id).query(Integer.class).single() > 0;
+        }
+
         @Override
         public void decision(UUID dreamShortId, String capability, List<Map<String, Object>> considered, String chosen, String reason) {
+            if (!isDream(dreamShortId)) {
+                return; // a Video's rental: the Video stage logs its own routing decision (rule 6)
+            }
             jdbc.sql("""
                             INSERT INTO routing_decision (id, dream_short_id, stage, capability, candidates_json, chosen_provider_id, reason_text)
                             VALUES (:id, :d, 'DREAM_GPU', :c, CAST(:cands AS jsonb), :chosen, :r)
@@ -46,11 +53,15 @@ public interface BrokerRecords {
         @Override
         public void cost(UUID dreamShortId, String provider, double hours, double hourlyUsd, String note) {
             BigDecimal inr = BigDecimal.valueOf(hours * hourlyUsd * pricing.fx()).setScale(4, RoundingMode.HALF_UP);
+            // The id is a Dream Short, or a Video that rented the shared pod (Video path, projectv.video.provider-*=broker):
+            // a Video's rental is booked on the Video's own ledger.
+            boolean dream = isDream(dreamShortId);
             jdbc.sql("""
                             INSERT INTO cost_entry (id, video_id, dream_short_id, provider_id, amount_inr, units, unit_type, estimated, note)
-                            VALUES (:id, NULL, :d, :p, :amt, :u, 'gpu_hour', true, :note)
+                            VALUES (:id, :v, :d, :p, :amt, :u, 'gpu_hour', true, :note)
                             """)
-                    .param("id", UUID.randomUUID()).param("d", dreamShortId, java.sql.Types.OTHER).param("p", provider).param("amt", inr)
+                    .param("id", UUID.randomUUID()).param("v", dream ? null : dreamShortId, java.sql.Types.OTHER)
+                    .param("d", dream ? dreamShortId : null, java.sql.Types.OTHER).param("p", provider).param("amt", inr)
                     .param("u", BigDecimal.valueOf(hours).setScale(4, RoundingMode.HALF_UP))
                     .param("note", "%s ($%.4f/h live)".formatted(note, hourlyUsd)).update();
         }

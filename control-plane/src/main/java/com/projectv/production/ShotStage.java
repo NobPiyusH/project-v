@@ -46,6 +46,19 @@ public class ShotStage extends StageSupport {
         this.router = router;
     }
 
+    private VideoGpu videoGpu; // null in tests; FLUX keyframes on the pod only with projectv.video.provider-keyframes=broker
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setVideoGpu(VideoGpu videoGpu) {
+        this.videoGpu = videoGpu;
+    }
+
+    public void releaseGpu(UUID videoId, String why) {
+        if (videoGpu != null) {
+            videoGpu.release(videoId, why);
+        }
+    }
+
     private DiagramSpecs diagrams; // null in tests; used only with projectv.video.diagram-lane=true
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
@@ -217,10 +230,15 @@ public class ShotStage extends StageSupport {
                 .filter(s -> only == null || only.contains((UUID) s.get("id")))
                 .filter(s -> !diagramShot(s)).toList(); // diagram shots are drawn, they have no keyframe
         long heroes = wanted.stream().filter(s -> "hero".equals(s.get("priority"))).count();
+        boolean onPod = videoGpu != null && videoGpu.keyframes();
         // M3a: the router picks the image provider per class of shot (logged; budget- and failure-aware)
-        String heroProvider = heroes == 0 ? null : routeKeyframes(videoId, true, (int) heroes, policy);
-        String standardProvider = heroes == wanted.size() ? null
-                : routeKeyframes(videoId, false, (int) (wanted.size() - heroes), policy);
+        String heroProvider = onPod ? VideoGpu.POD : null;
+        String standardProvider = onPod ? VideoGpu.POD : null;
+        if (!onPod) {
+            heroProvider = heroes == 0 ? null : routeKeyframes(videoId, true, (int) heroes, policy);
+            standardProvider = heroes == wanted.size() ? null
+                    : routeKeyframes(videoId, false, (int) (wanted.size() - heroes), policy);
+        }
         for (Map<String, Object> shot : wanted) {
             UUID id = (UUID) shot.get("id");
             Map<String, Object> p = json.readValue((String) shot.get("prompt_json"), new TypeReference<>() {
@@ -232,10 +250,19 @@ public class ShotStage extends StageSupport {
             // Real reference photos only help the image model that accepts them (Gemini), on hero shots.
             String reference = "gemini_api".equals(provider) ? java.util.Objects.toString(p.get("referenceQuery"), "") : "";
             jobs.add(new KeyframeJob(shotId, attempt, provider, prompt, width, height, plan.aspectRatio(), "1K", reference,
-                    Math.abs((long) shotId.hashCode()) + attempt));
+                    Math.abs((long) shotId.hashCode()) + attempt, onPod ? "flux2-klein" : null));
         }
         if (jobs.isEmpty()) {
             throw new IllegalStateException(only == null ? "No shots to render; run the shot plan first" : "None of those shots belong to this video");
+        }
+        if (onPod) { // FLUX.2 klein pictures on the rented pod (same broker session as Dream, same daily cap)
+            double sec = videoGpu.pictureSeconds(videoId, jobs.size());
+            if (router != null) {
+                router.choose(videoId, "KEYFRAMES", "image.dream", List.of(new com.projectv.routing.Router.Candidate(VideoGpu.POD,
+                        videoGpu.inr(sec))), VideoGpu.POD, true);
+            }
+            var session = videoGpu.session(videoId, sec);
+            return new KeyframeRequest(videoId.toString(), imageModel, modalApp, modalClass, jobs, session.url(), session.readyTimeoutSeconds());
         }
         return new KeyframeRequest(videoId.toString(), imageModel, modalApp, modalClass, jobs);
     }
@@ -306,11 +333,12 @@ public class ShotStage extends StageSupport {
             }
             KeyframeJob job = jobs.get(o.shotId());
             boolean isGemini = "gemini_api".equals(o.provider());
+            boolean flux = VideoGpu.POD.equals(job.provider()) && "flux2-klein".equals(job.podModel());
             UUID assetId = assets.create(new NewAsset(videoId, "image", o.uri(), o.uri().endsWith(".png") ? "image/png" : "image/jpeg",
                     job.width(), job.height(), null, o.provider(), o.model(), job.prompt()
                             + (o.references() == null || o.references().isEmpty() ? "" : " | reference photos: "
                             + String.join("; ", o.references())), o.seed(),
-                    isGemini ? AssetStore.LICENCE_GEMINI : AssetStore.LICENCE_ZIMAGE, true));
+                    isGemini ? AssetStore.LICENCE_GEMINI : flux ? AssetStore.LICENCE_FLUX2_KLEIN : AssetStore.LICENCE_ZIMAGE, true));
             jdbc.sql("UPDATE asset SET shot_id = :s WHERE id = :a").param("s", UUID.fromString(o.shotId())).param("a", assetId).update();
             jdbc.sql("UPDATE shot SET keyframe_asset_id = :a, status = 'READY', error = NULL, updated_at = now() WHERE id = :s")
                     .param("a", assetId).param("s", UUID.fromString(o.shotId())).update();

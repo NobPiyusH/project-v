@@ -159,7 +159,13 @@ public class VideoActivitiesImpl implements VideoActivities {
     @Override
     public StageResult saveClips(String videoId, com.projectv.media.MediaTypes.ClipRequest request,
                                  com.projectv.media.MediaTypes.ClipResult result) {
-        return video.saveClips(UUID.fromString(videoId), request, result);
+        try {
+            return video.saveClips(UUID.fromString(videoId), request, result);
+        } finally {
+            if ("pod".equals(request.provider())) {
+                video.releaseGpu(UUID.fromString(videoId), "clip batch saved");
+            }
+        }
     }
 
     @Override
@@ -305,7 +311,13 @@ public class VideoActivitiesImpl implements VideoActivities {
 
     @Override
     public StageResult saveKeyframes(String videoId, KeyframeRequest request, KeyframeResult result) {
-        return production.saveKeyframes(UUID.fromString(videoId), request, result);
+        try {
+            return production.saveKeyframes(UUID.fromString(videoId), request, result);
+        } finally {
+            if (request.gpuUrl() != null) {
+                production.releaseGpu(UUID.fromString(videoId), "keyframes saved");
+            }
+        }
     }
 
     @Override

@@ -81,6 +81,17 @@ public class VideoStage extends StageSupport {
         this.router = router;
     }
 
+    private VideoGpu videoGpu; // null in tests; used only with projectv.video.provider-draft/final=broker
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setVideoGpu(VideoGpu videoGpu) {
+        this.videoGpu = videoGpu;
+    }
+
+    private boolean onBroker(String kind) {
+        return videoGpu != null && videoGpu.clips(kind);
+    }
+
     /** The owner's preferred provider for this kind (config); the router may still pick another (M3a). */
     boolean omni(String kind) {
         return "omni".equals(DRAFT.equals(kind) ? draftProvider : finalProvider);
@@ -126,6 +137,9 @@ public class VideoStage extends StageSupport {
     // ------------------------------------------------------------------------------------------- estimate & request
 
     public ClipEstimate estimate(UUID videoId, String kind, List<UUID> only) {
+        if (onBroker(kind)) {
+            return brokerEstimate(videoId, kind, only);
+        }
         boolean useOmni;
         try {
             useOmni = routeOmni(videoId, kind, only, false); // preview: not logged
@@ -168,6 +182,9 @@ public class VideoStage extends StageSupport {
 
     /** The batch for the media worker. Refused (non-retryable) when it would break the monthly GPU cap. */
     public ClipRequest clipRequest(UUID videoId, String kind, List<UUID> only) {
+        if (onBroker(kind)) {
+            return brokerRequest(videoId, kind, only);
+        }
         boolean useOmni = routeOmni(videoId, kind, only, true); // the decision, logged (rule 6)
         List<ClipJob> jobs = jobs(videoId, kind, only, useOmni);
         List<ClipJob> drawn = diagramJobs(videoId, kind, only); // diagram lane: drawn on the laptop, free, no provider
@@ -189,6 +206,52 @@ public class VideoStage extends StageSupport {
         budget.requireGpu(inr, jobs.size() + " " + kind + " clips");
         return new ClipRequest(videoId.toString(), wanApp, wanClass, publicUrl, concat(jobs, drawn), containers(kind, jobs.size()), gpu,
                 inr.setScale(2, RoundingMode.HALF_UP), "wan", null, null);
+    }
+
+    // ------------------------------------------------------------------------------------------- GPU broker route
+
+    /** Same Wan 2.2 jobs as the Modal route (same pictures, sizes, takes); they run one after another on the rented pod. */
+    private ClipEstimate brokerEstimate(UUID videoId, String kind, List<UUID> only) {
+        List<ClipJob> jobs = jobs(videoId, kind, only, false);
+        int drawn = diagramJobs(videoId, kind, only).size();
+        double sec = jobs.isEmpty() ? 0 : videoGpu.clipSeconds(videoId, jobs);
+        BigDecimal inr = videoGpu.inr(sec).setScale(2, RoundingMode.HALF_UP);
+        String summary = jobs.isEmpty() ? "No shots need %s clips.".formatted(kind)
+                : "Ready to make %d %s clips on a rented GPU pod (cheapest live price, Auto): about ₹%s ($%.2f) and %.0f min, inside the daily GPU cap."
+                .formatted(jobs.size(), kind, inr.setScale(0, RoundingMode.HALF_UP), inr.doubleValue() / pricing.fx(), Math.ceil(sec / 60));
+        if (drawn > 0) {
+            summary += " Plus %d diagram shot%s drawn on the laptop (free).".formatted(drawn, drawn == 1 ? "" : "s");
+        }
+        return new ClipEstimate(kind, jobs.size() + drawn, sec, inr, inr.doubleValue() / pricing.fx(), Math.ceil(sec / 60),
+                !jobs.isEmpty() && inr.compareTo(autoApproveInr) > 0, summary);
+    }
+
+    private ClipRequest brokerRequest(UUID videoId, String kind, List<UUID> only) {
+        List<ClipJob> jobs = jobs(videoId, kind, only, false);
+        List<ClipJob> drawn = diagramJobs(videoId, kind, only);
+        if (jobs.isEmpty() && drawn.isEmpty()) {
+            throw new IllegalStateException(DRAFT.equals(kind) ? "No shots with images to animate"
+                    : "No approved drafts need a final render");
+        }
+        if (jobs.isEmpty()) {
+            return new ClipRequest(videoId.toString(), wanApp, wanClass, publicUrl, drawn, 0, 0, BigDecimal.ZERO, "wan", null, null);
+        }
+        double sec = videoGpu.clipSeconds(videoId, jobs);
+        BigDecimal inr = videoGpu.inr(sec).setScale(2, RoundingMode.HALF_UP);
+        if (router != null) { // rule 6: the routing decision names the pod route
+            router.choose(videoId, DRAFT.equals(kind) ? "DRAFT_GEN" : "FINAL_GEN", "video.i2v.dream",
+                    List.of(new com.projectv.routing.Router.Candidate(VideoGpu.POD, inr)), VideoGpu.POD, true);
+        }
+        var session = videoGpu.session(videoId, sec); // refused with the reason when the daily cap or every provider says no
+        return new ClipRequest(videoId.toString(), wanApp, wanClass, publicUrl, concat(jobs, drawn), 1, sec, inr, "pod", null, null,
+                0, session.url(), session.readyTimeoutSeconds(), false);
+    }
+
+    /** The batch is saved: let go of the pod (the rental is booked on this Video's ledger when it ends). */
+    public void releaseGpu(UUID videoId, String why) {
+        if (videoGpu != null) {
+            videoGpu.release(videoId, why);
+        }
     }
 
     private static List<ClipJob> concat(List<ClipJob> a, List<ClipJob> b) {
@@ -330,6 +393,7 @@ public class VideoStage extends StageSupport {
             }
             UUID shotId = UUID.fromString(o.shotId());
             boolean diagram = "diagram".equals(job.mode()); // drawn on the laptop: no provider, no cost, not a router signal
+            boolean pod = "pod".equals(request.provider()); // the rental is booked when the broker ends it, not per clip
             gpu += o.gpuSeconds();
             if (o.outputTokens() > 0) {
                 ledger.record(videoId, com.projectv.ledger.BudgetGuard.GEMINI, pricing.omniTokensInr(o.outputTokens()),
@@ -337,7 +401,7 @@ public class VideoStage extends StageSupport {
                         "%s clip shot %d take %d (Gemini Omni %s)".formatted(job.kind().toUpperCase(), job.shotNumber(),
                                 job.take(), request.resolution()));
             }
-            if (o.gpuSeconds() > 0) {
+            if (o.gpuSeconds() > 0 && !pod && !diagram) {
                 ledger.record(videoId, "modal_h100", pricing.modalGpuInr("H100", o.gpuSeconds()),
                         BigDecimal.valueOf(o.gpuSeconds()), "gpu_seconds", true,
                         "%s clip shot %d take %d (Wan %s)".formatted(job.kind().toUpperCase(), job.shotNumber(), job.take(), o.mode()));
@@ -356,8 +420,8 @@ public class VideoStage extends StageSupport {
             }
             UUID assetId = assets.create(new NewAsset(videoId, "video", o.uri(), "video/mp4", job.width(), job.height(),
                     o.fps() > 0 ? (double) o.frames() / o.fps() : null,
-                    diagram ? "diagram_manim" : "omni".equals(request.provider()) ? "gemini_omni" : "modal_wan",
-                    diagram ? "manim 1080p24 diagram" : "omni".equals(request.provider()) ? request.omniModel() + " " + request.resolution() : "wan2.2-i2v-a14b " + o.mode(),
+                    diagram ? "diagram_manim" : pod ? VideoGpu.POD : "omni".equals(request.provider()) ? "gemini_omni" : "modal_wan",
+                    diagram ? "manim 1080p24 diagram" : pod ? "wan2.2-i2v-a14b fp8 (rented pod)" : "omni".equals(request.provider()) ? request.omniModel() + " " + request.resolution() : "wan2.2-i2v-a14b " + o.mode(),
                     job.prompt(), job.seed(), diagram ? AssetStore.LICENCE_OWN_RENDER : "omni".equals(request.provider()) ? AssetStore.LICENCE_GEMINI : AssetStore.LICENCE_WAN, true));
             jdbc.sql("UPDATE asset SET shot_id = :s, clip_kind = :k, fps = :f WHERE id = :a")
                     .param("s", shotId).param("k", job.kind()).param("f", o.fps() > 0 ? o.fps() : FPS).param("a", assetId).update();
@@ -369,7 +433,7 @@ public class VideoStage extends StageSupport {
             ok++;
             aiOk += diagram ? 0 : 1;
         }
-        if (r.startUps() > 0) { // observed cold starts, not containers requested
+        if (r.startUps() > 0 && !"pod".equals(request.provider())) { // observed cold starts, not containers requested
             double start = r.startUps() * pricing.gpuContainerStartSeconds();
             ledger.record(videoId, "modal_h100", pricing.modalGpuInr("H100", start), BigDecimal.valueOf(start), "gpu_seconds",
                     true, "Wan GPU start-up + model load (%d cold start%s, estimated)".formatted(r.startUps(),

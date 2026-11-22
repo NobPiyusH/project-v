@@ -155,9 +155,33 @@ public class DreamGpu {
 
     /** Opens (or returns) the Short's pod. Throws when no provider can serve (the step then waits for the owner). */
     public Session session(UUID dreamId) {
-        GpuBroker.Rental r = broker.acquire(dreamId, "video.i2v.dream", podImage(), PodBoot.command(),
-                podEnv(), volumeId, pick(dreamId), rentalHours(dreamId));
+        return session(dreamId, rentalHours(dreamId));
+    }
+
+    /**
+     * As {@link #session(UUID)} for a caller that knows its own expected rental hours (the Video path: its id is a Video's,
+     * there is no dream_short row, the pick is Auto). Daily cap, pick, warm image and cost booking are the same.
+     */
+    public Session session(UUID id, double expectedHours) {
+        GpuBroker.Rental r = broker.acquire(id, "video.i2v.dream", podImage(), PodBoot.command(),
+                podEnv(), volumeId, pick(id), expectedHours);
         return new Session(r.instance().endpoint(), readyTimeoutMinutes * 60);
+    }
+
+    /** Video holders of the shared pod: Dream's "nobody waits" release must not end a pod a Video batch is using. */
+    private final java.util.Set<UUID> externalHolds = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    public void hold(UUID videoId) {
+        externalHolds.add(videoId);
+    }
+
+    public void unhold(UUID videoId) {
+        externalHolds.remove(videoId);
+    }
+
+    /** When this id's pod was last used (lease heartbeat); empty when it holds no pod. */
+    public java.util.Optional<Instant> lastActivity(UUID id) {
+        return broker.lastActivity(id);
     }
 
     /** Where docker/pod/Dockerfile bakes ComfyUI (not under /workspace, which a provider volume may cover). */
@@ -273,7 +297,7 @@ public class DreamGpu {
 
     /** Ends the shared pod for everyone, unless a Short using it has GPU power Manual (the owner keeps it on). */
     public void releaseAllUnlessHeld(String why) {
-        if (!enabled || broker.openShortIds().stream().anyMatch(this::holdManual)) {
+        if (!enabled || broker.openShortIds().stream().anyMatch(id -> externalHolds.contains(id) || holdManual(id))) {
             return;
         }
         log.info("GPU: ending the shared pod ({})", why);
