@@ -21,10 +21,12 @@ import java.util.Map;
  * @param template            instance template ("pytorch" is container-based)
  * @param servicePort         the port JarvisLabs publishes through the instance endpoint (docs: 6006); the worker is told to listen on it
  * @param startTimeoutSeconds create blocks until Running; the helper call is cut off after this
+ * @param inrPerUsd           rupees per dollar: the owner's account is INR, so the live list's prices are rupees per hour
+ * @param minBalance          the preflight fails below this account balance (account currency)
  * @param scriptMaxBytes      the largest startup script the preflight accepts (JarvisLabs publishes no limit: unverified)
  */
 public record JarvislabsConfig(List<Gpu> gpus, String template, int servicePort, int startTimeoutSeconds, int scriptMaxBytes,
-                               int cacheSeconds) {
+                               int cacheSeconds, double inrPerUsd, double minBalance) {
 
     public record Gpu(String type, int vramGb) {
     }
@@ -48,7 +50,7 @@ public record JarvislabsConfig(List<Gpu> gpus, String template, int servicePort,
         }
         return new JarvislabsConfig(gpus, v.get("template") != null ? v.get("template").toString() : "pytorch",
                 (int) num(v.get("servicePort"), 6006), (int) num(v.get("startTimeoutSeconds"), 900),
-                (int) num(v.get("scriptMaxBytes"), 60_000), (int) num(v.get("cacheSeconds"), 30));
+                (int) num(v.get("scriptMaxBytes"), 60_000), (int) num(v.get("cacheSeconds"), 30), Math.max(1, num(v.get("inrPerUsd"), 94)), num(v.get("minBalance"), 100));
     }
 
     private static double num(Object o, double dflt) {

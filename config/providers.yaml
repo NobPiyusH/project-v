@@ -204,6 +204,8 @@ pricing:
       jarvislabs:
         monthlyCapUsd: 0
         template: pytorch
+        inrPerUsd: 94                 # the account bills in INR (live check 22 Nov 2026: A100 = Rs 84.24/h); recheck with fxInrPerUsd
+        minBalance: 100               # preflight fails below this balance (account currency, INR)
         servicePort: 6006             # the port JarvisLabs publishes through the instance endpoint (docs)
         startTimeoutSeconds: 900
         gpus:
