@@ -79,6 +79,7 @@ public class Llm {
 
     /** Same as {@link #call(UUID, String, String, String, Class, String)} but also says which model answered. */
     public <T> Answer<T> callWithModel(UUID videoId, String purpose, String system, String user, Class<T> type, String preferred) {
+        preferred = stageModel(stageModels, purpose, preferred);
         ChatModel cm = chatModel.getIfAvailable();
         if (cm == null) {
             throw new IllegalStateException("No LLM configured: set GEMINI_API_KEY in .env");
@@ -158,6 +159,29 @@ public class Llm {
         } catch (Exception e) {
             throw new IllegalStateException(purpose + " failed: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * Cost lever, OFF by default (empty = every purpose keeps the model it always used): which model a text purpose tries first,
+     * e.g. {@code COST_STAGE_MODELS=PLAN=text;CONCEPT=claude:claude-haiku-5-5}. Purposes: PLAN, CONCEPT, SCRIPT, SHOT_PLAN, ...
+     * The value {@code text} (or {@code default}) means the Gemini list with no Claude first. Pairs are separated by ';' because
+     * model ids contain ':' and ','. The A/B plan is reports/cost-cuts/ab.md; quality decides, not price.
+     */
+    @Value("${projectv.cost.stage-models:}")
+    private String stageModels = "";
+
+    static String stageModel(String overrides, String purpose, String preferred) {
+        if (overrides == null || overrides.isBlank()) {
+            return preferred;
+        }
+        for (String pair : overrides.split(";")) {
+            int eq = pair.indexOf('=');
+            if (eq > 0 && pair.substring(0, eq).trim().equalsIgnoreCase(purpose)) {
+                String m = pair.substring(eq + 1).trim();
+                return m.isEmpty() ? preferred : m.equalsIgnoreCase("text") || m.equalsIgnoreCase("default") ? null : m;
+            }
+        }
+        return preferred;
     }
 
     /**

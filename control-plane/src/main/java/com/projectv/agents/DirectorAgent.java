@@ -1,6 +1,7 @@
 package com.projectv.agents;
 
 import com.projectv.agents.AgentTypes.Concept;
+import com.projectv.agents.AgentTypes.PlannedShot;
 import com.projectv.agents.AgentTypes.ShotPlan;
 import com.projectv.planner.StylePresets;
 import com.projectv.planner.VideoPlan;
@@ -53,8 +54,64 @@ public class DirectorAgent {
               its description must say exactly what the diagram shows and in what order. Diagram shots last 5-12 seconds.
             """;
 
+    /**
+     * projectv.cost.shot-plan-split-tokens (default 0 = never split): when the plan's expected output (thinking + shots) reaches
+     * this many tokens, it is asked for in two calls (the first half of the script lines, then the second half) instead of
+     * one call that can hit the output ceiling, be cut off and be paid again in full (22 Nov 2026: 5 SHOT_PLAN calls, 3 cut off).
+     */
+    @org.springframework.beans.factory.annotation.Value("${projectv.cost.shot-plan-split-tokens:0}")
+    private int splitTokens;
+
+    void setSplitTokens(int tokens) {
+        this.splitTokens = tokens;
+    }
+
+    /** Thinking effort plus the JSON the model writes for each shot (measured 22 Nov 2026: 8,069 and 8,357 tokens out for a 26-shot plan, so about 280 a shot plus thinking). */
+    static final int THINKING_TOKENS = 1500;
+    static final int TOKENS_PER_SHOT = 280;
+
+    static int expectedOutputTokens(double totalSec, boolean isShort) {
+        double perShot = isShort ? 2.2 : 6.0;
+        return THINKING_TOKENS + (int) Math.ceil(totalSec / perShot) * TOKENS_PER_SHOT;
+    }
+
     public ShotPlan plan(UUID videoId, VideoPlan plan, Concept concept, List<TimedLine> lines, double bpm,
                          double totalSec, String ownerNotes) {
+        boolean isShort = "short".equals(plan.format());
+        if (splitTokens <= 0 || lines.size() < 4 || expectedOutputTokens(totalSec, isShort) < splitTokens) {
+            return planOnce(videoId, plan, concept, lines, bpm, totalSec, ownerNotes, null);
+        }
+        // Split at the line that brings the narration to half; each half gets its share of the seconds.
+        double all = lines.stream().mapToDouble(TimedLine::durationSec).sum();
+        int cut = 1;
+        double run = 0;
+        while (cut < lines.size() - 1 && run + lines.get(cut - 1).durationSec() < all / 2) {
+            run += lines.get(cut - 1).durationSec();
+            cut++;
+        }
+        List<TimedLine> first = lines.subList(0, cut);
+        List<TimedLine> second = lines.subList(cut, lines.size());
+        double firstSec = totalSec * first.stream().mapToDouble(TimedLine::durationSec).sum() / all;
+        ShotPlan a = planOnce(videoId, plan, concept, first, bpm, firstSec, ownerNotes,
+                "This is PART 1 of 2 of one continuous shot plan: only the script lines listed here, which are the first half of the "
+                        + "video. Do not wrap up the story; part 2 follows in a second call.");
+        if (a.shots() == null || a.shots().isEmpty()) {
+            return a;
+        }
+        PlannedShot lastShot = a.shots().get(a.shots().size() - 1);
+        ShotPlan b = planOnce(videoId, plan, concept, second, bpm, totalSec - firstSec, ownerNotes,
+                "This is PART 2 of 2 of one continuous shot plan: only the script lines listed here, which are the second half of the "
+                        + "video. Part 1 is done and ended on the shot \"" + lastShot.description() + "\" (scene \"" + lastShot.sceneTitle()
+                        + "\"); continue from there without repeating it, with the same visual flow, and finish the video.");
+        List<PlannedShot> all2 = new java.util.ArrayList<>(a.shots());
+        if (b.shots() != null) {
+            all2.addAll(b.shots());
+        }
+        return new ShotPlan(all2);
+    }
+
+    private ShotPlan planOnce(UUID videoId, VideoPlan plan, Concept concept, List<TimedLine> lines, double bpm,
+                              double totalSec, String ownerNotes, String partNote) {
         StylePresets.Preset preset = presets.byIdOrDefault(plan.stylePreset());
         boolean isShort = "short".equals(plan.format());
         String pacing = isShort ? "fast cuts: shots of 1.5-3 seconds" : "cinematic pacing: shots of 4-9 seconds, longer for awe moments";
@@ -104,6 +161,9 @@ public class DirectorAgent {
                     .append(String.format("%.1f", l.durationSec())).append(" | ").append(l.text()).append('\n');
         }
         user.append(WriterAgent.notes(ownerNotes));
+        if (partNote != null) {
+            user.append('\n').append(partNote).append('\n');
+        }
         return llm.call(videoId, "SHOT_PLAN", system, user.toString(), ShotPlan.class, storyModel);
     }
 }

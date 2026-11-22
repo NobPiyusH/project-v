@@ -49,7 +49,15 @@ public class ClaudeResearcher {
     private final CostLedger ledger;
     private final BudgetGuard budget;
     private final Pricing pricing;
-    private final String model;
+    private final String storyModel;
+
+    /** Cost lever (default empty = the story model): a cheaper model for the Claude research backup, after an A/B. */
+    @Value("${projectv.models.research-backup:}")
+    private String backupModel = "";
+
+    private String model() {
+        return backupModel == null || backupModel.isBlank() ? storyModel : backupModel;
+    }
 
     public ClaudeResearcher(ClaudeChat claude, CostLedger ledger, BudgetGuard budget, Pricing pricing,
                             @Value("${projectv.models.story:claude:claude-sonnet-5-5}") String model) {
@@ -57,11 +65,11 @@ public class ClaudeResearcher {
         this.ledger = ledger;
         this.budget = budget;
         this.pricing = pricing;
-        this.model = model;
+        this.storyModel = model;
     }
 
     public ResearchResult research(UUID videoId, ResearchRequest req) {
-        if (!claude.configured() || !ClaudeChat.handles(model)) {
+        if (!claude.configured() || !ClaudeChat.handles(model())) {
             throw new IllegalStateException("unavailable: no Claude backup researcher configured");
         }
         if (!budget.canSpendClaude(ESTIMATE_INR)) {
@@ -81,7 +89,7 @@ public class ClaudeResearcher {
                         req.ownerNotes() == null || req.ownerNotes().isBlank() ? "" : "Owner notes: " + req.ownerNotes(),
                         req.maxFacts());
         MessageCreateParams.Builder params = MessageCreateParams.builder()
-                .model(model.substring(ClaudeChat.PREFIX.length()))
+                .model(model().substring(ClaudeChat.PREFIX.length()))
                 .maxTokens(ClaudeChat.MAX_TOKENS)
                 .outputConfig(OutputConfig.builder().effort(OutputConfig.Effort.MEDIUM).build())
                 .system("You are a careful science researcher for a premium documentary studio. Accuracy over drama.")
@@ -102,7 +110,7 @@ public class ClaudeResearcher {
                     ? "text cites=" + b.text().get().citations().map(List::size).orElse(0) + " | "
                     + b.text().get().text().replace("\n", "\\n") : b.toString().substring(0, Math.min(120, b.toString().length()))))));
         }
-        return parse(turns, model);
+        return parse(turns, model());
     }
 
     private void record(UUID videoId, Message m) {
@@ -110,7 +118,7 @@ public class ClaudeResearcher {
         long out = m.usage().outputTokens();
         long searches = m.usage().serverToolUse().map(s -> s.webSearchRequests()).orElse(0L);
         ledger.record(videoId, BudgetGuard.CLAUDE, pricing.claudeInr(in, out).add(pricing.claudeSearchInr(searches)),
-                BigDecimal.valueOf(in + out), "tokens", false, "RESEARCH backup (%s, %d web searches)".formatted(model, searches));
+                BigDecimal.valueOf(in + out), "tokens", false, "RESEARCH backup (%s, %d web searches)".formatted(model(), searches));
     }
 
     /** Facts from the "- " lines; each fact's sources are the pages cited by the text blocks it overlaps. */
