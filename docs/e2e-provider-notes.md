@@ -6,7 +6,7 @@ FX used: **₹94 = $1**; GST **18% extra** (not in the plan prices below, as far
 
 ## Verdict
 An SSH-free start **is** possible, so the adapter is built (`E2eProvider`). It is a **VM, not a container**: a start script
-(cloud-init, runs as root on first boot) starts Docker with the studio's worker image. Nothing in the create call needs SSH.
+(cloud-init, runs as root on first boot; **each entry max 2048 characters**, see below) starts Docker with the studio's worker image. Nothing in the create call needs SSH.
 **Not yet proven live**: no node has been created (needs the CTO's go).
 
 ## API (base `https://api.e2enetworks.com/myaccount/api/v1/`)
@@ -24,13 +24,20 @@ query string: never log URLs). `project_id` is documented as required; the list 
 | Firewall | `GET security_group/` (default group allows inbound 22, 80, 443, 1167, 3389, 10050 from anywhere) |
 
 ## Start without SSH
-- `start_scripts`: array of shell scripts, **run via cloud-init runcmd as root, each max 16 KB**, failures are logged to
+- `start_scripts`: array of shell scripts, **run via cloud-init runcmd as root**. The OpenAPI text says 16 KB per entry, but the real limit is **2048 characters per entry** (first real create, 22 Nov 2026: HTTP 400 "Ensure this field has no more than 2048 characters"; no node was made), failures are logged to
   `/var/log/cloud-init.log` and do not stop boot.
 - `ssh_keys` is mandatory. The adapter generates an Ed25519 key pair in memory per process, **throws the private key away**
   and sends only the public half, with password login disabled: the box is unreachable by SSH for everyone.
-- The worker payload (`workers/pod/server.py`, compressed + base64) is about 20 KB, over one script's 16 KB. The adapter writes the
-  env file over several start scripts (each under 15 KB), then a last script runs `docker run`. The 16 KB limit per entry is from the
-  OpenAPI text; **verify on the first real node** that several entries are all accepted.
+- The worker payload (about 20 KB of base64 text, as env chunks) goes over about 15 entries, each <= 2048 chars (slices of 1700): the env file
+  in plain slices, the run script (`docker run` + guard) base64 in slices, and a **last entry that verifies both sha256 sums on the node**
+  and only then runs `docker run`; a mismatch logs and starts nothing. No external hosting; the only secret on the node is the per-rental
+  worker token. A unit test fails if any entry exceeds 2048 chars.
+- Other fields checked against the OpenAPI: `name` 3-50 chars, letters/digits/hyphens (validated before the call), `label` max 50 (we send
+  `default`), `ssh_keys` = OpenSSH-format public keys (we send one Ed25519 key, no duplicates). All unverified live apart from the 2048 rejection.
+- Plan/image pairing: several single-GPU plans carry a template named after another size (e.g. A40 on 22.04 is
+  `...GDC3.2xA40-32.200GB_Ubuntu22`, A100 on 22.04/20.04 is `2xA10080`/`4xA10080`). The adapter never quotes a plan whose name says 2x/4x/8x.
+  The clean single-A40 template is the **Ubuntu-20.04** one, so the A40 uses `Ubuntu-20.04-GPU` (per-plan `image` in providers.yaml);
+  **unverified that 20.04 ships Docker + NVIDIA toolkit** (the docs promise it only for 22.04). The A100 has no clean template with Docker, so it is not offered.
 - Ubuntu **22.04** GPU images ship Docker + NVIDIA Container Toolkit; 24.04 does not. The adapter uses 22.04.
 
 ## Public IP and ports

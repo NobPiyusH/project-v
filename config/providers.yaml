@@ -228,8 +228,9 @@ pricing:
         startTimeoutSeconds: 540
         plans:
           - { sku: "GDC3.L40S-60.220GB_v1", gpu: "L40S", vramGb: 48 }
-          - { sku: "GDC3.A40-16.100GB", gpu: "A40", vramGb: 48 }
-          - { sku: "GDC3.A10080-16.115GB", gpu: "A100-80GB", vramGb: 80 }
+          # the 22.04 template of the A40 SKU is named "2xA40-32.200GB_Ubuntu22": use the clean single-A40 template (20.04). A100 has no clean
+          # template with Docker (22.04/20.04 are named 2x/4x, 24.04 has no Docker), so it is not offered.
+          - { sku: "GDC3.A40-16.100GB", gpu: "A40", vramGb: 48, image: "Ubuntu-20.04-GPU" }
       shadeform:  { monthlyCapUsd: 0 }
     gpuPreference: ["NVIDIA GeForce RTX 4090", "NVIDIA GeForce RTX 5090", "NVIDIA RTX A6000", "NVIDIA L40S"]   # >= 24 GB, fp8 Wan
     minVramGb: 24
