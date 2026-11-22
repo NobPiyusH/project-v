@@ -71,7 +71,7 @@ def test_clips_activity_renders_diagrams_and_passes_rest(monkeypatch):
     monkeypatch.setattr(C, "_post", lambda url, body: posts.append(body))
     monkeypatch.setattr(C, "_stop_requested", lambda base, vid: False)
     monkeypatch.setattr(C, "put_file", lambda key, path, ct: saved.setdefault(key, f"s3://b/{key}"))
-    monkeypatch.setattr(R, "render_or_fallback", lambda spec, out, title="", duration=6.0: (out.write_bytes(b"mp4"),
+    monkeypatch.setattr(R, "render_or_fallback", lambda spec, out, title="", duration=6.0, lines=None: (out.write_bytes(b"mp4"),
                                                                                             {"fallback": False, "reason": None})[1])
     monkeypatch.setattr(C, "_generate_clips", lambda req: passed.setdefault("req", req) and
                         {"clips": [{"shotId": "x", "uri": "s3://b/x"}], "containers": 1, "stopped": False})
@@ -87,7 +87,7 @@ def test_diagram_only_batch_never_touches_a_gpu(monkeypatch):
     monkeypatch.setattr(C, "_post", lambda url, body: None)
     monkeypatch.setattr(C, "_stop_requested", lambda base, vid: False)
     monkeypatch.setattr(C, "put_file", lambda key, path, ct: f"s3://b/{key}")
-    monkeypatch.setattr(R, "render_or_fallback", lambda spec, out, title="", duration=6.0: (out.write_bytes(b"m"),
+    monkeypatch.setattr(R, "render_or_fallback", lambda spec, out, title="", duration=6.0, lines=None: (out.write_bytes(b"m"),
                                                                                             {"fallback": True, "reason": "bad"})[1])
     monkeypatch.setattr(C, "_generate_clips", lambda req: pytest.fail("no GPU/provider call for diagram-only batches"))
     r = C.generate_clips({"videoId": "v", "jobs": [{**JOB, "prompt": "not json"}]})
