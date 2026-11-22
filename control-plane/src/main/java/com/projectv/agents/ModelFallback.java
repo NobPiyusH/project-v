@@ -85,7 +85,9 @@ public final class ModelFallback {
      */
     static boolean isCutOff(Throwable t) {
         for (Throwable c = t; c != null; c = c.getCause()) {
-            if (String.valueOf(c.getMessage()).toLowerCase(Locale.ROOT).contains("was cut off")) {
+            String msg = String.valueOf(c.getMessage()).toLowerCase(Locale.ROOT);
+            // Only the paid Claude call: a free-tier model cut off (groq, nvidia) still moves on to the next one, as before.
+            if (msg.contains("was cut off") && msg.contains("claude:")) {
                 return true;
             }
         }
