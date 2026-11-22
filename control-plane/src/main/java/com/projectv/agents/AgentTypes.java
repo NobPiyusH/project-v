@@ -49,6 +49,10 @@ public final class AgentTypes {
                               String priority, String overlayText, String footageQuery, String referenceQuery,
                               String sfxQuery, String lane) {
         /** "diagram" only when the Director chose it and the diagram lane is on; null/anything else = AI video (as before). */
+        public boolean stock() {
+            return "stock".equalsIgnoreCase(lane);
+        }
+
         public boolean diagram() {
             return "diagram".equalsIgnoreCase(lane);
         }

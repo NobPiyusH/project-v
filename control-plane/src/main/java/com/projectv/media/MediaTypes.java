@@ -301,6 +301,21 @@ public final class MediaTypes {
                                double wallMinutes, boolean needsApproval, String summary) {
     }
 
+    // ---- Stock footage lane (docs/stock-footage-lane.md)
+
+    public record StockRequest(String videoId, String shotId, int shotNumber, String description, String aspectRatio,
+                               double durationSec, List<String> sources, String queryModel) {
+    }
+
+    /** found=false (no key, no match, any error) means: use the AI lane for this shot. */
+    public record StockResult(boolean found, String reason, List<String> queries, List<String> skipped, String uri,
+                              Integer width, Integer height, Double durationSec, StockProvenance provenance) {
+    }
+
+    public record StockProvenance(String source, String sourceId, String pageUrl, String author, String licence,
+                                  String licenceUrl, String attribution, boolean creditRequired, String fetchedAt) {
+    }
+
     // ---- Free real footage (NASA Image and Video Library)
 
     public record FootageQuery(String shotId, String query) {
@@ -346,21 +361,33 @@ public final class MediaTypes {
     /** @param outputHeight 0 = the default 1080p master; 1440 = 2560x1440 (16:9 only); 2160 = 3840x2160 */
     public record AssemblyRequest(String videoId, String title, String aspectRatio, String language, boolean captions,
                                   List<AssemblyShot> shots, List<AssemblyLine> narration, String musicUri, double totalSec,
-                                  int outputHeight) {
+                                  int outputHeight, List<String> credits) {
         public AssemblyRequest(String videoId, String title, String aspectRatio, String language, boolean captions,
                                List<AssemblyShot> shots, List<AssemblyLine> narration, String musicUri, double totalSec) {
-            this(videoId, title, aspectRatio, language, captions, shots, narration, musicUri, totalSec, 0);
+            this(videoId, title, aspectRatio, language, captions, shots, narration, musicUri, totalSec, 0, null);
+        }
+
+        public AssemblyRequest(String videoId, String title, String aspectRatio, String language, boolean captions,
+                               List<AssemblyShot> shots, List<AssemblyLine> narration, String musicUri, double totalSec,
+                               int outputHeight) {
+            this(videoId, title, aspectRatio, language, captions, shots, narration, musicUri, totalSec, outputHeight, null);
         }
     }
 
     /** @param fits per shot: which clip, its length, how it was fitted (trimmed / slowed) */
     public record AssemblyResult(String masterUri, String packageUri, String srtUri, double durationSec, int width,
                                  int height, int fps, List<Map<String, Object>> fits, int captionChunks,
-                                 int linesTimedByWhisper, List<String> sfxCredits) {
+                                 int linesTimedByWhisper, List<String> sfxCredits, String creditsUri) {
         public AssemblyResult(String masterUri, String packageUri, String srtUri, double durationSec, int width,
                               int height, int fps, List<Map<String, Object>> fits, int captionChunks,
                               int linesTimedByWhisper) {
-            this(masterUri, packageUri, srtUri, durationSec, width, height, fps, fits, captionChunks, linesTimedByWhisper, null);
+            this(masterUri, packageUri, srtUri, durationSec, width, height, fps, fits, captionChunks, linesTimedByWhisper, null, null);
+        }
+
+        public AssemblyResult(String masterUri, String packageUri, String srtUri, double durationSec, int width,
+                              int height, int fps, List<Map<String, Object>> fits, int captionChunks,
+                              int linesTimedByWhisper, List<String> sfxCredits) {
+            this(masterUri, packageUri, srtUri, durationSec, width, height, fps, fits, captionChunks, linesTimedByWhisper, sfxCredits, null);
         }
     }
 

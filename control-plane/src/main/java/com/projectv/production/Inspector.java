@@ -307,7 +307,7 @@ public class Inspector extends StageSupport {
     }
 
     static List<Finding> keyframes(List<Map<String, Object>> shots) {
-        return shots.stream().filter(s -> s.get("keyframe_uri") == null && !StageSupport.diagramShot(s))
+        return shots.stream().filter(s -> s.get("keyframe_uri") == null && !StageSupport.diagramShot(s) && !StageSupport.stockShot(s))
                 .map(s -> new Finding("FAIL", "MISSING_KEYFRAME", "This shot has no image.", shotRef(s),
                         String.valueOf(s.get("id"))))
                 .toList();

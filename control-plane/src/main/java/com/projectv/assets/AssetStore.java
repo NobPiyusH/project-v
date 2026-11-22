@@ -24,6 +24,8 @@ public class AssetStore {
     public static final UUID LICENCE_KOKORO = UUID.fromString("00000000-0000-0000-0000-00000000a009");
     public static final UUID LICENCE_COMMONS = UUID.fromString("00000000-0000-0000-0000-00000000a010");
     public static final UUID LICENCE_CHATTERBOX = UUID.fromString("00000000-0000-0000-0000-00000000a011");
+    public static final UUID LICENCE_PEXELS = UUID.fromString("00000000-0000-0000-0000-00000000a020");
+    public static final UUID LICENCE_PIXABAY = UUID.fromString("00000000-0000-0000-0000-00000000a021");
     public static final UUID LICENCE_FLUX2_KLEIN = UUID.fromString("00000000-0000-0000-0000-00000000a013");
 
     public record NewAsset(UUID videoId, String kind, String uri, String mimeType, Integer width, Integer height,
@@ -66,7 +68,8 @@ public class AssetStore {
     public Map<String, Object> describe(UUID assetId) {
         return jdbc.sql("""
                         SELECT a.id, a.kind, a.uri_hot, a.mime_type, a.width, a.height, a.duration_sec,
-                               p.provider, p.model, p.prompt, p.seed, l.name AS licence
+                               p.provider, p.model, p.prompt, p.seed, l.name AS licence,
+                               p.source_url, p.source_id, p.author, p.attribution_text, p.credit_required, p.fetched_at
                         FROM asset a LEFT JOIN provenance p ON p.id = a.provenance_id LEFT JOIN licence l ON l.id = p.licence_id
                         WHERE a.id = :id
                         """)

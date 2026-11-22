@@ -525,8 +525,10 @@ public class VideoProductionWorkflowImpl implements VideoProductionWorkflow {
                     return activities.saveNarration(videoId, media.synthesizeNarration(producerActs.narrationRedoRequest(videoId, voiceNotes)));
                 }
                 return activities.saveNarration(videoId, media.synthesizeNarration(agents.narrationRequest(videoId)));
-            case SHOT_PLAN:
-                return agents.shotPlan(videoId, notes);
+            case SHOT_PLAN: {
+                StageResult planned = agents.shotPlan(videoId, notes);
+                return stockLaneEnabled() ? runStock(videoId, planned) : planned;
+            }
             case KEYFRAMES: {
                 StageFix fix = takeFix(Stage.KEYFRAMES);
                 var request = fix == null ? activities.keyframeRequest(videoId, notes)
@@ -685,6 +687,32 @@ public class VideoProductionWorkflowImpl implements VideoProductionWorkflow {
     /** Workflows started before M2c replay the old placeholder Assembly (Temporal determinism). */
     private boolean assemblyEnabled() {
         return Workflow.getVersion("assembly", Workflow.DEFAULT_VERSION, 1) != Workflow.DEFAULT_VERSION;
+    }
+
+    /** Workflows started before the stock lane existed replay Shot plan without it (determinism). */
+    private boolean stockLaneEnabled() {
+        return Workflow.getVersion("stock-lane", Workflow.DEFAULT_VERSION, 1) != Workflow.DEFAULT_VERSION;
+    }
+
+    /** Stock lane: search/fetch every stock shot (a switch that is off yields no requests). A miss never fails the shot. */
+    private StageResult runStock(String videoId, StageResult planned) {
+        var requests = activities.stockRequests(videoId);
+        if (requests.isEmpty()) {
+            return planned;
+        }
+        int found = 0;
+        for (var request : requests) {
+            com.projectv.media.MediaTypes.StockResult result;
+            try {
+                result = media.stockFetch(request);
+            } catch (ActivityFailure failure) {
+                result = new com.projectv.media.MediaTypes.StockResult(false, rootMessage(failure), null, null, null, null, null, null, null);
+            }
+            found += result.found() ? 1 : 0;
+            activities.saveStock(videoId, request, result);
+        }
+        return new StageResult(planned.summary() + " Stock lane: %d of %d stock shots got a real clip, the rest use the AI lane."
+                .formatted(found, requests.size()), planned.artifactJson(), planned.plannedStages());
     }
 
     /** Workflows started before real footage existed replay the old placeholder Library match (determinism). */

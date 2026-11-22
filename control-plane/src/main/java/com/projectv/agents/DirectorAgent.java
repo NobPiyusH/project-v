@@ -32,6 +32,19 @@ public class DirectorAgent {
         this.storyModel = storyModel;
     }
 
+    /** projectv.video.stock-lane (default off): the Director may mark shots lane=stock. */
+    @org.springframework.beans.factory.annotation.Value("${projectv.video.stock-lane:false}")
+    private boolean stockLane;
+
+    static final String STOCK_RULE = """
+            - lane may also be "stock": a REAL stock video clip (Pexels, Pixabay, Wikimedia Commons) of ordinary things that are easy to
+              film: a living room, hands at a workbench, a factory floor, an antenna at sunset, a street, a family in a dim room.
+              Use it for realistic everyday places, objects and people-doing-things, never for mechanisms (those are diagrams), never for
+              imaginary or abstract scenes, never when a specific brand, logo, famous person or exact historical moment is needed.
+              The description is the search text: say plainly what is filmed. ALWAYS also fill keyframePrompt and motionPrompt for a stock
+              shot: they are used if no real clip is found.
+            """;
+
     static final String DIAGRAM_RULE = """
             - lane: "ai_video" (default) or "diagram". Use "diagram" for a shot whose line explains HOW something works
               (parts, flows, layers, signals, colour mixing, a process step by step): it is drawn as an animated, labelled
@@ -78,7 +91,7 @@ public class DirectorAgent {
                   johnsonii", "Architeuthis dux", "Hubble Space Telescope"). Otherwise empty.
                 Keep a continuous visual flow between consecutive shots (scale, direction, colour).
                 %sReturn only the JSON object.""".formatted(preset.name(), preset.description(), totalSec, pacing, bpm,
-                bpm > 0 ? 60.0 / bpm : 0.5, diagramLane && "16:9".equals(plan.aspectRatio()) ? DIAGRAM_RULE : "");
+                bpm > 0 ? 60.0 / bpm : 0.5, (diagramLane && "16:9".equals(plan.aspectRatio()) ? DIAGRAM_RULE : "") + (stockLane ? STOCK_RULE : ""));
         StringBuilder user = new StringBuilder();
         user.append("Title: ").append(plan.title()).append(". Aspect ratio ").append(plan.aspectRatio()).append(".\n");
         user.append("Concept: ").append(concept.logline()).append("\nBig idea: ").append(concept.bigIdea()).append('\n');

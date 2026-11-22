@@ -132,3 +132,23 @@ def test_oversized_download_is_skipped_to_fallback(monkeypatch):
     monkeypatch.setattr(S, "_download", too_big)
     out = S.stock_fetch({"videoId": "v", "shotId": "s", "description": "television", "sources": ["pexels"]})
     assert out["found"] is False and any("ValueError" in s for s in out["skipped"])
+
+
+def test_credits_file_text_lists_cc_by_and_sfx():
+    from workers.activities.assemble import credits_text
+
+    t = credits_text(['"Old TV" by Jane Roe, CC BY 4.0 (https://cc/by), via Wikimedia Commons: https://c/x; trimmed'], ["Hiss by Bo (CC BY)"])
+    assert t.startswith("Credits") and "Footage:" in t and "Jane Roe" in t and "Sound effects:" in t and "Hiss by Bo" in t
+
+
+def test_assembly_mixes_stock_clip_of_any_size_and_fps(monkeypatch, tmp_path):
+    """A 1080p30 stock clip fills the 2560x1440 24 fps master: Lanczos scale + crop, light sharpen because it is enlarged."""
+    from workers.activities import assemble as A
+
+    assert A.scale_chain(1080, 2560, 1440)[0].endswith("flags=lanczos") and A.SHARPEN in A.scale_chain(1080, 2560, 1440)
+    assert A.SHARPEN not in A.scale_chain(1440, 2560, 1440)
+    src = tmp_path / "stock.mp4"
+    run_ffmpeg(["-f", "lavfi", "-i", "testsrc2=s=1920x1080:d=3:r=30", "-c:v", "libx264", "-pix_fmt", "yuv420p", str(src)])
+    out = tmp_path / "shot.mp4"
+    A._shot_clip({"n": 1, "kind": "footage", "durationSec": 2.0}, src, out, 2560, 1440)
+    assert A.media_height(out) == 1440

@@ -41,6 +41,7 @@ public class VideoActivitiesImpl implements VideoActivities {
     private final com.projectv.production.VideoStage video;
     private final com.projectv.video.ClipProgress clipProgress;
     private final com.projectv.production.FootageStage footage;
+    private final com.projectv.production.StockStage stock;
     private final com.projectv.production.AssemblyStage assembly;
     private final com.projectv.production.FinishStage finish;
     private final com.projectv.production.SharpenStage sharpen;
@@ -52,6 +53,7 @@ public class VideoActivitiesImpl implements VideoActivities {
                                com.projectv.production.CreativeDirector creative,
                                com.projectv.production.VideoStage video, com.projectv.video.ClipProgress clipProgress,
                                com.projectv.production.FootageStage footage,
+                               com.projectv.production.StockStage stock,
                                com.projectv.production.AssemblyStage assembly,
                                com.projectv.production.FinishStage finish,
                                com.projectv.production.SharpenStage sharpen,
@@ -67,6 +69,7 @@ public class VideoActivitiesImpl implements VideoActivities {
         this.video = video;
         this.clipProgress = clipProgress;
         this.footage = footage;
+        this.stock = stock;
         this.assembly = assembly;
         this.finish = finish;
         this.sharpen = sharpen;
@@ -113,6 +116,17 @@ public class VideoActivitiesImpl implements VideoActivities {
     @Override
     public StageResult saveMaster(String videoId, com.projectv.media.MediaTypes.AssemblyResult result) {
         return assembly.saveMaster(UUID.fromString(videoId), result);
+    }
+
+    @Override
+    public java.util.List<com.projectv.media.MediaTypes.StockRequest> stockRequests(String videoId) {
+        return stock.requests(UUID.fromString(videoId));
+    }
+
+    @Override
+    public StageResult saveStock(String videoId, com.projectv.media.MediaTypes.StockRequest request,
+                                 com.projectv.media.MediaTypes.StockResult result) {
+        return stock.save(UUID.fromString(videoId), request, result);
     }
 
     @Override

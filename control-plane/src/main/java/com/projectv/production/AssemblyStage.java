@@ -113,7 +113,7 @@ public class AssemblyStage extends StageSupport {
                         SELECT a.uri_hot FROM music_cue m JOIN asset a ON a.id = m.asset_id WHERE m.video_id = :v
                         """).param("v", videoId).query(String.class).optional().orElse(null);
         return new AssemblyRequest(videoId.toString(), plan.title(), plan.aspectRatio(), plan.language(),
-                !"none".equals(plan.narration()), shots, narration, musicUri, round(end), outputHeight);
+                !"none".equals(plan.narration()), shots, narration, musicUri, round(end), outputHeight, stockCredits(videoId));
     }
 
     @Transactional
@@ -127,6 +127,10 @@ public class AssemblyStage extends StageSupport {
         UUID captions = r.srtUri() == null ? null : assets.create(new NewAsset(videoId, "subtitle", r.srtUri(),
                 "application/x-subrip", null, null, null, "projectv", "Whisper word timings + script text", null, null,
                 AssetStore.LICENCE_OWN_RENDER, false));
+        if (r.creditsUri() != null) {
+            assets.create(new NewAsset(videoId, "doc", r.creditsUri(), "text/plain", null, null, null, "projectv",
+                    "credits.txt (stock footage and sound credits for the description)", null, null, AssetStore.LICENCE_OWN_RENDER, false));
+        }
         jdbc.sql("""
                         UPDATE video SET master_asset_id = :m, master_package_asset_id = :p, master_captions_asset_id = :c,
                                          updated_at = now() WHERE id = :v
@@ -140,6 +144,16 @@ public class AssemblyStage extends StageSupport {
                 + "motion and upscaling.").formatted(r.durationSec(), r.width(), r.height(), r.fps(), r.captionChunks(),
                 r.captionChunks() == 1 ? "" : "s", r.linesTimedByWhisper(), fits),
                 json.writeValueAsString(Map.of("masterAssetId", master, "packageAssetId", pack, "fits", r.fits())));
+    }
+
+    /** Credit lines for stock clips that need credit (CC BY, Pexels); empty when none: no credits file is made then. */
+    List<String> stockCredits(UUID videoId) {
+        return jdbc.sql("""
+                        SELECT DISTINCT p.attribution_text FROM shot sh JOIN scene sc ON sc.id = sh.scene_id
+                        JOIN asset a ON a.id = sh.footage_asset_id JOIN provenance p ON p.id = a.provenance_id
+                        WHERE sc.video_id = :v AND p.credit_required AND p.attribution_text IS NOT NULL
+                        ORDER BY p.attribution_text
+                        """).param("v", videoId).query(String.class).list();
     }
 
     private Map<String, String> clipUris(UUID videoId) {

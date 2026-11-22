@@ -105,6 +105,22 @@ class VideoProductionWorkflowTest {
             return StageResult.of("shots", "{}");
         }
 
+        /** Stock lane: how many stock shots the fake plan holds (0 = lane off). */
+        volatile int stockShots;
+
+        @Override
+        public List<com.projectv.media.MediaTypes.StockRequest> stockRequests(String videoId) {
+            return java.util.stream.IntStream.range(0, stockShots).mapToObj(i -> new com.projectv.media.MediaTypes.StockRequest(
+                    videoId, "shot" + i, i + 1, "a living room", "16:9", 4.0, List.of("commons"), null)).toList();
+        }
+
+        @Override
+        public StageResult saveStock(String videoId, com.projectv.media.MediaTypes.StockRequest request,
+                                     com.projectv.media.MediaTypes.StockResult result) {
+            events.add("STOCK:" + request.shotId() + ":" + (result.found() ? "found" : "fallback"));
+            return StageResult.of("saved", null);
+        }
+
         @Override
         public KeyframeRequest keyframeRequest(String videoId, String ownerNotes) {
             return new KeyframeRequest(videoId, "m", "a", "c", List.of());
@@ -389,6 +405,21 @@ class VideoProductionWorkflowTest {
                     30, List.of(), 0, 0);
         }
 
+        /** Stock lane: shot0 finds a clip, every other shot finds nothing (or the activity fails when failStock). */
+        volatile boolean failStock;
+
+        @Override
+        public com.projectv.media.MediaTypes.StockResult stockFetch(com.projectv.media.MediaTypes.StockRequest request) {
+            if (failStock) {
+                throw new IllegalStateException("worker down");
+            }
+            if (request.shotId().equals("shot0")) {
+                return new com.projectv.media.MediaTypes.StockResult(true, null, List.of("q"), List.of(), "s3://b/stock.mp4", 1920, 1080, 4.0,
+                        new com.projectv.media.MediaTypes.StockProvenance("commons", "File:x.webm", "https://p", "A", "CC BY 4.0", "", "t", true, null));
+            }
+            return new com.projectv.media.MediaTypes.StockResult(false, "no candidates", List.of("q"), List.of(), null, null, null, null, null);
+        }
+
         @Override
         public com.projectv.media.MediaTypes.FootageSearchResponse searchFootage(
                 com.projectv.media.MediaTypes.FootageSearchRequest request) {
@@ -499,6 +530,33 @@ class VideoProductionWorkflowTest {
             env.sleep(Duration.ofMillis(50));
         }
         throw new AssertionError("Stage " + stage + " never started waiting");
+    }
+
+    @Test
+    void stockShotsAreFetchedAfterShotPlanAndAMissNeverFailsTheVideo() {
+        activities.stockShots = 2;
+        VideoProductionWorkflow wf = start("auto", StageMode.AUTO, Map.of());
+        WorkflowStub.fromTyped(wf).getResult(Void.class);
+        assertTrue(activities.events.contains("STOCK:shot0:found"));
+        assertTrue(activities.events.contains("STOCK:shot1:fallback"), "no match: the shot is handed back to the AI lane");
+        assertEquals("VIDEO:COMPLETED", activities.events.getLast());
+    }
+
+    @Test
+    void aFailingStockWorkerFallsBackInsteadOfFailingTheStage() {
+        activities.stockShots = 1;
+        media.failStock = true;
+        VideoProductionWorkflow wf = start("auto", StageMode.AUTO, Map.of());
+        WorkflowStub.fromTyped(wf).getResult(Void.class);
+        assertTrue(activities.events.contains("STOCK:shot0:fallback"));
+        assertEquals("VIDEO:COMPLETED", activities.events.getLast());
+    }
+
+    @Test
+    void lanesOffMeansNoStockActivityAtAll() {
+        VideoProductionWorkflow wf = start("auto", StageMode.AUTO, Map.of());
+        WorkflowStub.fromTyped(wf).getResult(Void.class);
+        assertTrue(activities.events.stream().noneMatch(e -> e.startsWith("STOCK:")));
     }
 
     @Test

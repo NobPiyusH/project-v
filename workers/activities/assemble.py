@@ -210,6 +210,14 @@ def write_premiere_package(shots: list[dict], clip_files: list[Path], audio: Pat
 
 # ------------------------------------------------------------------------------------------------ activity
 
+def credits_text(credits: list[str], sfx_credits: list[str] | None = None) -> str:
+    """End-of-video credits for the description: stock clips that need credit (CC BY, Pexels) plus Freesound CC BY sounds."""
+    lines = ["Credits", "", "Footage:"] + [f"- {c}" for c in credits]
+    if sfx_credits:
+        lines += ["", "Sound effects:"] + [f"- {c}" for c in sfx_credits]
+    return "\n".join(lines) + "\n"
+
+
 @activity.defn(name="assemble_video")
 def assemble_video(req: dict) -> dict:
     """req: {videoId, title, aspectRatio, language, captions,
@@ -280,8 +288,13 @@ def assemble_video(req: dict) -> dict:
         master_uri = put_file(f"{base}/master.mp4", master, "video/mp4")
         package_uri = put_file(f"{base}/premiere_package.zip", package, "application/zip")
         srt_uri = put_file(f"{base}/captions.srt", srt, "application/x-subrip") if srt else None
+        credits_uri = None
+        if req.get("credits"):
+            credits = tmp / "credits.txt"
+            credits.write_text(credits_text(req["credits"], sfx_credits), encoding="utf-8")
+            credits_uri = put_file(f"{base}/credits.txt", credits, "text/plain")
         duration = media_duration(master)
     log.info("Master for %s: %.1fs %dx%d, %d shots, %d caption chunks", req["videoId"], duration, w, h, len(shots), len(chunks))
     return {"masterUri": master_uri, "packageUri": package_uri, "srtUri": srt_uri, "durationSec": round(duration, 3),
             "width": w, "height": h, "fps": FPS, "fits": fits, "captionChunks": len(chunks),
-            "linesTimedByWhisper": timed, "sfxCredits": sfx_credits}
+            "linesTimedByWhisper": timed, "sfxCredits": sfx_credits, "creditsUri": credits_uri}

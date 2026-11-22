@@ -104,6 +104,13 @@ public interface VideoActivities {
 
     void markClips(String videoId, java.util.List<String> shotIds, String status, String error);
 
+    // ---- Stock footage lane (off by default)
+
+    java.util.List<com.projectv.media.MediaTypes.StockRequest> stockRequests(String videoId);
+
+    StageResult saveStock(String videoId, com.projectv.media.MediaTypes.StockRequest request,
+                          com.projectv.media.MediaTypes.StockResult result);
+
     // ---- Free real footage (NASA)
 
     com.projectv.media.MediaTypes.FootageSearchRequest footageSearchRequest(String videoId, java.util.List<String> shotIds,

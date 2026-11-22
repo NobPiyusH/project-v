@@ -50,6 +50,9 @@ public interface MediaActivities {
     @ActivityMethod(name = "search_footage")
     com.projectv.media.MediaTypes.FootageSearchResponse searchFootage(com.projectv.media.MediaTypes.FootageSearchRequest request);
 
+    @ActivityMethod(name = "stock_fetch")
+    com.projectv.media.MediaTypes.StockResult stockFetch(com.projectv.media.MediaTypes.StockRequest request);
+
     @ActivityMethod(name = "fetch_footage")
     com.projectv.media.MediaTypes.FootageFetchResult fetchFootage(com.projectv.media.MediaTypes.FootageFetchRequest request);
 

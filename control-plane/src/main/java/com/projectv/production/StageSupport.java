@@ -42,6 +42,13 @@ public abstract class StageSupport {
 
     private static final java.util.regex.Pattern DIAGRAM_LANE = java.util.regex.Pattern.compile("\"lane\"\s*:\s*\"diagram\"");
 
+    private static final java.util.regex.Pattern STOCK_LANE = java.util.regex.Pattern.compile("\"lane\"\s*:\s*\"stock\"");
+
+    /** True for a shot in the stock lane (lane = stock): no keyframe, no AI clip. A shot that found no clip is reverted to ai_video. */
+    public static boolean stockShot(Map<String, Object> shot) {
+        return shot != null && shot.get("prompt_json") instanceof String p && STOCK_LANE.matcher(p).find();
+    }
+
     /** True for a shot the Director gave the diagram lane (prompt_json has lane = diagram): no keyframe, no AI clip. */
     public static boolean diagramShot(Map<String, Object> shot) {
         return shot != null && shot.get("prompt_json") instanceof String p && DIAGRAM_LANE.matcher(p).find();

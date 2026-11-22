@@ -66,6 +66,14 @@ public class ShotStage extends StageSupport {
         this.diagrams = diagrams;
     }
 
+    /** projectv.video.stock-lane (default off): a shot the Director marks lane=stock is searched on stock sites right after this stage. */
+    @org.springframework.beans.factory.annotation.Value("${projectv.video.stock-lane:false}")
+    private boolean stockLane;
+
+    void setStockLane(boolean on) {
+        this.stockLane = on;
+    }
+
     static final String GEMINI_IMAGE = "gemini_image";
     static final String ZIMAGE = "modal_zimage";
 
@@ -188,6 +196,10 @@ public class ShotStage extends StageSupport {
                 prompt.put("lane", "diagram");
                 prompt.put("diagramSpec", diagrams.specFor(videoId, plan.title(), line, s.description(), times.get(i)[1]));
             }
+            if (s.stock() && stockLane && prompt.get("lane") == null) {
+                prompt.put("lane", "stock");
+                prompt.put("stockQuery", s.description());
+            }
             prompt.put("startSec", round(times.get(i)[0]));
             jdbc.sql("""
                             INSERT INTO shot (id, scene_id, ord, duration_target_sec, shot_type, camera_move, description,
@@ -228,7 +240,7 @@ public class ShotStage extends StageSupport {
         int attempt = nextKeyframeAttempt(videoId);
         List<Map<String, Object>> wanted = shots(videoId).stream()
                 .filter(s -> only == null || only.contains((UUID) s.get("id")))
-                .filter(s -> !diagramShot(s)).toList(); // diagram shots are drawn, they have no keyframe
+                .filter(s -> !diagramShot(s) && !stockShot(s)).toList(); // diagram shots are drawn, stock shots are real clips: no keyframe
         long heroes = wanted.stream().filter(s -> "hero".equals(s.get("priority"))).count();
         boolean onPod = videoGpu != null && videoGpu.keyframes();
         // M3a: the router picks the image provider per class of shot (logged; budget- and failure-aware)
