@@ -48,6 +48,31 @@ def run(out_dir: Path, name: str, music: Path, clips: list[Path], width: int = 7
     return result
 
 
-if __name__ == "__main__":
+def picture_only(out_dir: Path, name: str, music: Path, clips: list[Path], width: int = 720, height: int = 1280) -> dict:
+    """<name>-picture-after.mp4: picture from the finish with ONLY smartTransitions + hqInterp on, trimmed at the end to
+    the before file's running time, with the before file's audio stream copied untouched (bit-identical)."""
+    import subprocess
+    from workers.common import ffmpeg_bin, media_duration, run_ffmpeg
+    before = out_dir / f"{name}-before.mp4"
+    dream.get_bytes = lambda uri: Path(uri).read_bytes()
+    dream.put_file = lambda key, path, ct: str(path)
+    req = {"dreamId": f"{name}-pic", "look": "lonely", "width": width, "height": height, "fps": 24,
+           "clips": [{"uri": str(c), "fps": 16} for c in clips], "musicUri": str(music), "musicName": music.name,
+           "ambience": False, "keepOrder": True, "smartTransitions": True, "hqInterp": True}
+    with workdir("edit-ab") as d:
+        res = dream.finish(req, Path(d))
+        dst = out_dir / f"{name}-picture-after.mp4"
+        run_ffmpeg(["-i", res["uri"], "-i", str(before), "-map", "0:v:0", "-map", "1:a:0", "-c:v", "libx264", "-crf", "25",
+                    "-preset", "fast", "-c:a", "copy", "-t", f"{media_duration(before):.3f}", "-movflags", "+faststart", str(dst)])
+        md5 = lambda f: subprocess.run([ffmpeg_bin(), "-v", "error", "-i", str(f), "-map", "0:a:0", "-c", "copy", "-f", "md5", "-"],  # noqa: E731
+                                       capture_output=True, text=True).stdout.strip()
+        return {"naturalSec": res["durationSec"], "beforeSec": media_duration(before), "afterSec": media_duration(dst),
+                "audioMd5Before": md5(before), "audioMd5After": md5(dst)}
+
+
+if __name__ == "__main__" and sys.argv[1] == "--picture":
+    out, nm, mus, *cl = sys.argv[2:]
+    print(json.dumps(picture_only(Path(out), nm, Path(mus), [Path(c) for c in cl])))
+elif __name__ == "__main__":
     out, nm, mus, *cl = sys.argv[1:]
     print(json.dumps(run(Path(out), nm, Path(mus), [Path(c) for c in cl]), indent=2))
