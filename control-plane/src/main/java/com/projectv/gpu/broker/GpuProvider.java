@@ -39,6 +39,16 @@ public interface GpuProvider extends PodApi {
     record InstanceStatus(State state, String endpoint, String detail) {
     }
 
+    /**
+     * Thrown by {@link #create} when the provider refuses this plan because it is out of stock right now and nothing was
+     * created. The only failure the canary may answer by trying the next plan; credit, auth and validation errors never are.
+     */
+    class PlanUnavailableException extends IllegalStateException {
+        public PlanUnavailableException(String message) {
+            super(message);
+        }
+    }
+
     boolean enabledByDefault();
 
     /** Result of {@link #preflight}: {@code ok} only when every check passed; {@code checks} says what was looked at. */

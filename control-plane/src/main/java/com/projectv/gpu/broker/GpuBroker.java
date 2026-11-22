@@ -751,6 +751,15 @@ public class GpuBroker {
      */
     public Map<String, Object> canary(String id, String image, List<String> workerArgv, Map<String, String> env, String volumeId,
                                       Health health, int timeoutSeconds, long pollMillis) {
+        return canary(id, image, workerArgv, env, volumeId, health, timeoutSeconds, pollMillis, DEFAULT_CANARY_MAX_USD);
+    }
+
+    static final int CANARY_MAX_ATTEMPTS = 3;
+    public static final double DEFAULT_CANARY_MAX_USD = 0.60;
+
+    /** @param maxUsd the owner-approved cap: a plan whose price for the whole canary run would exceed it is never rented */
+    public Map<String, Object> canary(String id, String image, List<String> workerArgv, Map<String, String> env, String volumeId,
+                                      Health health, int timeoutSeconds, long pollMillis, double maxUsd) {
         GpuProvider p = providers.get(id);
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("provider", id);
@@ -762,20 +771,29 @@ public class GpuBroker {
             return out;
         }
         String name;
-        GpuProvider.Quote q;
+        GpuProvider.Quote q = null;
+        List<GpuProvider.Quote> plans;
+        double canaryHours = (timeoutSeconds + 120) / 3600.0;
         synchronized (this) {
             if (shared != null || canaryRunning != null) {
                 out.put("result", "not run: a pod or another canary is on; turn the GPU off first");
                 return out;
             }
             GpuProvider.GpuSpec spec = new GpuProvider.GpuSpec(config.gpuPreference(), config.minVramGb(), config.minRamGb(), config.diskGb());
-            q = p.quotes(spec).stream().min(java.util.Comparator.comparingDouble(GpuProvider.Quote::hourlyUsd)).orElse(null);
-            if (q == null) {
+            plans = p.quotes(spec).stream().sorted(java.util.Comparator.comparingDouble(GpuProvider.Quote::hourlyUsd))
+                    .limit(CANARY_MAX_ATTEMPTS).toList();
+            if (plans.isEmpty()) {
                 out.put("result", "not run: no GPU in stock, nothing was rented");
                 return out;
             }
-            double canaryHours = (timeoutSeconds + 120) / 3600.0;
-            String why = wallet.refusal(id, q.hourlyUsd() * canaryHours);
+            q = plans.getFirst();
+            double cost = q.hourlyUsd() * canaryHours;
+            if (cost > maxUsd) {
+                out.put("result", String.format("not run: the cheapest plan (%s, $%.2f/h) would cost $%.2f for a %d s canary, over the approved cap of $%.2f",
+                        q.gpu(), q.hourlyUsd(), cost, timeoutSeconds + 120, maxUsd));
+                return out;
+            }
+            String why = wallet.refusal(id, cost);
             if (why != null) {
                 out.put("result", "not run: " + why);
                 return out;
@@ -786,17 +804,36 @@ public class GpuBroker {
         Instant start = clock.instant();
         GpuProvider.Instance inst = null;
         String failure = null;
+        List<String> attempts = new java.util.ArrayList<>();
+        out.put("attempts", attempts);
         try {
             List<String> argv = p.guard(workerArgv, Math.max(10, timeoutSeconds / 60 + 5), limits.idleMinutes(), start);
-            try {
-                inst = p.create(new GpuProvider.CreateRequest(name, image, config.diskGb(), argv, auth.env(id, name, env),
-                        config.port(), volumeId, q));
-            } catch (RuntimeException ex) {
-                failure = "create failed: " + ex.getMessage();
+            for (int i = 0; i < plans.size(); i++) {
+                q = plans.get(i);
+                double cost = q.hourlyUsd() * canaryHours;
+                if (cost > maxUsd) {
+                    attempts.add(q.gpu() + " $" + q.hourlyUsd() + "/h: skipped, $" + String.format("%.2f", cost) + " is over the cap of $" + String.format("%.2f", maxUsd));
+                    failure = "create failed: no plan left within the approved cap after: " + String.join("; ", attempts);
+                    break;
+                }
                 try {
-                    inst = find(p, name, q); // a pod whose create reply was lost is adopted, so it is terminated below
-                } catch (RuntimeException le) {
-                    failure += " (and the pod list failed: the watchdog ends any pod named " + name + ")";
+                    inst = p.create(new GpuProvider.CreateRequest(name, image, config.diskGb(), argv, auth.env(id, name, env),
+                            config.port(), volumeId, q));
+                    attempts.add(q.gpu() + " $" + q.hourlyUsd() + "/h: created");
+                    failure = null;
+                    break;
+                } catch (GpuProvider.PlanUnavailableException ex) {
+                    attempts.add(q.gpu() + " $" + q.hourlyUsd() + "/h: not available (" + ex.getMessage() + ")");
+                    failure = "create failed: every plan tried was unavailable: " + String.join("; ", attempts);
+                } catch (RuntimeException ex) {
+                    attempts.add(q.gpu() + " $" + q.hourlyUsd() + "/h: failed (" + ex.getMessage() + ")");
+                    failure = "create failed: " + ex.getMessage();
+                    try {
+                        inst = find(p, name, q); // a pod whose create reply was lost is adopted, so it is terminated below
+                    } catch (RuntimeException le) {
+                        failure += " (and the pod list failed: the watchdog ends any pod named " + name + ")";
+                    }
+                    break; // only "plan not available" moves on to the next plan
                 }
             }
             if (inst != null) {

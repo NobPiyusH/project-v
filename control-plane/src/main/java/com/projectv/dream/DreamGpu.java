@@ -333,10 +333,10 @@ public class DreamGpu {
     }
 
     /** The owner-approved canary: one tiny rental of the provider's cheapest GPU that must pass the worker's /health, then ends. */
-    public java.util.Map<String, Object> canary(String provider) {
+    public java.util.Map<String, Object> canary(String provider, double maxUsd) {
         return broker.canary(provider, image, PodBoot.command(),
                 PodBoot.env(worker(), port, "/workspace/data", volumeId == null ? null : VOLUME_MOUNT), volumeId,
-                DreamGpu::workerHealth, 20 * 60, 10_000);
+                DreamGpu::workerHealth, 20 * 60, 10_000, maxUsd);
     }
 
     /** null = the worker answered /health ready; else why not. The address carries the token as http://worker:TOKEN@host:port. */

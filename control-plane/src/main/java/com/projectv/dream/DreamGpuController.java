@@ -110,11 +110,12 @@ public class DreamGpuController {
      */
     @PostMapping("/gpu/broker/providers/{provider}/canary")
     public Map<String, Object> canary(@PathVariable String provider,
-                                      @org.springframework.web.bind.annotation.RequestParam(defaultValue = "false") boolean approve) {
+                                      @org.springframework.web.bind.annotation.RequestParam(defaultValue = "false") boolean approve,
+                                      @org.springframework.web.bind.annotation.RequestParam(defaultValue = "0.60") double maxUsd) {
         if (!approve) {
             throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.BAD_REQUEST,
                     "The canary rents a real GPU for a few minutes. Send approve=true to confirm.");
         }
-        return gpu.canary(provider);
+        return gpu.canary(provider, maxUsd);
     }
 }

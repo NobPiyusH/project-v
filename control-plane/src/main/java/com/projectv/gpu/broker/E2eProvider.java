@@ -529,6 +529,9 @@ public class E2eProvider implements GpuProvider {
             throw e;
         } catch (HttpClientErrorException e) {
             int code = e.getStatusCode().value();
+            if (code == 400 && e.getResponseBodyAsString().toLowerCase(java.util.Locale.ROOT).contains("temporarily not available")) {
+                throw new PlanUnavailableException("E2E plan out of stock (HTTP 400): " + scrub(abbreviate(e.getResponseBodyAsString())));
+            }
             throw new IllegalStateException("E2E refused the call (HTTP " + code + "): " + scrub(abbreviate(e.getResponseBodyAsString()))
                     + (code == 401 || code == 403 ? " (check E2E_API_KEY / E2E_AUTH_TOKEN in the MyAccount API settings)" : ""));
         } catch (RuntimeException e) {
