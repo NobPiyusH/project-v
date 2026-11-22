@@ -14,6 +14,7 @@ from workers.activities.assemble import assemble_video
 from workers.activities.clips import generate_clips
 from workers.activities.finish import smooth_clips, upscale_clips
 from workers.activities.footage import fetch_footage, search_footage
+from workers.activities.stock import stock_fetch
 from workers.activities.inspect import inspect_media
 from workers.activities.keyframes import generate_keyframes
 from workers.activities.media import tool_versions
@@ -51,7 +52,7 @@ async def main() -> None:
             task_queue=MEDIA_TASK_QUEUE,
             activities=[tool_versions, research_topic, synthesize_narration, generate_music,
                         generate_keyframes, render_animatic, inspect_media, review_images,
-                        generate_clips, search_footage, fetch_footage, assemble_video,
+                        generate_clips, search_footage, fetch_footage, stock_fetch, assemble_video,
                         smooth_clips, upscale_clips, check_sources, producer_review, dream_finish, dream_music_bed, dream_scout,
                         youtube_upload, dream_check],
             activity_executor=pool,
