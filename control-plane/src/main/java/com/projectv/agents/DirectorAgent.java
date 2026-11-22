@@ -21,6 +21,9 @@ public class DirectorAgent {
     private final StylePresets presets;
     /** Model tried first for this agent's most important call (Claude, owner-funded and capped); Gemini behind it. */
     private final String storyModel;
+    /** projectv.video.diagram-lane (default off): the Director may mark shots lane=diagram. */
+    @org.springframework.beans.factory.annotation.Value("${projectv.video.diagram-lane:false}")
+    private boolean diagramLane;
 
     public DirectorAgent(Llm llm, StylePresets presets,
                  @org.springframework.beans.factory.annotation.Value("${projectv.models.story:}") String storyModel) {
@@ -28,6 +31,14 @@ public class DirectorAgent {
         this.presets = presets;
         this.storyModel = storyModel;
     }
+
+    static final String DIAGRAM_RULE = """
+            - lane: "ai_video" (default) or "diagram". Use "diagram" for a shot whose line explains HOW something works
+              (parts, flows, layers, signals, colour mixing, a process step by step): it is drawn as an animated, labelled
+              diagram, accurate by construction. Never use it for atmosphere, people or places; AI video hallucinates
+              mechanisms, so a mechanism shot must be "diagram". A diagram shot's keyframePrompt/motionPrompt may be empty;
+              its description must say exactly what the diagram shows and in what order. Diagram shots last 5-12 seconds.
+            """;
 
     public ShotPlan plan(UUID videoId, VideoPlan plan, Concept concept, List<TimedLine> lines, double bpm,
                          double totalSec, String ownerNotes) {
@@ -66,8 +77,8 @@ public class DirectorAgent {
                   name for finding real reference photos, scientific name when it has one (e.g. "Melanocetus
                   johnsonii", "Architeuthis dux", "Hubble Space Telescope"). Otherwise empty.
                 Keep a continuous visual flow between consecutive shots (scale, direction, colour).
-                Return only the JSON object.""".formatted(preset.name(), preset.description(), totalSec, pacing, bpm,
-                bpm > 0 ? 60.0 / bpm : 0.5);
+                %sReturn only the JSON object.""".formatted(preset.name(), preset.description(), totalSec, pacing, bpm,
+                bpm > 0 ? 60.0 / bpm : 0.5, diagramLane && "16:9".equals(plan.aspectRatio()) ? DIAGRAM_RULE : "");
         StringBuilder user = new StringBuilder();
         user.append("Title: ").append(plan.title()).append(". Aspect ratio ").append(plan.aspectRatio()).append(".\n");
         user.append("Concept: ").append(concept.logline()).append("\nBig idea: ").append(concept.bigIdea()).append('\n');

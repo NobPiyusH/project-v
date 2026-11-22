@@ -133,6 +133,8 @@ public class VideoStage extends StageSupport {
             useOmni = omni(kind); // nothing fits: show the preferred plan; the request itself is then refused with reasons
         }
         List<ClipJob> jobs = jobs(videoId, kind, only, useOmni);
+        int drawn = diagramJobs(videoId, kind, only).size();
+        String drawnNote = drawn == 0 ? "" : " Plus %d diagram shot%s drawn on the laptop (free).".formatted(drawn, drawn == 1 ? "" : "s");
         if (useOmni) {
             BigDecimal inr = omniInr(jobs, kind).setScale(2, RoundingMode.HALF_UP);
             String what = "%s clips (Gemini Omni, %s)".formatted(kind, omniResolution(kind));
@@ -147,8 +149,8 @@ public class VideoStage extends StageSupport {
                 summary += " Shots: " + String.join(", ", jobs.stream().map(j -> "#" + j.shotNumber()).distinct().toList())
                         + ". Mark \"keep the draft\" on any whose Wan draft already looks right (₹0), then approve.";
             }
-            return new ClipEstimate(kind, jobs.size(), 0, inr, inr.doubleValue() / pricing.fx(), wall,
-                    !jobs.isEmpty() && inr.compareTo(autoApproveInr) > 0, summary);
+            return new ClipEstimate(kind, jobs.size() + drawn, 0, inr, inr.doubleValue() / pricing.fx(), wall,
+                    !jobs.isEmpty() && inr.compareTo(autoApproveInr) > 0, summary + drawnNote);
         }
         double gpu = gpuSeconds(jobs, kind);
         BigDecimal inr = pricing.modalGpuInr("H100", gpu).setScale(2, RoundingMode.HALF_UP);
@@ -160,29 +162,69 @@ public class VideoStage extends StageSupport {
                 : "Ready to make %d %s on Modal H100: about ₹%s ($%.2f) of GPU and %.0f min. ₹%s of this month's GPU cap left."
                 .formatted(jobs.size(), what, inr.setScale(0, RoundingMode.HALF_UP), usd, Math.ceil(wall),
                         budget.gpuRemaining().max(BigDecimal.ZERO).setScale(0, RoundingMode.HALF_UP));
-        return new ClipEstimate(kind, jobs.size(), gpu, inr, usd, wall, !jobs.isEmpty() && inr.compareTo(autoApproveInr) > 0,
-                summary);
+        return new ClipEstimate(kind, jobs.size() + drawn, gpu, inr, usd, wall, !jobs.isEmpty() && inr.compareTo(autoApproveInr) > 0,
+                summary + drawnNote);
     }
 
     /** The batch for the media worker. Refused (non-retryable) when it would break the monthly GPU cap. */
     public ClipRequest clipRequest(UUID videoId, String kind, List<UUID> only) {
         boolean useOmni = routeOmni(videoId, kind, only, true); // the decision, logged (rule 6)
         List<ClipJob> jobs = jobs(videoId, kind, only, useOmni);
-        if (jobs.isEmpty()) {
+        List<ClipJob> drawn = diagramJobs(videoId, kind, only); // diagram lane: drawn on the laptop, free, no provider
+        if (jobs.isEmpty() && drawn.isEmpty()) {
             throw new IllegalStateException(DRAFT.equals(kind) ? "No shots with images to animate"
                     : "No approved drafts need a final render");
+        }
+        if (jobs.isEmpty()) {
+            return new ClipRequest(videoId.toString(), wanApp, wanClass, publicUrl, drawn, 0, 0, BigDecimal.ZERO, "wan", null, null);
         }
         if (useOmni) {
             BigDecimal inr = omniInr(jobs, kind);
             budget.require(inr, jobs.size() + " " + kind + " clips on Gemini Omni");
-            return new ClipRequest(videoId.toString(), wanApp, wanClass, publicUrl, jobs, 0, 0,
+            return new ClipRequest(videoId.toString(), wanApp, wanClass, publicUrl, concat(jobs, drawn), 0, 0,
                     inr.setScale(2, RoundingMode.HALF_UP), "omni", omniResolution(kind), omniModel);
         }
         double gpu = gpuSeconds(jobs, kind);
         BigDecimal inr = pricing.modalGpuInr("H100", gpu);
         budget.requireGpu(inr, jobs.size() + " " + kind + " clips");
-        return new ClipRequest(videoId.toString(), wanApp, wanClass, publicUrl, jobs, containers(kind, jobs.size()), gpu,
+        return new ClipRequest(videoId.toString(), wanApp, wanClass, publicUrl, concat(jobs, drawn), containers(kind, jobs.size()), gpu,
                 inr.setScale(2, RoundingMode.HALF_UP), "wan", null, null);
+    }
+
+    private static List<ClipJob> concat(List<ClipJob> a, List<ClipJob> b) {
+        List<ClipJob> all = new ArrayList<>(a);
+        all.addAll(b);
+        return all;
+    }
+
+    static final int DIAGRAM_FPS = 24;
+
+    /**
+     * Diagram-lane shots (the Director's lane = diagram): the job's prompt is the shot's scene spec (JSON) and mode "diagram";
+     * the media worker draws it with Manim (workers/diagram). Drafts only: a drawn clip is final quality, so nothing is
+     * re-rendered for a "final". Already-drawn shots are skipped unless the owner picked them for a redo.
+     */
+    List<ClipJob> diagramJobs(UUID videoId, String kind, List<UUID> only) {
+        if (!DRAFT.equals(kind)) {
+            return List.of();
+        }
+        Set<String> wanted = only == null ? null : new HashSet<>(only.stream().map(UUID::toString).toList());
+        List<ClipJob> out = new ArrayList<>();
+        for (Map<String, Object> s : clipShots(videoId)) {
+            String id = String.valueOf(s.get("id"));
+            if (!diagramShot(s) || s.get("footage_asset_id") != null || wanted != null && !wanted.contains(id)
+                    || wanted == null && s.get("draft_clip_asset_id") != null) {
+                continue;
+            }
+            Map<String, Object> p = json.readValue((String) s.get("prompt_json"), new TypeReference<Map<String, Object>>() {
+            });
+            double sec = Math.max(5, Math.min(12, num(s.get("duration_target_sec"))));
+            Object spec = p.get("diagramSpec");
+            out.add(new ClipJob(id, ((Number) s.get("ord")).intValue() + 1, ((Number) s.get("draft_takes")).intValue() + 1, kind,
+                    "diagram", null, spec == null ? "{}" : json.writeValueAsString(spec), 1920, 1080,
+                    (int) Math.round(sec * DIAGRAM_FPS), Math.abs((long) id.hashCode())));
+        }
+        return out;
     }
 
     List<ClipJob> jobs(UUID videoId, String kind, List<UUID> only) {
@@ -203,8 +245,8 @@ public class VideoStage extends StageSupport {
             if (wanted != null && !wanted.contains(id)) {
                 continue;
             }
-            if (s.get("keyframe_uri") == null || s.get("footage_asset_id") != null) {
-                continue; // no image to animate, or the owner chose real footage for this shot
+            if (s.get("keyframe_uri") == null || s.get("footage_asset_id") != null || diagramShot(s)) {
+                continue; // no image to animate, real footage chosen, or a diagram shot (drawn, see diagramJobs)
             }
             if (!draft && wanted == null && (s.get("draft_clip_asset_id") == null || !Boolean.TRUE.equals(s.get("final_wanted")))) {
                 continue; // finals only for shots with a draft that the owner didn't mark "keep the draft"
@@ -276,6 +318,8 @@ public class VideoStage extends StageSupport {
         request.jobs().forEach(j -> jobs.put(j.shotId() + ":" + j.take(), j));
         java.util.Set<String> activated = new HashSet<>(); // first good take of each shot becomes the one in use
         int ok = 0;
+        int aiOk = 0;
+        int aiBad = 0;
         double gpu = 0;
         List<String> errors = new ArrayList<>();
         int stopped = 0;
@@ -285,6 +329,7 @@ public class VideoStage extends StageSupport {
                 continue;
             }
             UUID shotId = UUID.fromString(o.shotId());
+            boolean diagram = "diagram".equals(job.mode()); // drawn on the laptop: no provider, no cost, not a router signal
             gpu += o.gpuSeconds();
             if (o.outputTokens() > 0) {
                 ledger.record(videoId, com.projectv.ledger.BudgetGuard.GEMINI, pricing.omniTokensInr(o.outputTokens()),
@@ -302,6 +347,7 @@ public class VideoStage extends StageSupport {
                 stopped += wasStopped ? 1 : 0;
                 if (!wasStopped) {
                     errors.add("shot " + job.shotNumber() + ": " + o.error());
+                    aiBad += diagram ? 0 : 1;
                 }
                 jdbc.sql("UPDATE shot SET clip_status = :st, clip_error = :e, updated_at = now() WHERE id = :s")
                         .param("st", wasStopped ? "STOPPED" : "FAILED").param("e", wasStopped ? null : o.error())
@@ -310,9 +356,9 @@ public class VideoStage extends StageSupport {
             }
             UUID assetId = assets.create(new NewAsset(videoId, "video", o.uri(), "video/mp4", job.width(), job.height(),
                     o.fps() > 0 ? (double) o.frames() / o.fps() : null,
-                    "omni".equals(request.provider()) ? "gemini_omni" : "modal_wan",
-                    "omni".equals(request.provider()) ? request.omniModel() + " " + request.resolution() : "wan2.2-i2v-a14b " + o.mode(),
-                    job.prompt(), job.seed(), "omni".equals(request.provider()) ? AssetStore.LICENCE_GEMINI : AssetStore.LICENCE_WAN, true));
+                    diagram ? "diagram_manim" : "omni".equals(request.provider()) ? "gemini_omni" : "modal_wan",
+                    diagram ? "manim 1080p24 diagram" : "omni".equals(request.provider()) ? request.omniModel() + " " + request.resolution() : "wan2.2-i2v-a14b " + o.mode(),
+                    job.prompt(), job.seed(), diagram ? AssetStore.LICENCE_OWN_RENDER : "omni".equals(request.provider()) ? AssetStore.LICENCE_GEMINI : AssetStore.LICENCE_WAN, true));
             jdbc.sql("UPDATE asset SET shot_id = :s, clip_kind = :k, fps = :f WHERE id = :a")
                     .param("s", shotId).param("k", job.kind()).param("f", o.fps() > 0 ? o.fps() : FPS).param("a", assetId).update();
             if (activated.add(o.shotId())) {
@@ -321,6 +367,7 @@ public class VideoStage extends StageSupport {
                         .param("a", assetId).param("s", shotId).update();
             }
             ok++;
+            aiOk += diagram ? 0 : 1;
         }
         if (r.startUps() > 0) { // observed cold starts, not containers requested
             double start = r.startUps() * pricing.gpuContainerStartSeconds();
@@ -329,8 +376,8 @@ public class VideoStage extends StageSupport {
                             r.startUps() == 1 ? "" : "s"));
         }
         String kind = request.jobs().isEmpty() ? DRAFT : request.jobs().getFirst().kind();
-        if (router != null) { // M3a health: a batch where every clip failed cools the provider down
-            router.reportBatch("omni".equals(request.provider()) ? OMNI : WAN, ok, errors.size(),
+        if (router != null && aiOk + aiBad > 0) { // M3a health: a batch where every clip failed cools the provider down
+            router.reportBatch("omni".equals(request.provider()) ? OMNI : WAN, aiOk, aiBad,
                     errors.isEmpty() ? null : errors.getFirst());
         }
         if (ok == 0 && stopped == 0) {

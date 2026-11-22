@@ -508,14 +508,12 @@ def _diagram_one(video_id: str, j: dict) -> dict:
     try:
         with workdir("diagram") as tmp:
             out = Path(tmp) / "diagram.mp4"
-            res = render_or_fallback(spec, out, title=title or "", duration=int(j["numFrames"]) / 24.0)
+            res = render_or_fallback(spec, out, title=title or "", duration=int(j["numFrames"]) / 24.0,
+                                    lines=(spec or {}).get("lines") if isinstance(spec, dict) else None)
             uri = put_file(clip_key(video_id, j), out, "video/mp4")
-        note = f"text card: {res['reason']}" if res["fallback"] else None
-        if note:
+        if res["fallback"]:
             log.warning("Diagram shot %s fell back to a text card: %s", j["shotNumber"], res["reason"])
-        d = _clip(video_id, j, {"uri": uri, "seconds": 0, "frames": int(j["numFrames"]), "fps": 24, "mode": "diagram"})
-        d["note"] = note
-        return d
+        return _clip(video_id, j, {"uri": uri, "seconds": 0, "frames": int(j["numFrames"]), "fps": 24, "mode": "diagram"})
     except Exception as e:  # noqa: BLE001 - one failed diagram never fails the batch
         return _clip(video_id, j, {"mp4": None, "seconds": 0, "error": f"{type(e).__name__}: {e}"[:600]})
 

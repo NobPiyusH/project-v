@@ -46,6 +46,13 @@ public class ShotStage extends StageSupport {
         this.router = router;
     }
 
+    private DiagramSpecs diagrams; // null in tests; used only with projectv.video.diagram-lane=true
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setDiagramSpecs(DiagramSpecs diagrams) {
+        this.diagrams = diagrams;
+    }
+
     static final String GEMINI_IMAGE = "gemini_image";
     static final String ZIMAGE = "modal_zimage";
 
@@ -161,6 +168,13 @@ public class ShotStage extends StageSupport {
             if (s.footageQuery() != null && !s.footageQuery().isBlank()) {
                 prompt.put("footageQuery", s.footageQuery().strip());
             }
+            if (s.diagram() && diagrams != null && diagrams.enabled() && "16:9".equals(plan.aspectRatio())) {
+                // Diagram lane: drawn, not generated. The spec comes from this shot's narration line (validated, one repair).
+                String line = script.lines().stream().filter(l -> s.lineIndex() != null && l.index() == s.lineIndex())
+                        .map(StoredLine::text).findFirst().orElse(s.description());
+                prompt.put("lane", "diagram");
+                prompt.put("diagramSpec", diagrams.specFor(videoId, plan.title(), line, s.description(), times.get(i)[1]));
+            }
             prompt.put("startSec", round(times.get(i)[0]));
             jdbc.sql("""
                             INSERT INTO shot (id, scene_id, ord, duration_target_sec, shot_type, camera_move, description,
@@ -200,7 +214,8 @@ public class ShotStage extends StageSupport {
         List<KeyframeJob> jobs = new ArrayList<>();
         int attempt = nextKeyframeAttempt(videoId);
         List<Map<String, Object>> wanted = shots(videoId).stream()
-                .filter(s -> only == null || only.contains((UUID) s.get("id"))).toList();
+                .filter(s -> only == null || only.contains((UUID) s.get("id")))
+                .filter(s -> !diagramShot(s)).toList(); // diagram shots are drawn, they have no keyframe
         long heroes = wanted.stream().filter(s -> "hero".equals(s.get("priority"))).count();
         // M3a: the router picks the image provider per class of shot (logged; budget- and failure-aware)
         String heroProvider = heroes == 0 ? null : routeKeyframes(videoId, true, (int) heroes, policy);

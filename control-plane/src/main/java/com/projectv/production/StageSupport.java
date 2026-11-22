@@ -40,6 +40,13 @@ public abstract class StageSupport {
     protected final String modalApp;
     protected final String modalClass;
 
+    private static final java.util.regex.Pattern DIAGRAM_LANE = java.util.regex.Pattern.compile("\"lane\"\s*:\s*\"diagram\"");
+
+    /** True for a shot the Director gave the diagram lane (prompt_json has lane = diagram): no keyframe, no AI clip. */
+    public static boolean diagramShot(Map<String, Object> shot) {
+        return shot != null && shot.get("prompt_json") instanceof String p && DIAGRAM_LANE.matcher(p).find();
+    }
+
     protected StageSupport(ProductionDeps d) {
         this.jdbc = d.jdbc;
         this.json = d.json;
