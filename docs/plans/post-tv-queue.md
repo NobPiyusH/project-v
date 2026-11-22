@@ -25,3 +25,7 @@ Owner to-do: rotate pasted keys (Vast, E2E, RunPod, ElevenLabs, Pixabay, Vast TO
 13. Direction: small on purpose: one app, one database, one file store, one GPU route, one screen per stage, one proven provider per job, A/B tests, no pile of fallbacks.
 
 CTO notes: 10-13 are one program (a Python-only studio on serverless GPU). Do it as a staged migration on a branch, never a big-bang rewrite: prove serverless on one Short first (item 11), then move one stage at a time. Risk HIGH if done unattended in one night; agree scope and tests before starting.
+
+## Owner follow-up, 23 Nov 2026
+- Item 5: run an A/B of FLUX.2 klein vs Z-Image Turbo on the "lonely" look (same prompts, owner judges by eye, a few cents on a pod already running), THEN decide the default. Until then FLUX stays the default for Video; Z-Image stays for Dream Shorts "lonely".
+- Item 10: "do as needful, but later the code base will increase": agreed, the cost of the Java-to-Python move grows with the codebase, so start soon. Plan: right after the television video, write the migration plan (scope, order of stages, tests, stop rule, branch), get the owner's go, then migrate one stage at a time, old path kept until the Python one passes its tests and he approves.
