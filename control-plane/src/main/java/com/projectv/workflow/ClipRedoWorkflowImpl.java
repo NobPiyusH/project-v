@@ -13,9 +13,9 @@ public class ClipRedoWorkflowImpl implements ClipRedoWorkflow {
 
     private final VideoActivities activities = Workflow.newActivityStub(VideoActivities.class,
             ActivityOptions.newBuilder()
-                    .setStartToCloseTimeout(Duration.ofMinutes(2))
+                    .setStartToCloseTimeout(Duration.ofMinutes(5)) // may wait for a pod start (8-18 min): retries join it, see VideoGpu
                     .setRetryOptions(RetryOptions.newBuilder()
-                            .setMaximumAttempts(3)
+                            .setMaximumAttempts(8)
                             .setDoNotRetry(com.projectv.ledger.BudgetGuard.BUDGET_ERROR)
                             .build())
                     .build());
