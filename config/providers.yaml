@@ -195,10 +195,10 @@ pricing:
   # rates are read live from each provider). 0 = blocked: the owner raises one when he says yes. Modal keeps its own cap below.
   gpuBroker:
     order: [runpod, jarvislabs, cloudrift, vast, e2e, shadeform, modal]   # tie-break only: the cheapest live price in stock and inside its cap wins
-    totalCapUsd: 8               # all rented GPUs together per month (owner, 20 Nov 2026: 8)
+    totalCapUsd: 20              # all rented GPUs together per month (owner, 22 Nov 2026: 20, was 8)
     dailyCapUsd: 10.00           # all studio GPU spend per UTC day, booked rentals + the running pod (owner: 3.50 on 21 Nov 2026, 5.00 that evening, 10.00 on 22 Nov while testing); 0 = off
     providers:
-      runpod:     { monthlyCapUsd: 8 }   # owner: 8 (20 Nov 2026); other providers stay 0 until they have an adapter and a key
+      runpod:     { monthlyCapUsd: 12 }  # owner: 12 (22 Nov 2026, with the total at 20; was 8); other providers stay 0 until they have an adapter and a key
       # JarvisLabs (adapter built 22 Nov 2026 on the Python SDK; unproven until its canary passes, see docs/jarvislabs-provider-notes.md). Cap 0 = blocked: raise it
       # only when the owner approves the canary. GPU type names follow the CLI docs and are not verified live.
       jarvislabs:
@@ -216,7 +216,7 @@ pricing:
       # Vast.ai (owner, 21 Nov 2026: use it; strangers' machines, so tight filters and no secrets on the box). Every number is a limit or
       # an estimate, never a price: the hourly price is the live offer's. See VastConfig for what each one means.
       vast:
-        monthlyCapUsd: 5
+        monthlyCapUsd: 12                # owner 22 Nov 2026, with the total at 20 (was 5)
         gpuNames: ["RTX 4090", "RTX 5090", "L40S", "RTX A6000"]   # Vast gpu_name values, all >= 24 GB
         minReliability: 0.97
         minDownMbps: 500
