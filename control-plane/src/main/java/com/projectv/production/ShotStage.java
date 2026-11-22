@@ -158,6 +158,10 @@ public class ShotStage extends StageSupport {
             }
         }
 
+        // Diagram specs the earlier run already paid for (flag projectv.cost.diagram-spec-cache), read before the shots are replaced.
+        java.util.Map<String, java.util.ArrayDeque<Map<String, Object>>> paidSpecs = diagrams != null && diagrams.cacheEnabled()
+                ? paidDiagramSpecs(videoId, plan.title(), script) : java.util.Map.of();
+        int reusedSpecs = 0;
         jdbc.sql("DELETE FROM scene WHERE video_id = :v").param("v", videoId).update();
         UUID sceneId = null;
         String sceneTitle = null;
@@ -194,7 +198,15 @@ public class ShotStage extends StageSupport {
                 String line = script.lines().stream().filter(l -> s.lineIndex() != null && l.index() == s.lineIndex())
                         .map(StoredLine::text).findFirst().orElse(s.description());
                 prompt.put("lane", "diagram");
-                prompt.put("diagramSpec", diagrams.specFor(videoId, plan.title(), line, s.description(), times.get(i)[1]));
+                var queue = paidSpecs.get(DiagramSpecs.cacheKey(plan.title(), line, times.get(i)[1]));
+                if (queue != null && !queue.isEmpty()) {
+                    Map<String, Object> spec = queue.poll();
+                    spec.put("duration", Math.max(5.0, Math.min(12.0, Math.ceil(times.get(i)[1]))));
+                    prompt.put("diagramSpec", spec);
+                    reusedSpecs++;
+                } else {
+                    prompt.put("diagramSpec", diagrams.specFor(videoId, plan.title(), line, s.description(), times.get(i)[1]));
+                }
             }
             if (s.stock() && stockLane && prompt.get("lane") == null) {
                 prompt.put("lane", "stock");
@@ -214,7 +226,30 @@ public class ShotStage extends StageSupport {
         }
         return StageResult.of("%d shots in %d scenes over %.0fs (%d hero); every narration line starts on its own shot, other cuts on the %.0f BPM beat grid.%s"
                 .formatted(sp.shots().size(), sceneOrd, total, heroes, bpm,
-                        timing.warning() == null ? "" : " " + timing.warning()), json.writeValueAsString(sp));
+                        timing.warning() == null ? "" : " " + timing.warning())
+                + (reusedSpecs == 0 ? "" : " " + reusedSpecs + " diagram spec" + (reusedSpecs == 1 ? "" : "s") + " reused from the earlier run (no model call)."),
+                json.writeValueAsString(sp));
+    }
+
+    /** The earlier run's good (non-fallback) diagram specs, keyed like {@link DiagramSpecs#cacheKey}; a line used twice keeps both in order. */
+    private java.util.Map<String, java.util.ArrayDeque<Map<String, Object>>> paidDiagramSpecs(UUID videoId, String title, StoredScript script) {
+        java.util.Map<String, java.util.ArrayDeque<Map<String, Object>>> out = new java.util.HashMap<>();
+        for (Map<String, Object> row : shots(videoId)) {
+            Map<String, Object> p = json.readValue((String) row.get("prompt_json"), new TypeReference<>() {
+            });
+            if (!(p.get("diagramSpec") instanceof Map<?, ?> m) || Boolean.TRUE.equals(m.get("fallback")) || !(p.get("lineIndex") instanceof Number li)) {
+                continue;
+            }
+            String line = script.lines().stream().filter(l -> l.index() == li.intValue()).map(StoredLine::text).findFirst().orElse(null);
+            if (line == null) {
+                continue;
+            }
+            @SuppressWarnings("unchecked")
+            Map<String, Object> copy = new LinkedHashMap<>((Map<String, Object>) m);
+            out.computeIfAbsent(DiagramSpecs.cacheKey(title, line, ((Number) row.get("duration_target_sec")).doubleValue()),
+                    k -> new java.util.ArrayDeque<>()).add(copy);
+        }
+        return out;
     }
 
 

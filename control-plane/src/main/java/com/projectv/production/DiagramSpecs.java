@@ -71,6 +71,35 @@ public class DiagramSpecs {
     }
 
     /**
+     * projectv.cost.diagram-spec-cache (default off): when the Shot plan is run again, a diagram shot whose narration line
+     * and length are unchanged takes the spec the earlier run already paid for instead of asking the model again.
+     * Measured on the television explainer (22 Nov 2026): 23 DIAGRAM_SPEC calls for ~13 diagram shots, none of them repairs;
+     * the whole batch was simply paid twice because the stage ran twice.
+     */
+    @Value("${projectv.cost.diagram-spec-cache:false}")
+    private boolean cache;
+
+    void setCache(boolean on) {
+        this.cache = on;
+    }
+
+    public boolean cacheEnabled() {
+        return cache;
+    }
+
+    /** Same title + narration line + clamped length = same spec (the shot description is re-worded on every re-plan, so it is not part of the key). */
+    public static String cacheKey(String videoTitle, String narrationLine, double seconds) {
+        double dur = Math.max(5.0, Math.min(12.0, Math.ceil(seconds)));
+        try {
+            byte[] h = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest((videoTitle + "|" + narrationLine + "|" + dur).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            return java.util.HexFormat.of().formatHex(h, 0, 12);
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    /**
      * The spec for one diagram shot as a map ready for prompt_json. {@code fallback=true} in the result means a text card
      * will be drawn (title + lines); the reason is in {@code fallbackReason}.
      */
