@@ -39,7 +39,7 @@ def test_captions_use_script_words_with_whisper_timing_and_fall_back_evenly():
     even = A.line_words("13.8 billion years", None, 3.0)
     assert even[0]["word"] == "13.8" and even[-1]["end"] == pytest.approx(3.0)
     chunks = A.caption_chunks([{"word": w, "start": i, "end": i + 0.5} for i, w in enumerate("one two three four. five".split())], 3)
-    assert [c["text"] for c in chunks] == ["one two three", "four.", "five"]
+    assert [c["text"] for c in chunks] == ["one two", "three four.", "five"]  # a long sentence is split evenly, no one-word leftover
 
 
 def test_a_short_is_assembled_mastered_captioned_and_packaged(local):

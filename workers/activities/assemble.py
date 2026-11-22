@@ -73,15 +73,25 @@ def line_words(text: str, heard: list[dict] | None, duration: float) -> list[dic
 # ------------------------------------------------------------------------------------------------ captions
 
 def caption_chunks(words: list[dict], max_words: int, max_gap: float = 0.6) -> list[dict]:
-    """Groups timed words into short on-screen captions; a pause or sentence end starts a new one."""
-    chunks, cur = [], []
+    """Groups timed words into short on-screen captions. A pause or sentence end ends a group; a long group is split
+    into near-equal parts, so no caption is a one-word leftover ("... and mild" / "guilt.", owner saw it 23 Nov 2026)."""
+    groups, cur = [], []
     for w in words:
-        if cur and (len(cur) >= max_words or w["start"] - cur[-1]["end"] > max_gap or re.search(r"[.!?]$", cur[-1]["word"])):
-            chunks.append(cur)
+        if cur and (w["start"] - cur[-1]["end"] > max_gap or re.search(r"[.!?]$", cur[-1]["word"])):
+            groups.append(cur)
             cur = []
         cur.append(w)
     if cur:
-        chunks.append(cur)
+        groups.append(cur)
+    chunks = []
+    for g in groups:
+        parts = max(1, -(-len(g) // max_words))  # ceil
+        size, extra = divmod(len(g), parts)
+        k = 0
+        for n in range(parts):
+            take = size + (1 if n < extra else 0)
+            chunks.append(g[k:k + take])
+            k += take
     return [{"text": " ".join(x["word"] for x in c), "start": c[0]["start"], "end": c[-1]["end"]} for c in chunks]
 
 

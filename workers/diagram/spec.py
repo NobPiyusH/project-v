@@ -174,7 +174,7 @@ def fallback_spec(title: str, lines: list[str] | None = None, duration: float = 
 
 AMBIENT_PULSE = ("box", "layer", "circle", "dots_grid", "particles", "rgb_mix", "callout")
 AMBIENT_FLOW = ("beam", "line", "arrow")
-TITLE_SIZE, LABEL_MIN_SIZE = 40, 28  # one title size for every diagram; floating labels at least 28
+TITLE_SIZE, LABEL_MIN_SIZE, X_LABEL = 40, 28, 5.3  # one title size for every diagram; floating labels at least 28
 PULSE_PERIOD = 2.0        # seconds per gentle breathing cycle
 MAX_TOTAL_STEPS = 240
 
@@ -195,9 +195,28 @@ def enrich_motion(spec: dict) -> dict:
         out["elements"] = [e for e in out["elements"] if e["id"] not in gone]
         out["steps"] = [s for s in out.get("steps", []) if s.get("target") not in gone]
     els, steps = out["elements"], out.setdefault("steps", [])
+    for e in els:  # mojibake from an upstream encoding bug ("90Â°"): repaired at the last moment
+        for key in ("text",):
+            if isinstance(e.get(key), str):
+                e[key] = e[key].replace("Â°", "°")
+    tops = sorted((e for e in els if e["type"] == "text" and float(e.get("y", 0)) >= 2.9), key=lambda e: -float(e["y"]))
+    for k, e in enumerate(tops):  # one title (the highest); any other text up there becomes a label below it
+        if k == 0:
+            e["size"] = TITLE_SIZE
+        else:
+            e["y"] = 2.3
     for e in els:  # every title is the same size; floating labels get a modest floor (bigger ones overlapped each other)
-        if e.get("text") and e["type"] == "text":
-            e["size"] = TITLE_SIZE if float(e.get("y", 0)) >= 2.9 else max(int(e.get("size", 26)), LABEL_MIN_SIZE)
+        if e.get("text") and e["type"] == "text" and e not in tops[:1]:
+            e["size"] = max(int(e.get("size", 26)), LABEL_MIN_SIZE)
+            e["x"] = max(-X_LABEL, min(X_LABEL, float(e["x"])))  # keep labels inside the frame
+    labels = sorted((e for e in els if e["type"] == "text" and e not in tops[:1]), key=lambda e: (round(float(e["y"]), 1), float(e["x"])))
+    for a, b in zip(labels, labels[1:]):  # labels on the same line must not touch: push the right one along
+        if abs(float(a["y"]) - float(b["y"])) < 0.4:
+            need = (len(a["text"]) + len(b["text"])) * 0.1 + 0.3
+            if float(b["x"]) - float(a["x"]) < need:
+                b["x"] = min(X_LABEL, float(a["x"]) + need)
+                if float(b["x"]) - float(a["x"]) < need:
+                    a["x"] = float(b["x"]) - need
     appears = {s["target"] for s in steps if s.get("do") in ("show", "draw")}
     if els and all(e["id"] in appears and not e.get("visible") for e in els):
         first = next((e for e in els if e["type"] == "text"), els[0])
