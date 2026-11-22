@@ -292,6 +292,8 @@ def _build_scene_class():
                     if m.get_fill_opacity() > 0:
                         m.set_fill(c)
                     m.set_stroke(c)
+            elif kind == "draw" and a.type == "arrow" and len(st["orig"]) < 2:
+                a.set_alpha(e)  # a zero-length arrow has no shaft to draw: fade it in instead of crashing the whole shot
             elif kind == "draw":
                 for m, orig in st["orig"]:
                     if orig.get_num_points() > 0 and not (a.type == "arrow" and m is a.shapes[1]):
