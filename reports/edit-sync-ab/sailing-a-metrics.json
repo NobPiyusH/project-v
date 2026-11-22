@@ -1,0 +1,46 @@
+{
+  "before": {
+    "motion": 1.22,
+    "cuts": 0.0,
+    "colour": 4.89,
+    "shadows": 29.65,
+    "loudnessLufs": -13.0,
+    "durationSec": 17.625,
+    "shots": 4.0,
+    "cutsOnBeat": 3.0,
+    "speed": 1.0,
+    "hookShot": 1.0,
+    "ambiences": 0.0,
+    "shortestShotSec": 4.19,
+    "musicRiseSec": 12.98,
+    "cutToBeatErrorSec": 0.0,
+    "cutToBarErrorSec": 0.287,
+    "dissolves": [
+      0.5,
+      0.5,
+      0.5
+    ]
+  },
+  "after": {
+    "motion": 1.24,
+    "cuts": 0.0,
+    "colour": 4.88,
+    "shadows": 29.69,
+    "loudnessLufs": -13.9,
+    "durationSec": 19.667,
+    "shots": 4.0,
+    "cutsOnBeat": 3.0,
+    "speed": 1.0,
+    "hookShot": 1.0,
+    "ambiences": 0.0,
+    "shortestShotSec": 4.35,
+    "musicRiseSec": 12.98,
+    "cutToBeatErrorSec": 0.0,
+    "cutToBarErrorSec": 0.31,
+    "dissolves": [
+      0.12,
+      0.12,
+      0.12
+    ]
+  }
+}

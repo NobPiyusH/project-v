@@ -16,7 +16,7 @@ from pathlib import Path
 from temporalio import activity
 
 from workers.common import ffmpeg_bin, get_bytes, log, media_duration, put_file, run_ffmpeg, workdir
-from workers.dream import edit, hook, scenes
+from workers.dream import edit, hook, polish, scenes
 
 MUSIC_EXTENSIONS = {".mp3", ".wav", ".m4a", ".flac", ".ogg", ".aac"}
 
@@ -81,27 +81,29 @@ def look_filter(look: str | None) -> str:
     return LOOKS.get(look or "dreamcore", LOOKS["dreamcore"])
 
 
-def dissolve_graph(durations: list[float], dissolve: float, width: int, height: int, fps: int, look: str | None,
-                   handheld: str | None = None) -> str:
+def dissolve_graph(durations: list[float], dissolve: float | list[float], width: int, height: int, fps: int,
+                   look: str | None, handheld: str | None = None, stretch: list[float] | None = None) -> str:
     """filter_complex joining inputs 0..n-1 with cross-dissolves, then the look; output label [v].
 
     Each input is scaled/cropped to the final frame first. A dissolve can't be longer than a third of the shorter
-    neighbouring clip, so very short clips still show."""
+    neighbouring clip, so very short clips still show. `dissolve` may be a list (one length per clip, [0] unused) and
+    `stretch` a per-clip slow-down factor (>1 plays slower; used by beat snapping to reach a beat)."""
     n = len(durations)
     if n == 0:
         raise ValueError("no clips")
-    parts = [f"[{i}:v]trim=duration={durations[i]:.3f},setpts=PTS-STARTPTS,"
+    slow = lambda i: f"setpts=PTS*{stretch[i]:.4f}," if stretch and stretch[i] > 1.0 else ""  # noqa: E731
+    parts = [f"[{i}:v]{slow(i)}trim=duration={durations[i]:.3f},setpts=PTS-STARTPTS,"
              f"scale={width}:{height}:force_original_aspect_ratio=increase:flags=lanczos,"
              f"crop={width}:{height}{handheld_filter(handheld, width, height, i)},fps={fps},format=yuv420p,setsar=1[c{i}]"
              for i in range(n)]
-    if dissolve <= 0:  # hard cuts
+    if not isinstance(dissolve, list) and dissolve <= 0:  # hard cuts
         parts.append("".join(f"[c{i}]" for i in range(n)) + f"concat=n={n}:v=1:a=0[x]")
         parts.append(f"[x]{look_filter(look)},format=yuv420p[v]")
         return ";".join(parts)
     last = "c0"
     offset = durations[0]
     for i in range(1, n):
-        d = round(max(0.1, min(dissolve, durations[i - 1] / 3, durations[i] / 3)), 3)
+        d = _dissolve_at(durations, dissolve, i)
         offset -= d
         out = f"x{i}"
         parts.append(f"[{last}][c{i}]xfade=transition=fade:duration={d}:offset={round(offset, 3)}[{out}]")
@@ -111,11 +113,13 @@ def dissolve_graph(durations: list[float], dissolve: float, width: int, height: 
     return ";".join(parts)
 
 
-def _dissolve_at(durations: list[float], dissolve: float, i: int) -> float:
-    return round(max(0.1, min(dissolve, durations[i - 1] / 3, durations[i] / 3)), 3) if dissolve > 0 else 0.0
+def _dissolve_at(durations: list[float], dissolve: float | list[float], i: int) -> float:
+    """Length of the dissolve into clip i (list: per-cut lengths, [i] for clip i)."""
+    want = dissolve[i] if isinstance(dissolve, list) else dissolve
+    return round(max(0.1, min(want, durations[i - 1] / 3, durations[i] / 3)), 3) if want > 0 else 0.0
 
 
-def beat_synced(durations: list[float], dissolve: float, beats: list[float], max_trim: float = 1.0,
+def beat_synced(durations: list[float], dissolve: float | list[float], beats: list[float], max_trim: float = 1.0,
                 bars: list[float] | None = None, min_len: float = 0.0, prefer: dict[int, float] | None = None) -> list[float]:
     """Shorten clips (never lengthen) so every cut, or the middle of every dissolve, lands on the music.
 
@@ -154,12 +158,12 @@ def track_beats(path: Path, seconds: float) -> list[float]:
         return []
 
 
-def total_duration(durations: list[float], dissolve: float) -> float:
+def total_duration(durations: list[float], dissolve: float | list[float]) -> float:
     total = durations[0] if durations else 0.0
-    if dissolve <= 0:
+    if not isinstance(dissolve, list) and dissolve <= 0:
         return sum(durations)
     for i in range(1, len(durations)):
-        total += durations[i] - max(0.1, min(dissolve, durations[i - 1] / 3, durations[i] / 3))
+        total += durations[i] - _dissolve_at(durations, dissolve, i)
     return total
 
 
@@ -178,7 +182,7 @@ def pick_track(music_dir: str | None, seed: str) -> Path | None:
     return tracks[rnd.randrange(len(tracks))]
 
 
-def _smooth(src: Path, dst: Path, src_fps: float, dst_fps: int, speed: float = 1.0) -> str:
+def _smooth(src: Path, dst: Path, src_fps: float, dst_fps: int, speed: float = 1.0, hq: bool = False) -> str:
     """16 -> 24 fps, played at `speed` (0.7 = 30% slower, new in-between frames fill the gaps). RIFE on the laptop GPU
     (same pinned model as the main finish); FFmpeg if it can't run."""
     src_fps = src_fps * speed  # a slowed clip is a clip shot at a lower frame rate, then interpolated up
@@ -192,7 +196,7 @@ def _smooth(src: Path, dst: Path, src_fps: float, dst_fps: int, speed: float = 1
             return "rife-laptop"
     except Exception as e:  # noqa: BLE001 - e.g. out of GPU memory: FFmpeg instead
         log.warning("Laptop RIFE failed (%s); smoothing with FFmpeg", e)
-    run_ffmpeg(["-i", str(src), "-an", "-vf", f"setpts=PTS/{speed},minterpolate=fps={dst_fps}:mi_mode=mci:mc_mode=aobmc:vsbmc=1",
+    run_ffmpeg(["-i", str(src), "-an", "-vf", f"setpts=PTS/{speed},{polish.minterpolate_filter(dst_fps, hq)}",
                 "-c:v", "libx264", "-crf", "12", "-pix_fmt", "yuv420p", str(dst)])
     return "ffmpeg"
 
@@ -278,47 +282,67 @@ def finish(req: dict, tmp: Path) -> dict:
     how: set[str] = set()
     for k, i in enumerate(order):
         dst = tmp / f"smooth{k}.mp4"
-        how.add(_smooth(srcs[i], dst, float(clips[i].get("fps") or 16), fps, speeds[k]))
+        how.add(_smooth(srcs[i], dst, float(clips[i].get("fps") or 16), fps, speeds[k], **({"hq": True} if polish.flag(req, "hqInterp") else {})))
         smoothed.append(dst)
         _beat({"smoothed": k + 1, "total": len(order)})
     durations = [media_duration(p) for p in smoothed]
     synced = 0
+    stretch: list[float] | None = None
+    dis: float | list[float] = dissolve
+    if dissolve > 0 and polish.flag(req, "smartTransitions") and len(smoothed) > 1:  # per cut: flow = quick, jar = full
+        diffs = [polish.boundary_diff(smoothed[k], smoothed[k + 1]) for k in range(len(smoothed) - 1)]
+        dis = [0.0, *polish.transition_lengths(diffs, dissolve)]
     if track:  # cut on the music: bar lines first, then beats; the climax cut nearest the music's rise
-        beats = mm["beats"] if mm else track_beats(track, total_duration(durations, dissolve) + 2)
+        beats = mm["beats"] if mm else track_beats(track, total_duration(durations, dis) + 2)
         prefer = {climax_slot - 1: mm["rise"]} if climax_slot and mm and mm["rise"] is not None else None
-        new = beat_synced(durations, dissolve, beats, bars=mm["bars"] if (mm and music_edit) else None,
-                          min_len=edit.MIN_SHOT if pacing else 0.0, prefer=prefer)
+        bars = mm["bars"] if (mm and music_edit) else None
+        if polish.flag(req, "beatSnap"):
+            dl = dis if isinstance(dis, list) else [dissolve] * len(durations)
+            new, stretch = polish.snap_cuts(durations, [_dissolve_at(durations, dl, i) if i else 0.0 for i in range(len(durations))],
+                                            beats, bars=bars, min_len=edit.MIN_SHOT if pacing else 0.0, prefer=prefer)
+        else:
+            new = beat_synced(durations, dis, beats, bars=bars, min_len=edit.MIN_SHOT if pacing else 0.0, prefer=prefer)
         synced = sum(1 for a, b in zip(durations, new) if a != b)
         durations = new
-    length = total_duration(durations, dissolve)
-    graph = dissolve_graph(durations, dissolve, width, height, fps, req.get("look"), req.get("handheld"))
+    length = total_duration(durations, dis)
+    graph = dissolve_graph(durations, dis, width, height, fps, req.get("look"), req.get("handheld"), stretch)
     args: list[str] = []
     for p in smoothed:
         args += ["-i", str(p)]
+    soft = polish.flag(req, "softEndFade")
     if track:
         args += ["-stream_loop", "-1", "-i", str(track)]
-        fade_out = max(0.0, length - 1.5)
-        graph += (f";[{len(smoothed)}:a]atrim=0:{length:.3f},afade=t=in:d=0.3,afade=t=out:st={fade_out:.3f}:d=1.5,"
-                  "aresample=48000,aformat=channel_layouts=stereo[mus]")
+        ag = (f"[{len(smoothed)}:a]atrim=0:{length:.3f},afade=t=in:d=0.3,"
+              + (polish.end_fade(length, True) if soft else f"afade=t=out:st={max(0.0, length - 1.5):.3f}:d=1.5")
+              + ",aresample=48000,aformat=channel_layouts=stereo[mus]")
     else:  # silent track: platforms and editors expect audio
         args += ["-f", "lavfi", "-t", f"{length:.3f}", "-i", "anullsrc=r=48000:cl=stereo"]
-        graph += f";[{len(smoothed)}:a]anull[mus]"
+        ag = f"[{len(smoothed)}:a]anull[mus]"
     ambiences = 0
+    bed = "[mus]"
     if ambience_on:  # J-cut: each shot's own ambience starts 0.7 s before its cut
         sounds = edit.fetch_cc0([edit.ambience_query(clips[i].get("scene")) for i in order], tmp)
-        for s in sounds:
-            if s:
-                args += ["-stream_loop", "-1", "-i", str(s)]
-        parts, labels = edit.ambience_graph(len(smoothed) + 1, edit.j_cut_windows(durations, dissolve), [bool(s) for s in sounds])
+        for s_ in sounds:
+            if s_:
+                args += ["-stream_loop", "-1", "-i", str(s_)]
+        parts, labels = edit.ambience_graph(len(smoothed) + 1, edit.j_cut_windows(durations, dis), [bool(s_) for s_ in sounds])
         ambiences = len(labels)
         if labels:
-            graph += ";" + parts + f";[mus]{''.join(labels)}amix=inputs={len(labels) + 1}:normalize=0:duration=first[mixed]"
-            graph += ";[mixed]"
-        else:
-            graph += ";[mus]"
+            ag += ";" + parts + f";[mus]{''.join(labels)}amix=inputs={len(labels) + 1}:normalize=0:duration=first[mixed]"
+            bed = "[mixed]"
+    voiced = False
+    if req.get("voiceUri"):  # narration: the bed (music + ambience) ducks under it
+        voice = tmp / "voice.wav"
+        voice.write_bytes(get_bytes(req["voiceUri"]))
+        args += ["-i", str(voice)]
+        ag += (f";[{args.count('-i') - 1}:a]aresample=48000,aformat=channel_layouts=stereo,apad,atrim=0:{length:.3f}[voice];"
+               + ";".join(polish.duck_filters(bed, "[voice]", "ducked")))
+        bed, voiced = "[ducked]", True
+    if polish.flag(req, "twoPassLoudness") and (track or ambiences or voiced):
+        tail = polish.loudness_filter(polish.measure_loudness(ag, bed, args, tmp)) + ",aresample=48000"
     else:
-        graph += ";[mus]"
-    graph += "loudnorm=I=-14:TP=-1.5:LRA=11,aresample=48000[a]" if track or ambiences else "anull[a]"
+        tail = "loudnorm=I=-14:TP=-1.5:LRA=11,aresample=48000"
+    graph += ";" + ag + f";{bed}" + (tail + "[a]" if track or ambiences or voiced else "anull[a]")
     out = tmp / "dream-short.mp4"
     video = "[v]"
     hook_ass = hook.hook_ass(req.get("hookText") or "", width, height, req.get("hookColor"))
@@ -339,7 +363,8 @@ def finish(req: dict, tmp: Path) -> dict:
     log.info("Dream Short %s finished: %.1f s (%s, music: %s, %d cuts on the music, order %s, %d ambiences)", dream_id,
              length, smoothing, music_name, synced, order, ambiences)
     duration = round(media_duration(out), 3)
-    starts = [sum(durations[:k]) - k * dissolve for k in range(len(durations))]
+    starts = [sum(durations[:k]) - sum(_dissolve_at(durations, dis, j) for j in range(1, k + 1)) if dissolve > 0 else sum(durations[:k])
+              for k in range(len(durations))]
     metrics = {**measure(out, tmp), "durationSec": duration, "shots": float(len(smoothed)), "cutsOnBeat": float(synced),
                "speed": base, "hookShot": float(order[0] + 1) if order else 0.0, "ambiences": float(ambiences),
                "shortestShotSec": round(min(durations), 2) if durations else 0.0}
