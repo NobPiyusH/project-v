@@ -86,6 +86,42 @@ public class GpuBroker {
         this.states = states;
     }
 
+    /** Where each rental's boot time goes (rent / running / worker timeline). Nothing is kept until this is set. */
+    private BootTimings bootTimings = BootTimings.NONE;
+
+    @Autowired(required = false)
+    public void setBootTimings(BootTimings bootTimings) {
+        this.bootTimings = bootTimings;
+    }
+
+    /** The boot timeline of the Short's current pod: steps in seconds since the rent, and each weight download. */
+    public Optional<Map<String, Object>> bootTiming(UUID shortId) {
+        return open(shortId).flatMap(r -> bootTimings.get(r.instance().id())).map(BootTimings::summary);
+    }
+
+    /** The worker's own timeline (from its ready /health), stored with the rental and logged. Best effort. */
+    public void reportBoot(UUID shortId, Map<String, Object> timing) {
+        Rental r = open(shortId).orElse(null);
+        if (r == null || timing == null) {
+            return;
+        }
+        try {
+            bootTimings.workerReport(r.instance().id(), timing);
+            bootTimings.get(r.instance().id()).ifPresent(row -> log.info("GPU boot timing {} {}: {}",
+                    row.provider(), row.podId(), BootTimings.summary(row)));
+        } catch (RuntimeException e) {
+            log.warn("GPU broker: could not store the boot timing of {}: {}", r.instance().id(), e.getMessage());
+        }
+    }
+
+    private void noteRented(String provider, GpuProvider.Instance inst, String image, Instant at) {
+        try {
+            bootTimings.rented(inst.id(), provider, image, at);
+        } catch (RuntimeException e) {
+            log.warn("GPU broker: boot timing not started for {}: {}", inst.id(), e.getMessage());
+        }
+    }
+
     public GpuBroker(List<GpuProvider> providers, BrokerConfig config, GpuWallet wallet, BrokerRecords records,
                      PodLeases leases, PodEvents events, GpuPodLimits limits, Clock clock) {
         this(providers, config, wallet, records, leases, events, limits, clock, PreferenceStore.NONE);
@@ -414,6 +450,7 @@ public class GpuBroker {
             } catch (RuntimeException ex) { // the pod is rented and leased; a ledger hiccup must not strand it
                 log.warn("GPU broker: rented pod {} but its RoutingDecision failed: {}", inst.id(), ex.getMessage());
             }
+            noteRented(id, inst, image, now);
             Rental r = new Rental(shortId, inst, now);
             shared = r;
             attach(shortId);
@@ -543,7 +580,14 @@ public class GpuBroker {
             return false;
         }
         try {
-            return p.status(r.instance().id()).state() == GpuProvider.State.GONE;
+            GpuProvider.State state = p.status(r.instance().id()).state();
+            if (state == GpuProvider.State.RUNNING) {
+                try {
+                    bootTimings.running(r.instance().id(), clock.instant());
+                } catch (RuntimeException ignored) { // a timing row never decides whether a pod is alive
+                }
+            }
+            return state == GpuProvider.State.GONE;
         } catch (RuntimeException e) {
             log.warn("GPU broker: status of {} unreadable ({}); keeping the rental", r.instance().id(), e.getMessage());
             return false;

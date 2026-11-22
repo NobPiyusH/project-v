@@ -3,6 +3,7 @@ import os
 
 import json
 import threading
+import urllib.error
 import urllib.request
 
 import pytest
@@ -694,3 +695,55 @@ def test_fetch_files_retries_each_weight(monkeypatch, tmp_path):
     S.fetch_files(comfy, S.State(), {"a.safetensors": ("r", "a.safetensors", "unet", 3)}, "x")
     assert calls == ["a.safetensors"], "every weight goes through the retrying download"
     assert links == [("a.safetensors", "a.safetensors")]
+
+
+# ------------------------------------------------------------------------------------------- boot timing (22 Nov 2026)
+
+def test_boot_timeline_records_marks_and_download_speed():
+    t = [1000.0]
+    tl = S.BootTimeline(clock=lambda: t[0])
+    t[0] = 1012.5
+    tl.mark("deps_installed")
+    tl.download("a.safetensors", 14_000_000_000, 100.0, "huggingface")
+    tl.download("b.safetensors", 1_000_000, 0, "volume")
+    snap = tl.snapshot()
+    assert snap["marks"] == [{"phase": "deps_installed", "at": 1012.5, "since_start_s": 12.5}]
+    assert snap["downloads"][0] == {"name": "a.safetensors", "gb": 14.0, "seconds": 100.0, "mb_per_s": 140.0,
+                                    "source": "huggingface"}
+    assert snap["downloads"][1]["mb_per_s"] is None  # zero seconds: no division by zero
+
+
+def test_health_serves_the_timeline():
+    state = S.State()
+    state.timeline.mark("worker_started")
+    srv = S.ThreadingHTTPServer(("127.0.0.1", 0), S.make_handler(state, token=""))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        with pytest.raises(urllib.error.HTTPError) as e:  # not ready: 503, but the body still carries the timing
+            urllib.request.urlopen(f"http://127.0.0.1:{srv.server_address[1]}/health")
+        body = json.loads(e.value.read())
+        assert body["timing"]["marks"][0]["phase"] == "worker_started"
+    finally:
+        srv.shutdown()
+
+
+def test_wait_ready_beats_the_boot_timeline_once_when_ready(monkeypatch):
+    monkeypatch.setattr(client, "health", lambda base: {"ready": True, "timing": {"marks": []}})
+    seen = []
+    client.wait_ready("http://x", 5, beat=seen.append)
+    assert seen == [{"pod": "ready", "timing": {"marks": []}}]
+    client.wait_ready("http://x", 5, beat=lambda i: 1 / 0)  # a failing report never breaks the job
+
+
+def test_rented_reports_timing_once_per_pod_address(monkeypatch):
+    sent, inner = [], []
+    monkeypatch.setattr(client, "report_boot_timing", lambda cp, vid, url, timing: sent.append((vid, url, timing)))
+    r = client.Rented("http://cp", "vid", "http://worker:tok@pod:8000", 60, inner.append)
+    b = r._inner(inner.append)
+    b({"pod": "ready", "timing": {"marks": [1]}})
+    b({"pod": "ready", "timing": {"marks": [1]}})
+    assert sent == [("vid", "http://worker:tok@pod:8000", {"marks": [1]})]
+    assert all("timing" not in i for i in inner)  # the big timeline never rides on the Temporal heartbeat
+    r.url = "http://other:8000"
+    b({"pod": "ready", "timing": {"marks": [2]}})
+    assert len(sent) == 2

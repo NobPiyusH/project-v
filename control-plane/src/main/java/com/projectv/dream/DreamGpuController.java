@@ -33,6 +33,16 @@ public class DreamGpuController {
         return Map.of("url", s.url(), "readyTimeoutSeconds", s.readyTimeoutSeconds());
     }
 
+    /** The media worker forwards the pod's boot timeline (its /health "timing") once, when the pod first answers ready. */
+    @PostMapping("/internal/gpu/{dreamId}/boot-timing")
+    public Map<String, Object> bootTiming(@PathVariable UUID dreamId, @RequestBody Map<String, Object> body) {
+        if (body.get("timing") instanceof Map<?, ?> t) {
+            @SuppressWarnings("unchecked") Map<String, Object> timing = (Map<String, Object>) t;
+            gpu.reportBoot(dreamId, timing);
+        }
+        return Map.of("ok", true);
+    }
+
     /** unreadyUrl: the pod address that never became ready (null = the pod vanished). */
     public record ReplaceBody(String unreadyUrl, String why) {
     }
@@ -58,6 +68,7 @@ public class DreamGpuController {
         out.put("hold", gpu.holdManual(dreamId) ? "manual" : "auto");
         out.put("idleMinutes", gpu.idleMinutes(dreamId));
         out.put("offInSeconds", gpu.offInSeconds(dreamId, java.time.Instant.now())); // null unless Manual and a pod is on
+        out.put("boot", gpu.bootTiming(dreamId).orElse(null)); // where the pod's boot time went (null = no pod / no data yet)
         return out;
     }
 

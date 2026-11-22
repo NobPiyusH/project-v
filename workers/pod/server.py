@@ -143,6 +143,30 @@ def log(msg: str) -> None:
     print(f"[pod-worker {time.strftime('%H:%M:%S')}] {msg}", flush=True)
 
 
+class BootTimeline:
+    """Where boot time goes (warm-start work, 22 Nov 2026): wall-clock marks and one row per weight download. Served on
+    /health as "timing" so the control plane can store it next to the rental's own rent/running timestamps. Pure and
+    clock-injectable; never raises into boot."""
+
+    def __init__(self, clock=time.time):
+        self._clock = clock
+        self.started = clock()
+        self.marks: list[dict] = []
+        self.downloads: list[dict] = []
+
+    def mark(self, phase: str) -> None:
+        now = self._clock()
+        self.marks.append({"phase": phase, "at": round(now, 3), "since_start_s": round(now - self.started, 1)})
+
+    def download(self, name: str, size: int, seconds: float, source: str) -> None:
+        mbps = round(size / 1e6 / seconds, 1) if seconds > 0 else None
+        self.downloads.append({"name": name, "gb": round(size / 1e9, 2), "seconds": round(seconds, 1),
+                               "mb_per_s": mbps, "source": source})
+
+    def snapshot(self) -> dict:
+        return {"started_at": round(self.started, 3), "marks": list(self.marks), "downloads": list(self.downloads)}
+
+
 # ------------------------------------------------------------------------------------------- pure helpers (tested)
 
 def expert_split(steps: int, shift: float = SHIFT, boundary_ratio: float = 0.9, train_steps: int = 1000) -> int:
@@ -437,6 +461,7 @@ class State:
         self.phase = "starting"
         self.error = None
         self.jobs: Jobs | None = None
+        self.timeline = BootTimeline()
 
 
 def authorized(header: str | None, token: str) -> bool:
@@ -479,7 +504,7 @@ def make_handler(state: State, token: str | None = None):
                 return
             touch_heartbeat()
             if path in ("/health", "/ready", ""):
-                body = {"ready": state.ready, "phase": state.phase, "error": state.error}
+                body = {"ready": state.ready, "phase": state.phase, "error": state.error, "timing": state.timeline.snapshot()}
                 return self._json(200 if state.ready else 503, body)
             parts = path.split("/")
             if len(parts) >= 3 and parts[1] == "jobs" and state.jobs:
@@ -673,7 +698,9 @@ def fetch_files(comfy: Path, state: State, files: dict, volume_dir: str) -> None
         if dest.is_symlink() or dest.exists():
             dest.unlink()
         dest.symlink_to(local)
-        log(f"{name} {size / 1e9:.1f} GB from {how} in {time.time() - t:.0f} s")
+        took = time.time() - t
+        state.timeline.download(name, size, took, how)
+        log(f"{name} {size / 1e9:.1f} GB from {how} in {took:.0f} s ({size / 1e6 / max(took, 0.001):.0f} MB/s)")
 
 
 def download(comfy: Path, state: State) -> None:
@@ -696,6 +723,7 @@ def download(comfy: Path, state: State) -> None:
             copy_tree_plain(Path(snap), target)
             (target / ".complete").write_text("ok")
     log(f"Z-Image Turbo ready in {time.time() - t:.0f} s")
+    state.timeline.download("Z-Image-Turbo (snapshot)", 0, time.time() - t, "volume" if (marker is not None and marker.exists()) else "huggingface")
 
 
 def http_json(url: str, body: dict | None = None, timeout: float = 30):
@@ -914,17 +942,25 @@ def boot_heartbeat(state: State, interval: float = BOOT_BEAT_SECONDS) -> None:
 def boot(state: State) -> None:
     try:
         ROOT.mkdir(parents=True, exist_ok=True)
+        tl = state.timeline
+        tl.mark("worker_started")
         state.phase = "installing"
         install()
+        tl.mark("deps_installed")
         comfy = fetch_comfy()
+        tl.mark("comfyui_fetched")
         download(comfy, state)
+        tl.mark("weights_done")
         state.phase = "starting ComfyUI"
         proc = start_comfy(comfy)
+        tl.mark("comfyui_up")
         gpu = Gpu(comfy, state, proc)
         state.jobs = Jobs(gpu.run)
         threading.Thread(target=state.jobs.loop, daemon=True, name="gpu").start()
+        tl.mark("ready")
         state.phase, state.ready = "ready", True
-        log("ready")
+        log(f"ready {tl.marks[-1]['since_start_s']:.0f} s after the worker started: "
+            + ", ".join(f"{m['phase']}@{m['since_start_s']:.0f}s" for m in tl.marks))
     except Exception as e:  # noqa: BLE001 - stay up and report it on /health; the control plane deletes the group
         state.phase, state.error = "failed", f"{type(e).__name__}: {e}"[:600]
         log(f"boot failed: {state.error}")

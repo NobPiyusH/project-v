@@ -112,6 +112,16 @@ public class DreamGpu {
         return enabled;
     }
 
+    /** This Short's pod boot timeline (steps in seconds since the rent, weight downloads); empty when no pod is open. */
+    public java.util.Optional<java.util.Map<String, Object>> bootTiming(UUID dreamId) {
+        return broker.bootTiming(dreamId);
+    }
+
+    /** The worker's boot timeline, forwarded by the media worker when the pod first answers ready. */
+    public void reportBoot(UUID dreamId, java.util.Map<String, Object> timing) {
+        broker.reportBoot(dreamId, timing);
+    }
+
     /** Today's studio GPU spend (UTC) vs the daily cap: {spentUsd, bookedUsd, runningUsd, capUsd}. */
     public java.util.Map<String, Object> today() {
         return broker.today();

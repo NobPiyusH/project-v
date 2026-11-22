@@ -106,11 +106,17 @@ def health(base: str) -> dict:
 
 
 def wait_ready(base: str, timeout_s: float, beat=lambda info: None, sleep=time.sleep, clock=time.monotonic) -> None:
-    """Blocks until /health says ready. Raises RuntimeError on a boot failure or after timeout_s."""
+    """Blocks until /health says ready. Raises RuntimeError on a boot failure or after timeout_s.
+    When ready, beat() gets {"pod": "ready", "timing": <the worker's boot timeline>} once (a failing beat is ignored)."""
     end = clock() + timeout_s
     while True:
         h = health(base)
         if h["ready"]:
+            if h.get("timing"):
+                try:
+                    beat({"pod": "ready", "timing": h["timing"]})
+                except Exception:  # noqa: BLE001 - reporting timing must never break a job
+                    pass
             return
         if h.get("phase") == "failed":
             raise NeverReady(f"Pod worker failed to start: {h.get('error')}")
@@ -213,6 +219,15 @@ def replace_pod(control_plane: str, video_id: str, unready_url: str | None = Non
     return str(body["url"]).rstrip("/"), float(body.get("readyTimeoutSeconds") or 1800)
 
 
+def report_boot_timing(control_plane: str, video_id: str, url: str, timing: dict) -> None:
+    """Hands the worker's boot timeline to the control plane (stored with the rental). Best effort."""
+    base, _ = split_token(url)
+    body = {"url": base, "timing": timing}
+    req = urllib.request.Request(f"{control_plane.rstrip('/')}/api/internal/gpu/{video_id}/boot-timing",
+                                 data=json.dumps(body).encode(), headers={"Content-Type": "application/json"}, method="POST")
+    urllib.request.urlopen(req, timeout=5).close()
+
+
 class Rented:
     """The Short's pod for one GPU step: runs jobs and, when the pod vanishes mid-step, rents ONE replacement and
     resubmits the same job there. A second loss (or a released rental) fails the rest of the step fast, so it waits
@@ -225,7 +240,21 @@ class Rented:
         self.url, self.ready_s = url.rstrip("/"), ready_s
         self.replaced = 0
         self.lost: str | None = None  # set once the step cannot get a pod any more
-        self.beat = lease_beat(control_plane, video_id, inner, pod_url=lambda: self.url)
+        self._reported: set[str] = set()
+        self.beat = lease_beat(control_plane, video_id, self._inner(inner), pod_url=lambda: self.url)
+
+    def _inner(self, inner):
+        """Takes the boot timeline out of the "ready" beat and sends it, once per pod address, to the control plane."""
+        def beat(info):
+            timing = info.pop("timing", None) if isinstance(info, dict) else None
+            if timing and self.url not in self._reported:
+                self._reported.add(self.url)
+                try:
+                    report_boot_timing(self.control_plane, self.video_id, self.url, timing)
+                except Exception:  # noqa: BLE001 - best effort
+                    pass
+            inner(info)
+        return beat
 
     def run(self, kind: str, payload: dict) -> tuple[bytes, dict]:
         while True:
