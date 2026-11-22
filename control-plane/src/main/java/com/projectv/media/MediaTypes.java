@@ -308,10 +308,12 @@ public final class MediaTypes {
     }
 
     /** found=false (no key, no match, any error) means: use the AI lane for this shot. */
+    @com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown = true)
     public record StockResult(boolean found, String reason, List<String> queries, List<String> skipped, String uri,
                               Integer width, Integer height, Double durationSec, StockProvenance provenance) {
     }
 
+    @com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown = true)
     public record StockProvenance(String source, String sourceId, String pageUrl, String author, String licence,
                                   String licenceUrl, String attribution, boolean creditRequired, String fetchedAt, String sha256) {
     }
