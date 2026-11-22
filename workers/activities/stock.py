@@ -8,9 +8,14 @@ the AI lane. Only video clips are ever used (owner rule 10: no panned stills). K
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
+import tempfile
+import threading
+import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
@@ -20,11 +25,14 @@ from temporalio import activity
 
 from workers.common import log, media_duration, put_file, run_ffmpeg, workdir
 
-UA = "projectv-studio/1.0 (private documentary tool)"  # generic client name: Commons wants a descriptive User-Agent
+# Descriptive generic client name, no personal details. Required: Wikimedia and archive.org want a descriptive agent, and
+# Python urllib's default agent is blocked by Cloudflare (403, error 1010) on pixabay.com.
+UA = "ProjectV-StockLane/1.0"
 PEXELS = "https://api.pexels.com/v1/videos/search"
 PIXABAY = "https://pixabay.com/api/videos/"
 COMMONS = "https://commons.wikimedia.org/w/api.php"
-ALL_SOURCES = ("pexels", "pixabay", "commons")
+ARCHIVE = "https://archive.org"
+ALL_SOURCES = ("pixabay", "archive", "commons", "pexels")  # Pexels is optional: it paused new API keys (Nov 2026)
 KEY_ENV = {"pexels": "PEXELS_API_KEY", "pixabay": "PIXABAY_API_KEY"}
 OK_LICENCE = re.compile(r"^(public domain|pd|cc0|cc[ -]by \d(\.\d)?)", re.I)  # never share-alike, NC or ND
 STOP = set("a an the of in on at to and or with for from by is are was be as it its this that into over under near "
@@ -32,10 +40,58 @@ STOP = set("a an the of in on at to and or with for from by is are was be as it 
 MIN_FILL = 0.6  # a clip shorter than this share of the shot is rejected (assembly would have to slow it too much)
 
 
-def _get_json(url: str, headers: dict | None = None) -> dict:
+_KEY_PARAM = re.compile(r"([?&]key=)[^&]*", re.I)
+_last_call: dict[str, float] = {}
+_lock = threading.Lock()
+MIN_GAP = {"archive.org": 1.0, "commons.wikimedia.org": 1.0, "pixabay.com": 0.7, "api.pexels.com": 0.5}  # polite spacing, seconds
+CACHE_SECONDS = 24 * 3600  # Pixabay requires search results to be cached for 24 h (and its limit is 100 requests / 60 s)
+
+
+def redact(text: str) -> str:
+    """Never let an API key reach a log line or error text."""
+    return _KEY_PARAM.sub(r"\1***", str(text))
+
+
+def _pace(url: str) -> None:
+    host = urllib.parse.urlsplit(url).netloc
+    gap = MIN_GAP.get(host, 0.0)
+    with _lock:
+        wait = _last_call.get(host, 0.0) + gap - time.monotonic()
+        if wait > 0:
+            time.sleep(wait)
+        _last_call[host] = time.monotonic()
+
+
+def _cache_path(url: str) -> Path:
+    d = Path(os.environ.get("STOCK_CACHE_DIR") or Path(tempfile.gettempdir()) / "projectv-stock-cache")
+    d.mkdir(parents=True, exist_ok=True)
+    return d / (hashlib.sha1(_KEY_PARAM.sub("", url).encode()).hexdigest() + ".json")
+
+
+def _get_json(url: str, headers: dict | None = None, cache: bool = False) -> dict:
+    """GET with a descriptive User-Agent, polite spacing, 429/503 back-off (Retry-After) and an optional 24 h disk cache."""
+    path = _cache_path(url) if cache else None
+    if path is not None and path.exists() and time.time() - path.stat().st_mtime < CACHE_SECONDS:
+        return json.loads(path.read_text(encoding="utf-8"))
     req = urllib.request.Request(url, headers={"User-Agent": UA, **(headers or {})})
-    with urllib.request.urlopen(req, timeout=30) as r:
-        return json.load(r)
+    for attempt in range(4):
+        _pace(url)
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                data = json.load(r)
+            break
+        except urllib.error.HTTPError as e:
+            if e.code in (429, 503) and attempt < 3:
+                try:
+                    wait = float(e.headers.get("Retry-After") or 0)
+                except ValueError:
+                    wait = 0.0
+                time.sleep(min(60.0, wait or 5.0 * 2 ** attempt))
+                continue
+            raise RuntimeError(f"HTTP {e.code} from {urllib.parse.urlsplit(url).netloc}") from None
+    if path is not None:
+        path.write_text(json.dumps(data), encoding="utf-8")
+    return data
 
 
 def _key(source: str) -> str | None:
@@ -136,7 +192,7 @@ def search_pixabay(query: str, aspect: str, per_page: int = 12) -> list[dict]:
     q = urllib.parse.urlencode({"key": _key("pixabay") or "", "q": query[:100], "per_page": max(3, per_page),
                                 "video_type": "film", "safesearch": "true", "min_width": 1280})
     out = []
-    for v in _get_json(f"{PIXABAY}?{q}").get("hits") or []:
+    for v in _get_json(f"{PIXABAY}?{q}", cache=True).get("hits") or []:
         f = pick_file([{"url": x.get("url"), "width": x.get("width"), "height": x.get("height")}
                        for x in (v.get("videos") or {}).values() if isinstance(x, dict)])
         if not f:
@@ -181,7 +237,64 @@ def search_commons(query: str, aspect: str, per_page: int = 8) -> list[dict]:
     return out
 
 
-SEARCHERS = {"pexels": search_pexels, "pixabay": search_pixabay, "commons": search_commons}
+_IA_OK = re.compile(r"creativecommons\.org/(licenses/publicdomain|publicdomain/(zero|mark)|licenses/by/)", re.I)
+
+
+def _first(v):
+    return (v[0] if isinstance(v, list) and v else v) or ""
+
+
+def ia_licence(meta: dict) -> tuple[str, str] | None:
+    """(licence label, licence url) only for public domain, CC0 or CC BY, read from the item's own licenseurl/rights; else None
+    (an item with no machine-readable licence is skipped, never guessed). CC BY-SA/NC/ND never match."""
+    url = str(_first(meta.get("licenseurl")))
+    rights = str(_first(meta.get("rights")))
+    if _IA_OK.search(url):
+        label = ("CC BY " + (re.search(r"/by/([\d.]+)", url) or [None, ""])[1]).strip() if "/licenses/by/" in url \
+            else "CC0" if "/zero/" in url else "Public domain"
+        return label, url
+    if re.search(r"public domain", rights, re.I) and not re.search(r"not (in )?the public domain", rights, re.I):
+        return "Public domain", url
+    return None
+
+
+def search_archive(query: str, aspect: str, per_page: int = 6) -> list[dict]:
+    """Internet Archive movies (Prelinger Archives first): advancedsearch for ids, then each item's metadata for the licence and
+    a playable MP4 derivative. Vintage film is mostly 4:3/480p, so it ranks below HD stock but is the best source for old
+    factory, household and TV material."""
+    words = " ".join(w for w in re.findall(r"[A-Za-z]{3,}", query) if w.lower() not in STOP)
+    if not words:
+        return []
+    q = urllib.parse.urlencode({"q": f"({words}) AND mediatype:movies AND collection:prelinger",
+                                "fl[]": ["identifier", "title", "creator"], "rows": per_page * 2, "output": "json",
+                                "sort[]": "downloads desc"}, doseq=True)
+    out = []
+    for doc in (_get_json(f"{ARCHIVE}/advancedsearch.php?{q}", cache=True).get("response") or {}).get("docs") or []:
+        ident = doc.get("identifier")
+        if not ident:
+            continue
+        item = _get_json(f"{ARCHIVE}/metadata/{urllib.parse.quote(ident)}")
+        meta = item.get("metadata") or {}
+        lic = ia_licence(meta)
+        if not lic:
+            continue
+        files = {x.get("format"): x for x in item.get("files") or []}
+        f = next((files[k] for k in ("h.264", "MPEG4", "WebM", "Ogg Video") if k in files), None)
+        if not f:
+            continue
+        creator = str(_first(meta.get("creator")))
+        out.append({"source": "archive", "id": ident, "pageUrl": f"{ARCHIVE}/details/{urllib.parse.quote(ident)}",
+                    "downloadUrl": f"{ARCHIVE}/download/{urllib.parse.quote(ident)}/{urllib.parse.quote(f['name'])}",
+                    "width": int(f.get("width") or 640), "height": int(f.get("height") or 480),
+                    "duration": float(f.get("length") or 0), "title": str(_first(meta.get("title")) or ident),
+                    "author": creator, "authorUrl": "", "licence": lic[0], "licenceUrl": lic[1],
+                    "text": f"{meta.get('title', '')} {_first(meta.get('subject'))} {str(meta.get('description', ''))[:300]}"})
+        if len(out) >= per_page:
+            break
+    return out
+
+
+SEARCHERS = {"pexels": search_pexels, "pixabay": search_pixabay, "commons": search_commons, "archive": search_archive}
 
 
 # --------------------------------------------------------------------------------------------------------------- ranking
@@ -225,10 +338,11 @@ def rank(cands: list[dict], queries: list[str], aspect: str, want_sec: float) ->
 def provenance(c: dict, fetched_at: str) -> dict:
     """What the studio stores per clip. creditRequired: CC BY (law) and Pexels (its API guideline asks for a Pexels link)."""
     lic = c["licence"]
-    if c["source"] == "commons":
+    if c["source"] in ("commons", "archive"):
         required = bool(re.match(r"cc[ -]by", lic, re.I))
+        where = "Wikimedia Commons" if c["source"] == "commons" else "Internet Archive"
         text = (f"\"{c.get('title', '')}\" by {c.get('author') or 'unknown author'}, {lic}"
-                + (f" ({c['licenceUrl']})" if c.get("licenceUrl") else "") + f", via Wikimedia Commons: {c['pageUrl']}; trimmed")
+                + (f" ({c['licenceUrl']})" if c.get("licenceUrl") else "") + f", via {where}: {c['pageUrl']}; trimmed")
     elif c["source"] == "pexels":
         required = True
         text = f"Video by {c.get('author') or 'a Pexels contributor'} on Pexels ({c['pageUrl']})"
@@ -281,7 +395,7 @@ def stock_fetch(req: dict) -> dict:
                 try:
                     cands += SEARCHERS[src](q, aspect)
                 except Exception as e:  # noqa: BLE001 - one failing source/query never hides the others
-                    skipped.append(f"{src}: {type(e).__name__}")
+                    skipped.append(f"{src}: {type(e).__name__} {redact(e)[:80]}")
                     break
         seen, uniq = set(), []
         for c in cands:
@@ -295,6 +409,7 @@ def stock_fetch(req: dict) -> dict:
                 with workdir("stock") as tmp:
                     raw = Path(tmp) / "raw"
                     _download(c["downloadUrl"], raw, max_bytes)
+                    digest = hashlib.sha256(raw.read_bytes()).hexdigest() if raw.stat().st_size < 600_000_000 else ""
                     total = media_duration(raw)
                     if total < want * MIN_FILL:
                         continue
@@ -312,7 +427,7 @@ def stock_fetch(req: dict) -> dict:
             log.info("stock clip %s:%s for shot %s", c["source"], c["id"], req.get("shotNumber"))
             return {"found": True, "reason": None, "queries": queries, "skipped": skipped, "uri": uri,
                     "width": c["width"], "height": c["height"], "durationSec": round(got, 3), "sourceWidth": c["width"],
-                    "sourceHeight": c["height"], "provenance": provenance(c, now)}
+                    "sourceHeight": c["height"], "provenance": {**provenance(c, now), "sha256": digest}}
         return _miss("no suitable clip" if ranked else "no candidates", queries, skipped)
     except Exception as e:  # noqa: BLE001 - never fail the shot
-        return _miss(f"{type(e).__name__}: {str(e)[:150]}", queries, skipped)
+        return _miss(f"{type(e).__name__}: {redact(e)[:150]}", queries, skipped)

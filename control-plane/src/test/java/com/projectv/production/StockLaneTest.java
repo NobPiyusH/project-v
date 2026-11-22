@@ -88,7 +88,7 @@ class StockLaneTest {
     private static StockResult hit(String source, String licence, boolean credit, String attribution) {
         return new StockResult(true, null, List.of("living room tv"), List.of(), "s3://b/stock.mp4", 1920, 1080, 5.0,
                 new StockProvenance(source, "id-1", "https://page/1", "Jane Roe", licence, "https://lic", attribution, credit,
-                        "2026-11-22T10:00:00+00:00"));
+                        "2026-11-22T10:00:00+00:00", "abc123"));
     }
 
     @Test

@@ -313,7 +313,7 @@ public final class MediaTypes {
     }
 
     public record StockProvenance(String source, String sourceId, String pageUrl, String author, String licence,
-                                  String licenceUrl, String attribution, boolean creditRequired, String fetchedAt) {
+                                  String licenceUrl, String attribution, boolean creditRequired, String fetchedAt, String sha256) {
     }
 
     // ---- Free real footage (NASA Image and Video Library)

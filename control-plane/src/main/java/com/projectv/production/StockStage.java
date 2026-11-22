@@ -36,9 +36,15 @@ public class StockStage extends StageSupport {
     private boolean pixabay;
     @Value("${projectv.video.stock-commons:false}")
     private boolean commons;
+    @Value("${projectv.video.stock-archive:false}")
+    private boolean archive;
 
     public StockStage(ProductionDeps d) {
         super(d);
+    }
+
+    void configureArchive(boolean on) {
+        this.archive = on;
     }
 
     void configure(boolean lane, boolean pexels, boolean pixabay, boolean commons) {
@@ -62,6 +68,9 @@ public class StockStage extends StageSupport {
         }
         if (commons) {
             s.add("commons");
+        }
+        if (archive) {
+            s.add("archive");
         }
         return s;
     }
@@ -104,10 +113,10 @@ public class StockStage extends StageSupport {
         }
         StockProvenance pv = r.provenance();
         boolean isCommons = "commons".equals(pv.source());
-        UUID licence = isCommons ? AssetStore.LICENCE_COMMONS
+        UUID licence = isCommons ? AssetStore.LICENCE_COMMONS : "archive".equals(pv.source()) ? AssetStore.LICENCE_ARCHIVE
                 : "pexels".equals(pv.source()) ? AssetStore.LICENCE_PEXELS : AssetStore.LICENCE_PIXABAY;
         UUID assetId = assets.create(new NewAsset(videoId, "video", r.uri(), "video/mp4", r.width(), r.height(), r.durationSec(),
-                isCommons ? "wikimedia" : pv.source(), "stock footage " + pv.source() + " " + pv.sourceId(),
+                isCommons ? "wikimedia" : "archive".equals(pv.source()) ? "internet_archive" : pv.source(), "stock footage " + pv.source() + " " + pv.sourceId(),
                 req.description() + " | queries: " + String.join(", ", r.queries() == null ? List.of() : r.queries()),
                 null, licence, false));
         jdbc.sql("""
@@ -117,7 +126,8 @@ public class StockStage extends StageSupport {
                         """).param("u", pv.pageUrl()).param("i", pv.sourceId()).param("a", pv.author()).param("t", pv.attribution())
                 .param("c", pv.creditRequired()).param("f", pv.fetchedAt() == null ? OffsetDateTime.now().toString() : pv.fetchedAt())
                 .param("asset", assetId).update();
-        jdbc.sql("UPDATE asset SET shot_id = :s, clip_kind = 'footage' WHERE id = :a").param("s", shotId).param("a", assetId).update();
+        jdbc.sql("UPDATE asset SET shot_id = :s, clip_kind = 'footage', sha256 = :h WHERE id = :a").param("s", shotId)
+                .param("h", pv.sha256() == null || pv.sha256().isBlank() ? null : pv.sha256()).param("a", assetId).update();
         jdbc.sql("UPDATE shot SET footage_asset_id = :a, clip_status = 'READY', clip_error = NULL, updated_at = now() WHERE id = :s")
                 .param("a", assetId).param("s", shotId).update();
         p.remove("stockFallback");

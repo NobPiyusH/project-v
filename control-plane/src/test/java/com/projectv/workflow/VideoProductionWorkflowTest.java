@@ -415,7 +415,7 @@ class VideoProductionWorkflowTest {
             }
             if (request.shotId().equals("shot0")) {
                 return new com.projectv.media.MediaTypes.StockResult(true, null, List.of("q"), List.of(), "s3://b/stock.mp4", 1920, 1080, 4.0,
-                        new com.projectv.media.MediaTypes.StockProvenance("commons", "File:x.webm", "https://p", "A", "CC BY 4.0", "", "t", true, null));
+                        new com.projectv.media.MediaTypes.StockProvenance("commons", "File:x.webm", "https://p", "A", "CC BY 4.0", "", "t", true, null, null));
             }
             return new com.projectv.media.MediaTypes.StockResult(false, "no candidates", List.of("q"), List.of(), null, null, null, null, null);
         }

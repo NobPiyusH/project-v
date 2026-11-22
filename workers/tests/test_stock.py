@@ -152,3 +152,62 @@ def test_assembly_mixes_stock_clip_of_any_size_and_fps(monkeypatch, tmp_path):
     out = tmp_path / "shot.mp4"
     A._shot_clip({"n": 1, "kind": "footage", "durationSec": 2.0}, src, out, 2560, 1440)
     assert A.media_height(out) == 1440
+
+
+def test_archive_licence_accepts_only_pd_cc0_ccby():
+    ok = S.ia_licence
+    assert ok({"licenseurl": "http://creativecommons.org/licenses/publicdomain/"}) == ("Public domain", "http://creativecommons.org/licenses/publicdomain/")
+    assert ok({"licenseurl": "https://creativecommons.org/publicdomain/zero/1.0/"})[0] == "CC0"
+    assert ok({"licenseurl": "https://creativecommons.org/publicdomain/mark/1.0/"})[0] == "Public domain"
+    assert ok({"licenseurl": "https://creativecommons.org/licenses/by/4.0/"})[0] == "CC BY 4.0"
+    assert ok({"rights": "This film is in the public domain"})[0] == "Public domain"
+    for bad in ({"licenseurl": "https://creativecommons.org/licenses/by-sa/4.0/"}, {"licenseurl": "https://creativecommons.org/licenses/by-nc/4.0/"},
+                {"licenseurl": "https://creativecommons.org/licenses/by-nd/4.0/"}, {"rights": "not in the public domain"}, {}):
+        assert ok(bad) is None, bad
+
+
+def test_archive_search_reads_item_licence_and_skips_unlicensed(monkeypatch):
+    def fake(url, headers=None, cache=False):
+        if "advancedsearch" in url:
+            return {"response": {"docs": [{"identifier": "FactoryA"}, {"identifier": "NoLicence"}]}}
+        if url.endswith("/FactoryA"):
+            return {"metadata": {"title": "Making Glass", "creator": "Ford Motor Co.", "licenseurl": "http://creativecommons.org/licenses/publicdomain/"},
+                    "files": [{"name": "a.mp4", "format": "h.264", "width": "640", "height": "480", "length": "120.5"}, {"name": "a.ogv", "format": "Ogg Video"}]}
+        return {"metadata": {"title": "x"}, "files": [{"name": "b.mp4", "format": "h.264"}]}
+    monkeypatch.setattr(S, "_get_json", fake)
+    got = S.search_archive("factory glass", "16:9")
+    assert [c["id"] for c in got] == ["FactoryA"]
+    c = got[0]
+    assert c["downloadUrl"] == "https://archive.org/download/FactoryA/a.mp4" and c["duration"] == 120.5 and c["author"] == "Ford Motor Co."
+    p = S.provenance(c, "t")
+    assert p["creditRequired"] is False and "Internet Archive" in p["attribution"]
+    assert "Internet Archive" in S.provenance({**c, "licence": "CC BY 4.0"}, "t")["attribution"]
+
+
+def test_get_json_sends_user_agent_backs_off_on_429_and_caches(monkeypatch, tmp_path):
+    import io
+    import urllib.error
+
+    monkeypatch.setenv("STOCK_CACHE_DIR", str(tmp_path))
+    monkeypatch.setattr(S.time, "sleep", lambda s: None)
+    calls, agents = [], []
+
+    class R(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def fake_open(req, timeout=0):
+        agents.append(req.get_header("User-agent"))
+        calls.append(1)
+        if len(calls) == 1:
+            raise urllib.error.HTTPError(req.full_url, 429, "slow", {"Retry-After": "1"}, None)
+        return R(b'{"hits": [1]}')
+    monkeypatch.setattr(S.urllib.request, "urlopen", fake_open)
+    url = "https://pixabay.com/api/videos/?key=SECRET&q=tv"
+    assert S._get_json(url, cache=True) == {"hits": [1]}
+    assert len(calls) == 2 and set(agents) == {"ProjectV-StockLane/1.0"}
+    assert S._get_json(url, cache=True) == {"hits": [1]} and len(calls) == 2, "second call comes from the 24 h cache"
+    assert "SECRET" not in S.redact(url) and "key=***" in S.redact(url)

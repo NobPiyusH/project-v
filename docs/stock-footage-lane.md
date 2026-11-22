@@ -1,5 +1,7 @@
 # Stock footage lane (OFF by default)
 
+**Update 22 Nov 2026 (evening):** Pexels has paused new API keys, so it is an optional adapter (skipped without a key). Pixabay (key in `.env`), Wikimedia Commons and the **Internet Archive** (Prelinger Archives, no key) are the working sources. Source order: pixabay, archive, commons, pexels.
+
 Real video clips (never panned stills) from Pexels, Pixabay and Wikimedia Commons, chosen per shot, trimmed to the shot and
 mixed into the master with AI clips and diagrams. Researched 22 Nov 2026 from the providers' own pages. **Terms change: re-read
 them before relying on this for a monetised channel.**
@@ -57,3 +59,24 @@ At assembly, if any clip needs credit, `credits.txt` is written next to the mast
 | `STOCK_MAX_MB` | | download cap, worker (default 400) |
 
 Enable: put switches + keys in `.env`, restart the control plane (`scripts\start.ps1`) and the Python worker (`uv run python -m workers.main`), re-run Shot plan.
+
+## Internet Archive (added; keyless, `VIDEO_STOCK_ARCHIVE`)
+- API: `archive.org/advancedsearch.php` (ids) then `archive.org/metadata/<id>` (licence, creator, files); download `archive.org/download/<id>/<file>`. Plain HTTP, no library, no key. Descriptive generic User-Agent, 1 s spacing, back-off on 429/503.
+- **Only the curated `prelinger` collection is searched.** An open search with `licenseurl:*` returned user uploads with a self-chosen "public domain" tag (e.g. a 2005 feature film), which is not reliable; user uploads are never used.
+- **Per-item rule:** accept only if the item's own `licenseurl` is CC0, a CC public-domain mark/dedication or CC BY, or its `rights` text says public domain. Anything else is skipped, never guessed. Verified live: many Prelinger items carry `licenseurl: http://creativecommons.org/licenses/publicdomain/` (accepted); some, e.g. "Story of Television", have **no machine-readable licence and are skipped**. Relaxing that (Prelinger states "no known copyright restrictions") is an owner decision.
+- Footage is mostly 4:3 / 480p black-and-white or colour film: ranks below HD stock, and is enlarged at assembly (soft). It fits "vintage" shots only.
+- Risks: PD status is the uploader's/Archive's claim; third-party footage inside a film (logos, brands, identifiable people) is the re-user's check; CC BY items need the credit line (written automatically); Archive terms were not read in full.
+
+## Pixabay live findings (22 Nov 2026)
+- Python's default urllib User-Agent gets a Cloudflare 403 (error 1010); every request sends `ProjectV-StockLane/1.0`.
+- Limit 100 requests / 60 s per key: searches are cached 24 h on disk (`STOCK_CACHE_DIR`, default temp folder), spaced 0.7 s, 429 back-off honours Retry-After. API keys are redacted from any error text.
+- Smoke test passed: 12 candidates for "old television", best 1920x1080 10 s clip downloaded (6.5 MB) and probed; its provenance JSON is in `reports/tv-explainer/stock-smoke/` (the clip itself is not committed).
+
+## Provenance stored per clip
+source, id, page URL, creator, licence (verbatim label + URL), attribution text, credit-required flag, fetched-at, SHA-256 of the downloaded file (`asset.sha256`).
+
+## Reference projects (ideas reimplemented, no code copied)
+broll-mcp (MIT: Internet Archive source design, provenance), MoneyPrinterTurbo `material.py` (MIT: aspect/duration filter, key redaction, 429 handling), free-for-creators (CC0: list of extra sources). No AGPL/GPL/unlicensed repo and no MCP dependency used.
+
+## Not done yet (deliberately)
+- **CLIP/SigLIP reranker** (optional, flag, CPU, cache on a non-C: drive) and **PySceneDetect** clean cuts: not built. Text ranking is the default and good enough to start; both need new heavy dependencies (torch, ~600 MB weights) and a measurement on the laptop first.

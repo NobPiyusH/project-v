@@ -25,6 +25,7 @@ public class AssetStore {
     public static final UUID LICENCE_COMMONS = UUID.fromString("00000000-0000-0000-0000-00000000a010");
     public static final UUID LICENCE_CHATTERBOX = UUID.fromString("00000000-0000-0000-0000-00000000a011");
     public static final UUID LICENCE_PEXELS = UUID.fromString("00000000-0000-0000-0000-00000000a020");
+    public static final UUID LICENCE_ARCHIVE = UUID.fromString("00000000-0000-0000-0000-00000000a022");
     public static final UUID LICENCE_PIXABAY = UUID.fromString("00000000-0000-0000-0000-00000000a021");
     public static final UUID LICENCE_FLUX2_KLEIN = UUID.fromString("00000000-0000-0000-0000-00000000a013");
 
