@@ -50,7 +50,7 @@ public interface BrokerRecords {
                             INSERT INTO cost_entry (id, video_id, dream_short_id, provider_id, amount_inr, units, unit_type, estimated, note)
                             VALUES (:id, NULL, :d, :p, :amt, :u, 'gpu_hour', true, :note)
                             """)
-                    .param("id", UUID.randomUUID()).param("d", dreamShortId).param("p", provider).param("amt", inr)
+                    .param("id", UUID.randomUUID()).param("d", dreamShortId, java.sql.Types.OTHER).param("p", provider).param("amt", inr)
                     .param("u", BigDecimal.valueOf(hours).setScale(4, RoundingMode.HALF_UP))
                     .param("note", "%s ($%.4f/h live)".formatted(note, hourlyUsd)).update();
         }

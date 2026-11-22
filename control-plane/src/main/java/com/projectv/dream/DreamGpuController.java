@@ -87,6 +87,34 @@ public class DreamGpuController {
 
     @GetMapping("/gpu/broker")
     public Map<String, Object> status() {
-        return gpu.enabled() ? Map.of("enabled", true, "today", gpu.today()) : Map.of("enabled", false);
+        return gpu.enabled() ? Map.of("enabled", true, "today", gpu.today(), "providers", gpu.providerStatuses())
+                : Map.of("enabled", false);
+    }
+
+    /** Every provider: configured / preflight ok / proven (only proven ones are searched by Auto). */
+    @GetMapping("/gpu/broker/providers")
+    public java.util.List<Map<String, Object>> providers() {
+        return gpu.providerStatuses();
+    }
+
+    /** Free pre-check, rents nothing. */
+    @PostMapping("/gpu/broker/providers/{provider}/preflight")
+    public Map<String, Object> preflight(@PathVariable String provider) {
+        var r = gpu.preflight(provider);
+        return Map.of("provider", provider, "ok", r.ok(), "checks", r.checks());
+    }
+
+    /**
+     * The canary: ONE real, tiny rental on this provider (its cheapest GPU, ends as soon as the worker answers /health).
+     * Spends real money, so it needs {@code approve=true}, which only the owner sends.
+     */
+    @PostMapping("/gpu/broker/providers/{provider}/canary")
+    public Map<String, Object> canary(@PathVariable String provider,
+                                      @org.springframework.web.bind.annotation.RequestParam(defaultValue = "false") boolean approve) {
+        if (!approve) {
+            throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.BAD_REQUEST,
+                    "The canary rents a real GPU for a few minutes. Send approve=true to confirm.");
+        }
+        return gpu.canary(provider);
     }
 }

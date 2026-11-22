@@ -76,6 +76,16 @@ public class GpuBroker {
         this.auth = auth;
     }
 
+    /** Which providers have run a real worker (only those are searched); everything counts as proven until this is set. */
+    private ProviderStates states = ProviderStates.ALL_PROVEN;
+    /** The provider whose canary is running (null = none): no other rental starts meanwhile (one pod only). */
+    private volatile String canaryRunning;
+
+    @Autowired(required = false)
+    public void setStates(ProviderStates states) {
+        this.states = states;
+    }
+
     public GpuBroker(List<GpuProvider> providers, BrokerConfig config, GpuWallet wallet, BrokerRecords records,
                      PodLeases leases, PodEvents events, GpuPodLimits limits, Clock clock) {
         this(providers, config, wallet, records, leases, events, limits, clock, PreferenceStore.NONE);
@@ -224,6 +234,11 @@ public class GpuBroker {
                 out.add(cand(id, p, GpuProvider.Quote.unavailable(id, ""), "not configured (no key in .env, or adapter not built)"));
                 continue;
             }
+            if (!states.proven(id)) {
+                out.add(cand(id, p, GpuProvider.Quote.unavailable(id, ""), "not proven yet: no worker has run on it. Run its preflight, then the owner-approved canary"
+                        + " (POST /api/gpu/broker/providers/" + id + "/canary?approve=true)"));
+                continue;
+            }
             List<GpuProvider.Quote> quotes;
             try {
                 quotes = p.quotes(spec);
@@ -295,6 +310,9 @@ public class GpuBroker {
     public synchronized Rental acquire(UUID shortId, String capability, String image, List<String> workerArgv,
                                        Map<String, String> env, String volumeId, Pick pick, double expectedHours) {
         double hours = expectedHours > 0 ? expectedHours : config.expectedHours();
+        if (canaryRunning != null && shared == null) {
+            throw new NoGpuAvailableException("The " + canaryRunning + " canary rental is running (a few minutes); nothing else is rented meanwhile. Press Retry shortly.");
+        }
         // ONE shared pod: when it is on, every Short uses it (a manual GPU pick applies only when no pod is on).
         Rental existing = shared;
         List<UUID> carried = List.of();
@@ -442,7 +460,7 @@ public class GpuBroker {
         GpuProvider.Quote best = null;
         for (String id : config.order()) {
             GpuProvider p = providers.get(id);
-            if (p == null || !p.configured()) {
+            if (p == null || !p.configured() || !states.proven(id)) {
                 continue;
             }
             try {
@@ -671,6 +689,176 @@ public class GpuBroker {
             log.warn("GPU broker: terminate {} failed: {}", id, e.getMessage());
             return false;
         }
+    }
+
+    // ------------------------------------------------------------------------------------------------ pre-check and canary
+
+    /** One provider's state for the GPU API: configured / preflight / proven. */
+    public Map<String, Object> providerStatus(String id) {
+        GpuProvider p = providers.get(id);
+        ProviderStates.State st = states.get(id);
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("provider", id);
+        m.put("configured", p != null && p.configured());
+        m.put("preflightOk", st.preflightOk());
+        m.put("preflightAt", st.preflightAt() == null ? null : st.preflightAt().toString());
+        m.put("preflightNote", st.preflightNote());
+        m.put("proven", st.proven());
+        m.put("provenNote", st.provenNote());
+        m.put("monthlyCapUsd", config.capUsd(id));
+        m.put("inAutoSearch", p != null && p.configured() && st.proven() && config.capUsd(id) > 0);
+        return m;
+    }
+
+    public List<Map<String, Object>> providerStatuses() {
+        return config.order().stream().filter(providers::containsKey).map(this::providerStatus).toList();
+    }
+
+    /** Free pre-check of one provider with the real create request (never rents). The result is stored for the GPU API. */
+    public GpuProvider.Preflight preflight(String id, String image, List<String> workerArgv, Map<String, String> env, String volumeId) {
+        GpuProvider p = providers.get(id);
+        if (p == null) {
+            return new GpuProvider.Preflight(false, List.of("no adapter for '" + id + "'"));
+        }
+        GpuProvider.GpuSpec spec = new GpuProvider.GpuSpec(config.gpuPreference(), config.minVramGb(), config.minRamGb(), config.diskGb());
+        GpuProvider.Preflight r;
+        try {
+            String name = limits.prefix() + id + "-preflight";
+            List<String> argv = p.guard(workerArgv, limits.maxRuntimeMinutes(), limits.idleMinutes(), clock.instant());
+            GpuProvider.CreateRequest probe = new GpuProvider.CreateRequest(name, image, config.diskGb(), argv,
+                    auth.env(id, name, env), config.port(), volumeId, null);
+            r = p.preflight(spec, probe);
+        } catch (RuntimeException e) {
+            r = new GpuProvider.Preflight(false, List.of("preflight failed: " + e.getMessage()));
+        }
+        try {
+            states.recordPreflight(id, r.ok(), String.join("; ", r.checks()));
+        } catch (RuntimeException e) {
+            log.warn("GPU broker: could not store the preflight of {}: {}", id, e.getMessage());
+        }
+        return r;
+    }
+
+    /** Asks the worker at {@code endpoint} (token already in the address) if it is ready; null = ready, else why not. */
+    public interface Health {
+        String check(String endpoint);
+    }
+
+    /**
+     * The canary: ONE tiny owner-approved rental on {@code id}. Rents the provider's cheapest GPU, waits for the worker's health
+     * check, always terminates and books it, and sets proven=true only when the worker answered. Refused while any pod is on.
+     * Leased without a Short, so the watchdog covers it if this method dies.
+     */
+    public Map<String, Object> canary(String id, String image, List<String> workerArgv, Map<String, String> env, String volumeId,
+                                      Health health, int timeoutSeconds, long pollMillis) {
+        GpuProvider p = providers.get(id);
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("provider", id);
+        out.put("proven", false);
+        GpuProvider.Preflight pre = preflight(id, image, workerArgv, env, volumeId);
+        out.put("preflight", pre.checks());
+        if (p == null || !p.configured() || !pre.ok()) {
+            out.put("result", "not run: preflight failed, nothing was rented");
+            return out;
+        }
+        String name;
+        GpuProvider.Quote q;
+        synchronized (this) {
+            if (shared != null || canaryRunning != null) {
+                out.put("result", "not run: a pod or another canary is on; turn the GPU off first");
+                return out;
+            }
+            GpuProvider.GpuSpec spec = new GpuProvider.GpuSpec(config.gpuPreference(), config.minVramGb(), config.minRamGb(), config.diskGb());
+            q = p.quotes(spec).stream().min(java.util.Comparator.comparingDouble(GpuProvider.Quote::hourlyUsd)).orElse(null);
+            if (q == null) {
+                out.put("result", "not run: no GPU in stock, nothing was rented");
+                return out;
+            }
+            double canaryHours = (timeoutSeconds + 120) / 3600.0;
+            String why = wallet.refusal(id, q.hourlyUsd() * canaryHours);
+            if (why != null) {
+                out.put("result", "not run: " + why);
+                return out;
+            }
+            canaryRunning = id;
+            name = limits.prefix() + id + "-canary-" + UUID.randomUUID().toString().substring(0, 4);
+        }
+        Instant start = clock.instant();
+        GpuProvider.Instance inst = null;
+        String failure = null;
+        try {
+            List<String> argv = p.guard(workerArgv, Math.max(10, timeoutSeconds / 60 + 5), limits.idleMinutes(), start);
+            try {
+                inst = p.create(new GpuProvider.CreateRequest(name, image, config.diskGb(), argv, auth.env(id, name, env),
+                        config.port(), volumeId, q));
+            } catch (RuntimeException ex) {
+                failure = "create failed: " + ex.getMessage();
+                try {
+                    inst = find(p, name, q); // a pod whose create reply was lost is adopted, so it is terminated below
+                } catch (RuntimeException le) {
+                    failure += " (and the pod list failed: the watchdog ends any pod named " + name + ")";
+                }
+            }
+            if (inst != null) {
+                try {
+                    leases.open(id, inst.id(), inst.name(), "canary");
+                } catch (RuntimeException ex) {
+                    log.warn("GPU broker: canary lease failed: {}", ex.getMessage());
+                }
+                out.put("gpu", inst.gpu());
+                out.put("hourlyUsd", inst.hourlyUsd());
+                if (failure == null) {
+                    failure = waitHealthy(p, inst, health, timeoutSeconds, pollMillis);
+                }
+            }
+        } finally {
+            if (inst != null) {
+                boolean ended = safeTerminate(p, inst.id());
+                double hours = Math.max(1 / 3600.0, Duration.between(start, clock.instant()).toSeconds() / 3600.0);
+                try {
+                    records.cost(null, id, hours, inst.hourlyUsd(), "canary rental " + inst.id() + " (" + inst.gpu() + ")");
+                    leases.release(inst.id());
+                } catch (RuntimeException e) {
+                    log.warn("GPU broker: canary {} ended but its ledger row failed: {}", inst.id(), e.getMessage());
+                }
+                out.put("terminated", ended);
+                out.put("hours", hours);
+            }
+            canaryRunning = null;
+        }
+        if (failure == null && inst != null) {
+            states.markProven(id, "canary ok " + clock.instant() + " on " + inst.gpu() + " $" + inst.hourlyUsd() + "/h");
+            out.put("proven", true);
+            out.put("result", "worker healthy; pod terminated; provider marked proven");
+        } else {
+            out.put("result", "failed, provider stays unproven: " + failure);
+        }
+        return out;
+    }
+
+    /** Null when the worker answered its health check in time, else why not. */
+    private String waitHealthy(GpuProvider p, GpuProvider.Instance inst, Health health, int timeoutSeconds, long pollMillis) {
+        String ep = auth.decorate(inst.provider(), inst.name(), inst.endpoint());
+        long deadline = System.currentTimeMillis() + timeoutSeconds * 1000L;
+        String last = "no address yet";
+        while (System.currentTimeMillis() < deadline) {
+            if (ep == null) {
+                ep = auth.decorate(inst.provider(), inst.name(), p.endpointFor(inst.id(), config.port()));
+            }
+            if (ep != null) {
+                last = health.check(ep);
+                if (last == null) {
+                    return null;
+                }
+            }
+            try {
+                Thread.sleep(pollMillis);
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                return "interrupted";
+            }
+        }
+        return "worker never became healthy within " + timeoutSeconds + " s: " + last;
     }
 
     /** Nothing in the chain can serve the job; non-retryable, the step waits for the owner (rule 2b). */

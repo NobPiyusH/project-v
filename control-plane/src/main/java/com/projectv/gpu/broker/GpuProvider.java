@@ -41,6 +41,24 @@ public interface GpuProvider extends PodApi {
 
     boolean enabledByDefault();
 
+    /** Result of {@link #preflight}: {@code ok} only when every check passed; {@code checks} says what was looked at. */
+    record Preflight(boolean ok, List<String> checks) {
+    }
+
+    /**
+     * Free check, never rents anything: would this create request be accepted? Providers validate the request shape and
+     * limits locally and the plan/image pairing with read-only API calls. The default only checks the key is set and that
+     * a quote exists. {@code probe} is the real create request the studio would send (its quote may be null).
+     */
+    default Preflight preflight(GpuSpec spec, CreateRequest probe) {
+        if (!configured()) {
+            return new Preflight(false, List.of("not configured (no key in .env)"));
+        }
+        Quote q = quote(spec);
+        return q.available() ? new Preflight(true, List.of("configured", "live quote: " + q.gpu() + " $" + q.hourlyUsd() + "/h"))
+                : new Preflight(false, List.of("configured", "no quote: " + q.detail()));
+    }
+
     /**
      * The pod's command wrapped with this provider's in-pod guard. Default: {@link com.projectv.gpu.PodSelfStop#wrap} (the
      * pod deletes itself with its own RunPod key). Providers whose pods must hold no account key (Vast.ai) override it.

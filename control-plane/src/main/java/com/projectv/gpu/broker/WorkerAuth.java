@@ -39,7 +39,7 @@ public class WorkerAuth {
                       @Value("${projectv.runpod.api-key:}") String runpodKey,
                       @Value("${projectv.vast.api-key:}") String vastKey,
                       @Value("${projectv.gpu.worker-token-runpod:true}") boolean runpod) {
-        this(secretBytes(secret, runpodKey, vastKey), runpod ? Set.of("vast", "e2e", "runpod") : Set.of("vast", "e2e"));
+        this(secretBytes(secret, runpodKey, vastKey), runpod ? Set.of("vast", "e2e", "jarvislabs", "runpod") : Set.of("vast", "e2e", "jarvislabs"));
     }
 
     public WorkerAuth(byte[] secret, Set<String> providers) {
