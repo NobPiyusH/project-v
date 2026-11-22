@@ -127,10 +127,10 @@ public class E2eProvider implements GpuProvider {
         try {
             List<String> scripts = startScripts(probe);
             int longest = scripts.stream().mapToInt(String::length).max().orElse(0);
-            checks.add("start scripts: " + scripts.size() + " piece(s), longest " + longest + " chars (limit used here " + SCRIPT_BYTES + ")");
-            if (longest > SCRIPT_BYTES) {
+            checks.add("start scripts: " + scripts.size() + " piece(s), longest " + longest + " chars (limit used here " + MAX_ENTRY + ")");
+            if (longest > MAX_ENTRY) {
                 ok = false;
-                checks.add("FAIL: a start script is longer than " + SCRIPT_BYTES);
+                checks.add("FAIL: a start script is longer than " + MAX_ENTRY);
             }
         } catch (RuntimeException e) {
             ok = false;
