@@ -135,13 +135,14 @@ def ambience_query(scene: str | None) -> str:
     return "quiet outdoor ambience"
 
 
-def j_cut_windows(durations: list[float], dissolve: float = 0.0) -> list[tuple[float, float]]:
+def j_cut_windows(durations: list[float], dissolve: float | list[float] = 0.0) -> list[tuple[float, float]]:
     """Where each shot's ambience plays on the timeline: from J_CUT before its cut to the end of the shot."""
     out, t = [], 0.0
     for k, d in enumerate(durations):
         start = t if k == 0 else max(0.0, t - J_CUT)
         out.append((round(start, 3), round(t + d, 3)))
-        t += d - (dissolve if k < len(durations) - 1 else 0)
+        nxt = dissolve[k + 1] if isinstance(dissolve, list) and k < len(durations) - 1 else dissolve
+        t += d - (nxt if k < len(durations) - 1 else 0)
     return out
 
 
