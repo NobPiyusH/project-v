@@ -92,17 +92,43 @@ public class VideoGpu {
         return gpu.inr(seconds);
     }
 
-    /** Opens (or joins) the shared pod for this Video. Throws when no provider can serve or the daily cap would be exceeded. */
+    /** A pod start in progress per Video: it outlives one activity attempt (a start takes 8-18 min, an attempt is 5), so a retry joins it. */
+    private final Map<UUID, java.util.concurrent.CompletableFuture<DreamGpu.Session>> starting = new ConcurrentHashMap<>();
+    private final java.util.concurrent.ExecutorService startPool = java.util.concurrent.Executors.newCachedThreadPool(r -> {
+        Thread t = new Thread(r, "video-gpu-start");
+        t.setDaemon(true);
+        return t;
+    });
+    /** How long one call waits for the pod; kept under the 5-minute activity limit. Package-private so a test can shorten it. */
+    long startWaitSeconds = 240;
+
+    /**
+     * Opens (or joins) the shared pod for this Video. Throws when no provider can serve or the daily cap would be exceeded.
+     * The start runs in the background and survives an activity timeout: a call that waits {@link #startWaitSeconds} without
+     * the pod being ready throws, and the Temporal retry joins the same start instead of renting a second pod.
+     */
     public DreamGpu.Session session(UUID videoId, double podSeconds) {
         requireBroker();
         gpu.hold(videoId);
         holds.put(videoId, Instant.now());
+        var start = starting.computeIfAbsent(videoId, id -> java.util.concurrent.CompletableFuture.supplyAsync(
+                () -> gpu.session(id, podSeconds / 3600.0), startPool));
         try {
-            return gpu.session(videoId, podSeconds / 3600.0);
-        } catch (RuntimeException e) {
+            var session = start.get(startWaitSeconds, java.util.concurrent.TimeUnit.SECONDS);
+            starting.remove(videoId, start);
+            holds.put(videoId, Instant.now());
+            return session;
+        } catch (java.util.concurrent.TimeoutException e) {
+            throw new IllegalStateException("The GPU pod is still starting (a start takes 8-18 min); this step retries and joins it");
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Waiting for the GPU pod was interrupted; this step retries and joins the start");
+        } catch (java.util.concurrent.ExecutionException e) {
+            starting.remove(videoId, start);
             holds.remove(videoId);
             gpu.unhold(videoId);
-            throw e;
+            Throwable cause = e.getCause() == null ? e : e.getCause();
+            throw cause instanceof RuntimeException re ? re : new IllegalStateException(cause.getMessage(), cause);
         }
     }
 
@@ -123,6 +149,10 @@ public class VideoGpu {
 
     void releaseIdle(Instant now) {
         for (UUID id : List.copyOf(holds.keySet())) {
+            var inProgress = starting.get(id);
+            if (inProgress != null && !inProgress.isDone()) {
+                continue; // a pod start in progress is not idle (it would end the rental before it is ready)
+            }
             try {
                 Instant last = gpu.lastActivity(id).orElse(holds.get(id));
                 if (last == null || Duration.between(last, now).toMinutes() >= idleMinutes) {

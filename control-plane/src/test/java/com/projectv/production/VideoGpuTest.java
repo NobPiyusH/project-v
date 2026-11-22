@@ -92,4 +92,24 @@ class VideoGpuTest {
         g.releaseIdle(used.plusSeconds(5 * 60));
         verify(dream).release(Mockito.eq(V), anyString());
     }
+
+    @Test
+    void aSlowPodStartSurvivesAnAttemptAndTheRetryJoinsItInsteadOfRentingAgain() throws Exception {
+        DreamGpu dream = Mockito.mock(DreamGpu.class);
+        when(dream.enabled()).thenReturn(true);
+        var gate = new java.util.concurrent.CountDownLatch(1);
+        when(dream.session(Mockito.eq(V), anyDouble())).thenAnswer(i -> {
+            gate.await();
+            return new DreamGpu.Session("http://pod", 60);
+        });
+        VideoGpu g = new VideoGpu(dream, "broker", "omni", "", 5);
+        g.startWaitSeconds = 1;
+        assertThrows(IllegalStateException.class, () -> g.session(V, 600)); // attempt 1: pod still starting
+        g.releaseIdle(Instant.now().plusSeconds(3600)); // a start in progress is never "idle"
+        verify(dream, never()).release(Mockito.any(), anyString());
+        gate.countDown();
+        g.startWaitSeconds = 10;
+        assertTrue(g.session(V, 600).url().equals("http://pod")); // attempt 2 joins the same start
+        verify(dream, times(1)).session(Mockito.eq(V), anyDouble());
+    }
 }
