@@ -389,8 +389,10 @@ public class ShotStage extends StageSupport {
         if (ok == 0) {
             throw new IllegalStateException("No keyframes were produced: " + String.join(" | ", errors));
         }
-        String summary = "%d/%d keyframes (%d hero via Nano Banana, %d via Z-Image on Modal)%s.".formatted(ok, jobs.size(), gem,
-                ok - gem, errors.isEmpty() ? "" : "; " + errors.size() + " failed: " + errors.getFirst());
+        boolean onRentedPod = jobs.values().stream().anyMatch(j -> VideoGpu.POD.equals(j.provider()));
+        String standardLabel = onRentedPod ? "FLUX.2 klein on a rented pod" : "Z-Image on Modal"; // the label says where the pictures really came from
+        String summary = "%d/%d keyframes (%d hero via Nano Banana, %d via %s)%s.".formatted(ok, jobs.size(), gem,
+                ok - gem, standardLabel, errors.isEmpty() ? "" : "; " + errors.size() + " failed: " + errors.getFirst());
         return StageResult.of(summary, json.writeValueAsString(Map.of("ok", ok, "failed", errors)));
     }
 }
