@@ -145,3 +145,15 @@ def test_enrich_motion_shows_something_at_the_start_when_everything_is_hidden():
             "steps": [{"at": 1.0, "dur": 1.0, "do": "show", "target": "a"}, {"at": 2.0, "dur": 1.0, "do": "show", "target": "b"}]}
     out = enrich_motion(spec)
     assert any(e.get("visible") for e in out["elements"])
+
+
+def test_enrich_motion_drops_the_bottom_caption_the_video_burns_its_own_captions_there():
+    from workers.diagram.spec import enrich_motion
+
+    spec = {"version": 1, "title": "t", "duration": 6.0,
+            "elements": [{"id": "box", "type": "box", "x": 0, "y": 0, "w": 2, "h": 1},
+                         {"id": "cap", "type": "text", "x": 0, "y": -3.4, "text": "bottom caption"}],
+            "steps": [{"at": 0.5, "dur": 0.5, "do": "show", "target": "cap"}]}
+    out = enrich_motion(spec)
+    assert [e["id"] for e in out["elements"]] == ["box"]
+    assert all(s["target"] != "cap" for s in out["steps"])

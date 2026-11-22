@@ -188,6 +188,12 @@ def enrich_motion(spec: dict) -> dict:
 
     out = copy.deepcopy(spec)
     d = float(out["duration"])
+    # The finished video burns the narration captions into the bottom of the frame: a diagram's own bottom caption
+    # (y <= -3.0) would be printed over them (owner saw it, 23 Nov 2026), so it is dropped.
+    gone = {e["id"] for e in out["elements"] if e["type"] == "text" and float(e.get("y", 0)) <= -3.0}
+    if gone and len(gone) < len(out["elements"]):
+        out["elements"] = [e for e in out["elements"] if e["id"] not in gone]
+        out["steps"] = [s for s in out.get("steps", []) if s.get("target") not in gone]
     els, steps = out["elements"], out.setdefault("steps", [])
     for e in els:  # only the title and the caption (top and bottom edge) grow; bigger labels overlapped each other
         if e.get("text") and e["type"] == "text" and abs(float(e.get("y", 0))) >= 2.9:
