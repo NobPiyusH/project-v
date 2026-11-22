@@ -16,6 +16,8 @@ from workers.common import download, ffmpeg_bin, run_ffmpeg
 
 
 SFX_VOLUME = 0.35  # sound effects sit under the music; the whole bed ducks under the voice
+MUSIC_VOLUME = 0.12  # was 0.9: the music sat as loud as the voice (owner heard it, 23 Nov 2026; measured -2 dB gap, now about +9 dB)
+DUCK_THRESHOLD, DUCK_RATIO, DUCK_RELEASE_MS = 0.02, 12, 500  # deeper ducking while a line is spoken
 
 
 def _graph(narration: list[dict], music: Path | None, total: float, tmp: Path,
@@ -35,7 +37,7 @@ def _graph(narration: list[dict], music: Path | None, total: float, tmp: Path,
     bed = []  # music and sound effects together form the background bed
     if music is not None:
         inputs += ["-i", str(music)]
-        filters.append(f"[{n_voice}:a]aresample=48000,aformat=channel_layouts=stereo,apad,atrim=0:{total:.3f},volume=0.9[mus]")
+        filters.append(f"[{n_voice}:a]aresample=48000,aformat=channel_layouts=stereo,apad,atrim=0:{total:.3f},volume={MUSIC_VOLUME}[mus]")
         bed.append("[mus]")
     for k, fx in enumerate(sfx or []):
         idx = inputs.count("-i")  # input number; sfx inputs carry extra -stream_loop args, so count -i, not len/2
@@ -53,7 +55,7 @@ def _graph(narration: list[dict], music: Path | None, total: float, tmp: Path,
             filters.append(f"{bed[0]}anull[bed]")
         if n_voice:
             filters.append("[voice]asplit=2[v1][v2]")
-            filters.append("[bed][v2]sidechaincompress=threshold=0.03:ratio=8:attack=20:release=400[ducked]")
+            filters.append(f"[bed][v2]sidechaincompress=threshold={DUCK_THRESHOLD}:ratio={DUCK_RATIO}:attack=20:release={DUCK_RELEASE_MS}[ducked]")
             filters.append("[ducked][v1]amix=inputs=2:normalize=0[mix]")
             return inputs, filters, "[mix]"
         return inputs, filters, "[bed]"
