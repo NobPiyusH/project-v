@@ -61,7 +61,7 @@ public class DreamGpuController {
         var p = gpu.pick(dreamId);
         var out = new java.util.LinkedHashMap<String, Object>();
         out.put("mode", p.mode());
-        out.put("choice", p.choice() == null ? "" : p.choice());
+        out.put("choice", p.choice() == null ? "" : com.projectv.gpu.broker.GpuBroker.pickKey(p.choice()));
         out.put("rented", gpu.isOpen(dreamId));
         out.put("estimate", gpu.rentalEstimate(dreamId)); // the same hours the daily-cap check uses before renting
         out.put("usersOnPod", gpu.usersOnPod()); // the ONE shared pod: how many Shorts are using it
@@ -87,6 +87,13 @@ public class DreamGpuController {
     public Map<String, Object> turnOff(@PathVariable UUID dreamId) {
         gpu.turnOff(dreamId);
         return pick(dreamId);
+    }
+
+    /** A pick that cannot be accepted is the caller's to fix: 4xx with the reason, never a 500. */
+    @org.springframework.web.bind.annotation.ExceptionHandler(IllegalArgumentException.class)
+    public org.springframework.http.ResponseEntity<Map<String, String>> refused(IllegalArgumentException e) {
+        boolean blocked = e instanceof DreamGpu.PickRefusedException p && p.blocked();
+        return org.springframework.http.ResponseEntity.status(blocked ? 409 : 400).body(Map.of("error", String.valueOf(e.getMessage())));
     }
 
     /** Auto (the studio picks, learning from your past picks) or Manual (you pick one option from the list). */

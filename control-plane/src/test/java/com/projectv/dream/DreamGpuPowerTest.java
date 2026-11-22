@@ -192,4 +192,17 @@ class DreamGpuPowerTest {
         assertFalse(gpu.holdManual(dream));
         assertEquals(30, gpu.idleMinutes(dream), "idle minutes kept when not given");
     }
+
+    @Test
+    void aPickDuringARentalIsStoredForTheNextRentAndABadPickIsA4xxNotA500() {
+        UUID dream = rentedShort("auto"); // a pod is open: the pick used to throw IllegalStateException (HTTP 500 path)
+        gpu.setPick(dream, "manual", "runpod|NVIDIA GeForce RTX 4090|COMMUNITY");
+        assertEquals("runpod|NVIDIA GeForce RTX 4090|COMMUNITY", gpu.pick(dream).choice(), "applies to the next rental");
+        var ctl = new DreamGpuController(gpu);
+        var gone = assertThrows(DreamGpu.PickRefusedException.class, () -> gpu.setPick(dream, "manual", "vast|RTX 9999"));
+        assertEquals(400, ctl.refused(gone).getStatusCode().value());
+        assertTrue(gone.getMessage().contains("not an offered"), gone.getMessage());
+        assertEquals(400, ctl.refused(new IllegalArgumentException("mode must be auto or manual")).getStatusCode().value());
+        dreams.status(dream, "MUSIC", "RUNNING", null);
+    }
 }

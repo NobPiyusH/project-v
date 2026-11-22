@@ -189,30 +189,45 @@ public class DreamGpu {
      * The owner sets Auto or Manual for a Short. A manual pick must be one of the options offered now, and is remembered
      * as a preference (what he chose, and what was cheapest) so Auto can learn from it.
      */
-    public void setPick(UUID dreamId, String mode, String choice) {
+    public void setPick(UUID dreamId, String mode, String choice0) {
+        String choice = choice0;
         boolean manual = "manual".equalsIgnoreCase(mode);
         if (!manual && !"auto".equalsIgnoreCase(mode)) {
             throw new IllegalArgumentException("mode must be auto or manual");
         }
         if (manual && (choice == null || choice.isBlank())) {
-            throw new IllegalArgumentException("manual mode needs a choice (an option key from the list)");
+            throw new PickRefusedException("manual mode needs a choice (an option key from the list)", false);
         }
-        if (isOpen(dreamId) && (manual != pick(dreamId).manual() || (manual && !choice.equals(pick(dreamId).choice())))) {
-            throw new IllegalStateException("This Short already has a rented GPU; the choice applies to the next rental (after Retry)");
-        }
+        // While a pod is rented (or a start is in progress) the pick is still stored: it applies to the next rental.
         if (manual) {
+            String type = GpuBroker.pickKey(choice); // an old offer-id pick is read as its GPU type
             var opts = broker.options();
-            var chosen = opts.stream().filter(o -> o.key() != null && o.key().equals(choice)).findFirst()
-                    .orElseThrow(() -> new IllegalArgumentException("not an offered option: " + choice));
+            var chosen = opts.stream().filter(o -> o.key() != null && o.key().equals(type)).findFirst()
+                    .orElseThrow(() -> new PickRefusedException("not an offered GPU option now: " + choice0
+                            + " (GET /api/gpu/broker/options lists what can be picked)", false));
             if (!chosen.available()) {
-                throw new IllegalArgumentException(choice + " cannot be rented now: " + chosen.why());
+                throw new PickRefusedException(type + " cannot be rented now: " + chosen.why(), true);
             }
-            String cheapest = opts.stream().filter(GpuBroker.Option::available).findFirst().map(GpuBroker.Option::key).orElse(choice);
-            prefs.recordChoice(dreamId, choice, cheapest, java.util.Map.of("shortId", dreamId.toString(),
+            String cheapest = opts.stream().filter(GpuBroker.Option::available).findFirst().map(GpuBroker.Option::key).orElse(type);
+            prefs.recordChoice(dreamId, type, cheapest, java.util.Map.of("shortId", dreamId.toString(),
                     "options", opts.stream().filter(GpuBroker.Option::available).map(o -> o.key() + " $" + o.hourlyUsd()).toList()));
         }
         jdbc.sql("UPDATE dream_short SET gpu_mode = :m, gpu_choice = :c, updated_at = now() WHERE id = :d")
-                .param("m", manual ? "manual" : "auto").param("c", manual ? choice : null).param("d", dreamId).update();
+                .param("m", manual ? "manual" : "auto").param("c", manual ? GpuBroker.pickKey(choice) : null).param("d", dreamId).update();
+    }
+
+    /** A manual pick the studio refuses: 400 when the type is unknown, 409 when it is known but blocked now (reason in the message). */
+    public static class PickRefusedException extends IllegalArgumentException {
+        private final boolean blocked;
+
+        public PickRefusedException(String message, boolean blocked) {
+            super(message);
+            this.blocked = blocked;
+        }
+
+        public boolean blocked() {
+            return blocked;
+        }
     }
 
     /** Keeps the lease warm and says whether the pod still exists (the worker re-rents on GONE, stops on NONE). */

@@ -250,6 +250,26 @@ public class GpuBroker {
         String key() {
             return id + "|" + q.gpu();
         }
+
+        /** What a Manual pick stores: provider + GPU type (a marketplace's offer id is dropped: offers vanish in seconds). */
+        String typeKey() {
+            return q.available() ? pickKey(key()) : null;
+        }
+    }
+
+    /** Providers whose quote key carries a per-offer id (Vast: "gpu|offerId|country|machine"); a pick there is the GPU type only. */
+    private static final java.util.Set<String> MARKETPLACES = java.util.Set.of("vast");
+
+    /**
+     * The stable form of an option key: for a marketplace provider "vast|RTX 4090|123|US|m5" becomes "vast|RTX 4090"
+     * (also how an old stored offer-id pick is read); every other key is returned unchanged.
+     */
+    public static String pickKey(String key) {
+        if (key == null) {
+            return null;
+        }
+        String[] parts = key.split("[|]", -1);
+        return parts.length > 2 && MARKETPLACES.contains(parts[0]) ? parts[0] + "|" + parts[1] : key;
     }
 
     /** Every provider's every option with the reason it can or cannot be rented now. Read-only. */
@@ -321,9 +341,21 @@ public class GpuBroker {
     /** What the owner can choose from, rentable options first, cheapest first. */
     public List<Option> options() {
         GpuProvider.GpuSpec spec = new GpuProvider.GpuSpec(config.gpuPreference(), config.minVramGb(), config.minRamGb(), config.diskGb());
-        return candidates(spec).stream()
-                .map(c -> new Option(c.id(), c.q().available() ? c.q().gpu() : null, c.q().available() ? c.key() : null,
-                        c.q().stock(), c.q().hourlyUsd(), c.ok(), c.why()))
+        // Marketplace offers collapse to one row per GPU type (the cheapest rentable offer of it, else the cheapest blocked one)
+        Map<String, Cand> byType = new LinkedHashMap<>();
+        List<Cand> rows = new ArrayList<>();
+        for (Cand c : candidates(spec)) {
+            if (c.q().available() && MARKETPLACES.contains(c.id())) {
+                byType.merge(c.typeKey(), c, (a, b) -> a.ok() != b.ok() ? (a.ok() ? a : b)
+                        : a.q().hourlyUsd() <= b.q().hourlyUsd() ? a : b);
+            } else {
+                rows.add(c);
+            }
+        }
+        rows.addAll(byType.values());
+        return rows.stream()
+                .map(c -> new Option(c.id(), c.q().available() ? (MARKETPLACES.contains(c.id()) ? c.typeKey().substring(c.id().length() + 1) : c.q().gpu()) : null,
+                        c.typeKey(), c.q().stock(), c.q().hourlyUsd(), c.ok(), c.why()))
                 .sorted(java.util.Comparator.comparing((Option o) -> !o.available()).thenComparingDouble(Option::hourlyUsd))
                 .toList();
     }
@@ -376,20 +408,24 @@ public class GpuBroker {
                 eligible.clear();
                 considered.add(Map.of("provider", "-", "skipped", "Manual mode: no GPU picked yet (GET /api/gpu/broker/options, then choose one)"));
             } else {
-                Cand wanted = all.stream().filter(c -> key.equals(c.key())).findFirst().orElse(null);
+                // A pick is a GPU type: the cheapest live offer of it (an old stored offer-id pick falls back to its type)
+                String type = pickKey(key);
+                Cand wanted = all.stream().filter(c -> c.q().available() && type.equals(c.typeKey()))
+                        .min(java.util.Comparator.comparing((Cand c) -> !c.ok()).thenComparingDouble(c -> c.q().hourlyUsd())).orElse(null);
                 if (wanted == null || !wanted.ok()) {
                     considered.add(Map.of("provider", "-", "skipped", "your pick " + key + " is not available now"
                             + (wanted == null ? "" : ": " + wanted.why())));
                     eligible.clear();
                 } else {
-                    eligible = new ArrayList<>(List.of(wanted));
+                    eligible = new ArrayList<>(all.stream().filter(c -> c.ok() && type.equals(c.typeKey()))
+                            .sorted(java.util.Comparator.comparingDouble((Cand c) -> c.q().hourlyUsd())).toList()); // other offers of the type are fallbacks
                     how = "your manual pick";
                 }
             }
         } else if (!eligible.isEmpty()) {
             double cheapest = eligible.getFirst().q().hourlyUsd();
             String learned = prefs.learnedKey().orElse(null);
-            Cand fav = learned == null ? null : eligible.stream().filter(c -> learned.equals(c.key())).findFirst().orElse(null);
+            Cand fav = learned == null ? null : eligible.stream().filter(c -> pickKey(learned).equals(c.typeKey())).findFirst().orElse(null);
             if (fav != null && fav.q().hourlyUsd() <= cheapest * PreferenceStore.MAX_PREMIUM) {
                 eligible.remove(fav);
                 eligible.addFirst(fav);

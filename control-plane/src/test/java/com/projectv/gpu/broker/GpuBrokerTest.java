@@ -594,4 +594,58 @@ class GpuBrokerTest {
                 GpuBroker.Pick.AUTO, 0.39); // 1 SVI scene, 4 clips: about $0.27
         assertEquals("runpod", r.instance().provider());
     }
+
+    /** A marketplace: one quote per live offer, each with its own offer id in the key (Vast's shape). */
+    static class Market extends Fake {
+        final List<String> offers = new ArrayList<>(); // "gpuName|offerId|price"
+
+        Market(String id) {
+            super(id);
+        }
+
+        @Override
+        public List<Quote> quotes(GpuSpec spec) {
+            return offers.stream().map(o -> o.split("[|]")).map(a -> new Quote(id, true, "ON-DEMAND",
+                    a[0] + "|" + a[1] + "|US|m1", Double.parseDouble(a[2]), "")).toList();
+        }
+
+        @Override
+        public Quote quote(GpuSpec spec) {
+            return quotes(spec).getFirst();
+        }
+
+        @Override
+        public Instance create(CreateRequest req) {
+            created.add(req.name());
+            return new Instance(id, id + "-pod-" + created.size(), req.name(), req.quote().hourlyUsd(), req.quote().gpu(), "https://x");
+        }
+    }
+
+    @Test
+    void marketplaceOptionsAreGpuTypesNotOfferIds() {
+        Market vast = new Market("vast");
+        vast.offers.addAll(List.of("RTX 4090|111|0.40", "RTX 4090|222|0.35", "RTX 5090|333|0.80"));
+        runpod.stock = false;
+        jarvis.configured = false;
+        GpuBroker b = new GpuBroker(List.of(runpod, vast), new BrokerConfig(List.of("runpod", "vast"), Map.of("runpod", 5.0, "vast", 5.0), 0,
+                List.of("x"), 24, 48, 80, 1.0, 8000), new GpuWallet(new BrokerConfig(List.of("runpod", "vast"), Map.of("runpod", 5.0, "vast", 5.0),
+                0, List.of("x"), 24, 48, 80, 1.0, 8000), p -> 0.0), records, leases, (p, pod, r, h, u) -> { },
+                new GpuPodLimits("projectv-", 120, 15, 10, 2, 2.0, true), Clock.fixed(NOW, ZoneOffset.UTC));
+        assertEquals(List.of("vast|RTX 4090", "vast|RTX 5090"),
+                b.options().stream().filter(GpuBroker.Option::available).map(GpuBroker.Option::key).toList());
+        assertEquals(0.35, b.options().getFirst().hourlyUsd(), "the cheapest offer of the type");
+
+        // the offer the owner once saw is gone: a type pick still rents the cheapest live offer of it
+        GpuBroker.Rental r = b.acquire(shortId, "video.i2v.dream", "img", List.of("w"), Map.of(), null, new GpuBroker.Pick("manual", "vast|RTX 4090"));
+        assertEquals("vast", r.instance().provider());
+        assertEquals(0.35, r.instance().hourlyUsd());
+        // an old stored pick naming a vanished offer id falls back to its GPU type
+        b.release(shortId, "test");
+        vast.offers.remove("RTX 4090|222|0.35");
+        GpuBroker.Rental old = b.acquire(shortId, "video.i2v.dream", "img", List.of("w"), Map.of(), null,
+                new GpuBroker.Pick("manual", "vast|RTX 4090|999|DE|m7"));
+        assertEquals(0.40, old.instance().hourlyUsd());
+        assertEquals("vast|RTX 4090", GpuBroker.pickKey("vast|RTX 4090|999|DE|m7"));
+        assertEquals("runpod|4090|SECURE", GpuBroker.pickKey("runpod|4090|SECURE"), "other providers' keys are unchanged");
+    }
 }
