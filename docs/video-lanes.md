@@ -69,6 +69,26 @@ If a `broker` value is set while `DREAM_GPU_PROVIDER` is not `broker`, the batch
   No per-clip Modal rows are written for pod clips. A RoutingDecision (`gpu_pod`, capability `video.i2v.dream`) is logged for each batch.
 - Finals on the broker follow the existing rule (drafts the owner did not mark "keep the draft"); Omni-only "hero finals" logic is not used.
 
+## 2K delivery (2560x1440, 16:9, 24 fps)
+
+All off by default (1080p behaviour unchanged). For the television video set, in `.env`:
+`VIDEO_OUTPUT_HEIGHT=1440`, `VIDEO_DIAGRAM_WIDTH=2560`, `VIDEO_DIAGRAM_HEIGHT=1440` (backend restart; worker restart picks up nothing new).
+
+- **Diagrams** render natively at the configured size (vector, so crisp; ~0.6-0.8 MB per 11 s at 2560x1440). The four samples in
+  `reports/tv-explainer/diagram-samples/` are 2560x1440 (`... templates OUT_DIR [W H]`, default 2560x1440; pass `1920 1080` for the old size).
+- **AI clips on the pod, 16:9:** drafts and finals are requested at **1280x720** (the pod worker accepts multiples of 16 up to 1280x720 pixels; `MAX_PIXELS` in
+  `workers/pod/server.py`). Vertical 9:16 Videos keep 480x832 drafts, and Dream Shorts is untouched. 720p costs more pod time than 480p: the estimate scales
+  the configured seconds per 81 frames by pixels^1.75 (Modal H100 measured 30 s vs 133 s; **not measured on a pod**, so check the first estimate against the real rental).
+- **Assembly** takes mixed sources: each shot is scaled to fill with Lanczos and cropped to the master size. A clip that has to be enlarged (720p AI, 1080p Omni)
+  also gets light luma sharpening (`unsharp=5:5:0.5:5:5:0.0`); a native-size diagram is left untouched. Master is x264 CRF 16, 24 fps.
+- **Existing upscaler:** SeedVR2 7B on Modal (Upscale/"sharp" stage, `workers/modal_apps/upscale.py`). It outputs a **1080 px short side**, so it cannot make a 1440p
+  master by itself, and Modal GPU work is capped at 0 until 1 Dec 2026. Diagram shots are skipped by it (they are already native). For this video use the
+  Lanczos + sharpen path above (skip the Upscale stage, or "Continue without it").
+- **Next quality step: a SeedVR2-class AI upscale of the AI clips to 1440p** (target height above 1080 in the SeedVR2 app, which needs a code change and a test).
+  Cost from the studio's own estimate constants (`SharpenStage`: ~60 s of H100 per clip + 30 s per group of 8, ~64 s per 5 s clip) at the config's Modal H100 rate
+  ($3.95/h, verify on modal.com/pricing): about **$0.85 per finished minute of AI footage at 1080p**; 1440p output will cost more (not measured). Only AI-video shots
+  count (diagrams need none), so a 3-minute video with ~1 minute of AI clips is roughly $1. On a rented pod instead of Modal the same model would be billed at the pod's hourly price.
+
 ## Voice (ElevenLabs): not changed here
 The provider rule lives in `workers/activities/voice.py` (`ELEVENLABS_COMMERCIAL`); there is no per-video field. To use ElevenLabs set
 `ELEVENLABS_COMMERCIAL=1` in the Python worker's environment and restart the worker (no backend restart).

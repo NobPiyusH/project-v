@@ -161,6 +161,8 @@ class VideoLanesTest {
 
         var req = s.clipRequest(video, VideoStage.DRAFT, null);
         assertEquals("pod", req.provider());
+        assertEquals(1280, req.jobs().getFirst().width(), "16:9 on the pod: 720p-class drafts");
+        assertEquals(720, req.jobs().getFirst().height());
         assertEquals("http://worker:tok@pod:8000", req.gpuUrl());
         assertEquals(1, req.containers());
         assertEquals(0, new BigDecimal("58.50").compareTo(req.estimateInr()));
@@ -170,6 +172,7 @@ class VideoLanesTest {
         assertEquals(0, s.estimate(video, VideoStage.FINAL, null).clips());
         // default (no VideoGpu): the Modal Wan request, no pod
         assertNull(stage(null).clipRequest(video, VideoStage.DRAFT, null).gpuUrl());
+        assertEquals(832, stage(null).clipRequest(video, VideoStage.DRAFT, null).jobs().getFirst().width(), "default route unchanged");
     }
 
     @Test

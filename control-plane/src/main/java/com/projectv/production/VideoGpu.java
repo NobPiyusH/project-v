@@ -73,8 +73,15 @@ public class VideoGpu {
 
     /** Pod seconds for these clips (config time per 81 frames; the pod start-up only when no pod is open). */
     public double clipSeconds(UUID videoId, List<ClipJob> jobs) {
-        return gpu.clipSeconds(videoId, jobs.stream().mapToInt(ClipJob::numFrames).sum());
+        // The configured seconds per 81 frames were measured at 480x832: scale up for larger clips so 720p is not under-estimated.
+        double equivalentFrames = jobs.stream().mapToDouble(j -> j.numFrames() * Math.max(1.0, Math.pow((double) j.width() * j.height() / REFERENCE_PIXELS, PIXEL_EXPONENT))).sum();
+        return gpu.clipSeconds(videoId, (int) Math.ceil(equivalentFrames));
     }
+
+    /** 480x832, the size the pod's seconds-per-81-frames figure was measured at (Dream Shorts). Linear scaling is an estimate. */
+    static final double REFERENCE_PIXELS = 480.0 * 832.0;
+    /** Modal H100 measured 30 s (480p) vs 133 s (720p) per 81 frames (config wanSecondsPer81Frames): 2.3x the pixels took 4.4x the time. Not measured on a pod. */
+    static final double PIXEL_EXPONENT = 1.75;
 
     public double pictureSeconds(UUID videoId, int pictures) {
         return gpu.pictureSeconds(videoId, pictures);

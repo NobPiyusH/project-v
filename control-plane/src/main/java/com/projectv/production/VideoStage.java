@@ -262,6 +262,12 @@ public class VideoStage extends StageSupport {
 
     static final int DIAGRAM_FPS = 24;
 
+    /** Diagram render size (projectv.video.diagram-width/height; 2560x1440 for a 2K delivery). Default unchanged: 1920x1080. */
+    @Value("${projectv.video.diagram-width:1920}")
+    private int diagramWidth = 1920;
+    @Value("${projectv.video.diagram-height:1080}")
+    private int diagramHeight = 1080;
+
     /**
      * Diagram-lane shots (the Director's lane = diagram): the job's prompt is the shot's scene spec (JSON) and mode "diagram";
      * the media worker draws it with Manim (workers/diagram). Drafts only: a drawn clip is final quality, so nothing is
@@ -284,7 +290,7 @@ public class VideoStage extends StageSupport {
             double sec = Math.max(5, Math.min(12, num(s.get("duration_target_sec"))));
             Object spec = p.get("diagramSpec");
             out.add(new ClipJob(id, ((Number) s.get("ord")).intValue() + 1, ((Number) s.get("draft_takes")).intValue() + 1, kind,
-                    "diagram", null, spec == null ? "{}" : json.writeValueAsString(spec), 1920, 1080,
+                    "diagram", null, spec == null ? "{}" : json.writeValueAsString(spec), diagramWidth, diagramHeight,
                     (int) Math.round(sec * DIAGRAM_FPS), Math.abs((long) id.hashCode())));
         }
         return out;
@@ -301,6 +307,10 @@ public class VideoStage extends StageSupport {
         boolean draft = DRAFT.equals(kind);
         int longSide = draft ? 832 : 1280;
         int shortSide = draft ? 480 : 720;
+        if (!vertical && !useOmni && onBroker(kind)) {
+            longSide = 1280; // 16:9 on the rented pod: 720p-class drafts too (the pod worker's limit is 1280x720); 9:16 and Dream keep 480x832
+            shortSide = 720;
+        }
         Set<String> wanted = only == null ? null : new HashSet<>(only.stream().map(UUID::toString).toList());
         List<ClipJob> jobs = new ArrayList<>();
         for (Map<String, Object> s : clipShots(videoId)) {

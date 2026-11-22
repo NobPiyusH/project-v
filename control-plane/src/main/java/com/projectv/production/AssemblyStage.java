@@ -28,6 +28,10 @@ import java.util.UUID;
 @Component
 public class AssemblyStage extends StageSupport {
 
+    /** projectv.video.output-height: 0 = 1080p master (default); 1440 = 2560x1440 (16:9). See docs/video-lanes.md. */
+    @org.springframework.beans.factory.annotation.Value("${projectv.video.output-height:0}")
+    private int outputHeight = 0;
+
     public AssemblyStage(ProductionDeps d) {
         super(d);
     }
@@ -109,7 +113,7 @@ public class AssemblyStage extends StageSupport {
                         SELECT a.uri_hot FROM music_cue m JOIN asset a ON a.id = m.asset_id WHERE m.video_id = :v
                         """).param("v", videoId).query(String.class).optional().orElse(null);
         return new AssemblyRequest(videoId.toString(), plan.title(), plan.aspectRatio(), plan.language(),
-                !"none".equals(plan.narration()), shots, narration, musicUri, round(end));
+                !"none".equals(plan.narration()), shots, narration, musicUri, round(end), outputHeight);
     }
 
     @Transactional

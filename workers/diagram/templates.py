@@ -1,6 +1,6 @@
 """Four ready diagram scenes for "How a television works" (also the worked examples the spec writer's prompt shows).
 
-python -m workers.diagram.templates OUT_DIR   renders every template to OUT_DIR/<name>.mp4 (+ <name>.json)
+python -m workers.diagram.templates OUT_DIR [W H]   renders (default 2560x1440) every template to OUT_DIR/<name>.mp4 (+ <name>.json)
 """
 
 from __future__ import annotations
@@ -143,6 +143,7 @@ def main(argv: list[str]) -> int:
     from workers.diagram.spec import validate_spec
 
     out = Path(argv[0] if argv else "reports/tv-explainer/diagram-samples")
+    w, h = (int(argv[1]), int(argv[2])) if len(argv) >= 3 else (2560, 1440)  # the television video is delivered in 2K
     out.mkdir(parents=True, exist_ok=True)
     for name, build in TEMPLATES.items():
         spec = build()
@@ -151,7 +152,7 @@ def main(argv: list[str]) -> int:
             print(name, "INVALID", errs)
             return 1
         (out / f"{name}.json").write_text(json.dumps(spec, indent=1), encoding="utf-8")
-        render_to_file(spec, out / f"{name}.mp4")
+        render_to_file(spec, out / f"{name}.mp4", width=w, height=h)
         print("rendered", name)
     return 0
 

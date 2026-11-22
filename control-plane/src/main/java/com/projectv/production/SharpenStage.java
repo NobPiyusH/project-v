@@ -54,7 +54,7 @@ public class SharpenStage extends StageSupport {
     List<SmoothJob> jobs(UUID videoId) {
         List<SmoothJob> jobs = new ArrayList<>();
         for (Map<String, Object> s : jdbc.sql("""
-                        SELECT s.id, s.ord, s.footage_asset_id, c.id AS chosen, c.uri_hot AS chosen_uri, c.fps AS chosen_fps,
+                        SELECT s.id, s.ord, s.footage_asset_id, s.prompt_json::text AS prompt_json, c.id AS chosen, c.uri_hot AS chosen_uri, c.fps AS chosen_fps,
                                sm.id AS smooth, sm.uri_hot AS smooth_uri, sm.derived_from AS smoothed_from,
                                sh.derived_from AS sharpened_from
                         FROM shot s JOIN scene sc ON sc.id = s.scene_id
@@ -64,8 +64,8 @@ public class SharpenStage extends StageSupport {
                         WHERE sc.video_id = :v ORDER BY s.ord
                         """).param("v", videoId).query().listOfRows()) {
             Object chosen = s.get("chosen");
-            if (s.get("footage_asset_id") != null || chosen == null || s.get("chosen_uri") == null) {
-                continue; // real footage is left as it is; no clip yet = nothing to sharpen
+            if (s.get("footage_asset_id") != null || diagramShot(s) || chosen == null || s.get("chosen_uri") == null) {
+                continue; // real footage and drawn diagrams (native vector render) are left as they are; no clip yet = nothing to sharpen
             }
             boolean smoothFresh = s.get("smooth") != null && chosen.equals(s.get("smoothed_from")) && s.get("smooth_uri") != null;
             Object source = smoothFresh ? s.get("smooth") : chosen;

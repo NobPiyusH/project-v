@@ -29,14 +29,14 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 FPS, WIDTH, HEIGHT = 24, 1920, 1080
 
 
-def render_to_file(spec: dict, out_path: str | Path, timeout: int = 900) -> Path:
+def render_to_file(spec: dict, out_path: str | Path, timeout: int = 900, width: int = WIDTH, height: int = HEIGHT) -> Path:
     """Renders in a subprocess; raises RuntimeError with the renderer's last output on failure."""
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="diagram-") as tmp:
         spec_file = Path(tmp) / "spec.json"
         spec_file.write_text(json.dumps(spec), encoding="utf-8")
-        p = subprocess.run([sys.executable, "-m", "workers.diagram.render", str(spec_file), str(out_path)],
+        p = subprocess.run([sys.executable, "-m", "workers.diagram.render", str(spec_file), str(out_path), str(width), str(height)],
                            cwd=REPO_ROOT, capture_output=True, text=True, timeout=timeout,
                            env={**__import__("os").environ, "PYTHONPATH": str(REPO_ROOT)})
     if p.returncode != 0 or not out_path.exists():
@@ -45,7 +45,7 @@ def render_to_file(spec: dict, out_path: str | Path, timeout: int = 900) -> Path
 
 
 def render_or_fallback(spec, out_path: str | Path, title: str = "", lines: list[str] | None = None,
-                       duration: float = 6.0) -> dict:
+                       duration: float = 6.0, width: int = WIDTH, height: int = HEIGHT) -> dict:
     """Validates and renders the spec; an invalid spec or a failed render becomes the animated text card. Returns
     {"path", "fallback": bool, "reason": str|None}."""
     reason = None
@@ -54,13 +54,13 @@ def render_or_fallback(spec, out_path: str | Path, title: str = "", lines: list[
         reason = "invalid spec: " + "; ".join(errs[:3])
     else:
         try:
-            render_to_file(spec, out_path)
+            render_to_file(spec, out_path, width=width, height=height)
             return {"path": str(out_path), "fallback": False, "reason": None}
         except Exception as e:  # noqa: BLE001 - never lose the shot over a drawing problem
             reason = f"render failed: {e}"[:400]
     d = spec.get("duration", duration) if isinstance(spec, dict) and isinstance(spec.get("duration"), (int, float)) else duration
     card = fallback_spec(title or (spec.get("title") if isinstance(spec, dict) else "") or "", lines, d)
-    render_to_file(card, out_path)
+    render_to_file(card, out_path, width=width, height=height)
     return {"path": str(out_path), "fallback": True, "reason": reason}
 
 
@@ -363,15 +363,19 @@ def render_in_process(spec: dict, out_path: str | Path, fps: int = FPS, width: i
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) != 2:
-        print("usage: python -m workers.diagram.render spec.json out.mp4", file=sys.stderr)
+    if len(argv) not in (2, 4):
+        print("usage: python -m workers.diagram.render spec.json out.mp4 [width height]", file=sys.stderr)
         return 2
     spec = json.loads(Path(argv[0]).read_text(encoding="utf-8"))
     errs = validate_spec(spec)
     if errs:
         print("invalid spec: " + "; ".join(errs), file=sys.stderr)
         return 3
-    render_in_process(spec, argv[1])
+    w, h = (int(argv[2]), int(argv[3])) if len(argv) == 4 else (WIDTH, HEIGHT)
+    if w % 2 or h % 2 or not (640 <= w <= 3840) or not (360 <= h <= 2160):
+        print(f"bad size {w}x{h}", file=sys.stderr)
+        return 2
+    render_in_process(spec, argv[1], width=w, height=h)
     return 0
 
 

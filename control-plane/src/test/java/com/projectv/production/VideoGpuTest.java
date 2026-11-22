@@ -31,6 +31,18 @@ class VideoGpuTest {
     }
 
     @Test
+    void clipSecondsScaleWithPixelsAgainstTheReferenceSize() {
+        DreamGpu dream = Mockito.mock(DreamGpu.class);
+        VideoGpu g = new VideoGpu(dream, "broker", "omni", "", 5);
+        var small = new com.projectv.media.MediaTypes.ClipJob("s", 1, 1, "draft", "fast", "u", "p", 480, 832, 81, 1L);
+        var big = new com.projectv.media.MediaTypes.ClipJob("s", 1, 1, "draft", "fast", "u", "p", 1280, 720, 81, 1L);
+        g.clipSeconds(V, java.util.List.of(small));
+        verify(dream).clipSeconds(V, 81);
+        g.clipSeconds(V, java.util.List.of(big));
+        verify(dream).clipSeconds(V, (int) Math.ceil(81 * Math.pow(1280.0 * 720 / (480.0 * 832), 1.75))); // ~4.3x
+    }
+
+    @Test
     void brokerRouteNeedsTheBrokerOn() {
         DreamGpu dream = Mockito.mock(DreamGpu.class);
         when(dream.enabled()).thenReturn(false);

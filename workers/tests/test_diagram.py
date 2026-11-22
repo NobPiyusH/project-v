@@ -48,7 +48,7 @@ def test_flow_only_on_lines():
 
 def test_invalid_spec_falls_back_to_text_card(monkeypatch, tmp_path):
     rendered = []
-    monkeypatch.setattr(R, "render_to_file", lambda spec, out, timeout=900: rendered.append(spec))
+    monkeypatch.setattr(R, "render_to_file", lambda spec, out, timeout=900, **kw: rendered.append(spec))
     res = R.render_or_fallback({"duration": 6, "elements": []}, tmp_path / "o.mp4", title="CRT", lines=["a"])
     assert res["fallback"] and "invalid spec" in res["reason"]
     assert rendered[0]["fallback"] and rendered[0]["title"] == "CRT"
@@ -57,7 +57,7 @@ def test_invalid_spec_falls_back_to_text_card(monkeypatch, tmp_path):
 def test_failed_render_falls_back_once(monkeypatch, tmp_path):
     calls = []
 
-    def fake(spec, out, timeout=900):
+    def fake(spec, out, timeout=900, **kw):
         calls.append(spec)
         if not spec.get("fallback"):
             raise RuntimeError("manim exploded")
@@ -71,7 +71,7 @@ def test_clips_activity_renders_diagrams_and_passes_rest(monkeypatch):
     monkeypatch.setattr(C, "_post", lambda url, body: posts.append(body))
     monkeypatch.setattr(C, "_stop_requested", lambda base, vid: False)
     monkeypatch.setattr(C, "put_file", lambda key, path, ct: saved.setdefault(key, f"s3://b/{key}"))
-    monkeypatch.setattr(R, "render_or_fallback", lambda spec, out, title="", duration=6.0, lines=None: (out.write_bytes(b"mp4"),
+    monkeypatch.setattr(R, "render_or_fallback", lambda spec, out, title="", duration=6.0, lines=None, **kw: (out.write_bytes(b"mp4"),
                                                                                             {"fallback": False, "reason": None})[1])
     monkeypatch.setattr(C, "_generate_clips", lambda req: passed.setdefault("req", req) and
                         {"clips": [{"shotId": "x", "uri": "s3://b/x"}], "containers": 1, "stopped": False})
@@ -87,7 +87,7 @@ def test_diagram_only_batch_never_touches_a_gpu(monkeypatch):
     monkeypatch.setattr(C, "_post", lambda url, body: None)
     monkeypatch.setattr(C, "_stop_requested", lambda base, vid: False)
     monkeypatch.setattr(C, "put_file", lambda key, path, ct: f"s3://b/{key}")
-    monkeypatch.setattr(R, "render_or_fallback", lambda spec, out, title="", duration=6.0, lines=None: (out.write_bytes(b"m"),
+    monkeypatch.setattr(R, "render_or_fallback", lambda spec, out, title="", duration=6.0, lines=None, **kw: (out.write_bytes(b"m"),
                                                                                             {"fallback": True, "reason": "bad"})[1])
     monkeypatch.setattr(C, "_generate_clips", lambda req: pytest.fail("no GPU/provider call for diagram-only batches"))
     r = C.generate_clips({"videoId": "v", "jobs": [{**JOB, "prompt": "not json"}]})
@@ -105,3 +105,10 @@ def test_real_render_is_1080p_24fps(tmp_path):
     st = json.loads(probe.stdout)["streams"][0]
     assert (st["width"], st["height"], st["r_frame_rate"], st["pix_fmt"]) == (1920, 1080, "24/1", "yuv420p")
     assert abs(float(st["duration"]) - 5.0) < 0.2
+
+
+def test_diagram_size_is_passed_to_the_renderer(monkeypatch, tmp_path):
+    seen = {}
+    monkeypatch.setattr(R, "render_to_file", lambda spec, out, timeout=900, width=0, height=0: seen.update(w=width, h=height))
+    R.render_or_fallback(TEMPLATES["rgb-colour-mixing"](), tmp_path / "o.mp4", width=2560, height=1440)
+    assert (seen["w"], seen["h"]) == (2560, 1440)

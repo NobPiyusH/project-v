@@ -509,6 +509,7 @@ def _diagram_one(video_id: str, j: dict) -> dict:
         with workdir("diagram") as tmp:
             out = Path(tmp) / "diagram.mp4"
             res = render_or_fallback(spec, out, title=title or "", duration=int(j["numFrames"]) / 24.0,
+                                     width=int(j.get("width") or 1920), height=int(j.get("height") or 1080),
                                     lines=(spec or {}).get("lines") if isinstance(spec, dict) else None)
             uri = put_file(clip_key(video_id, j), out, "video/mp4")
         if res["fallback"]:

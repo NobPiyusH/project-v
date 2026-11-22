@@ -343,8 +343,14 @@ public final class MediaTypes {
     public record AssemblyLine(String uri, double startSec, double tempo, String text, double durationSec) {
     }
 
+    /** @param outputHeight 0 = the default 1080p master; 1440 = 2560x1440 (16:9 only); 2160 = 3840x2160 */
     public record AssemblyRequest(String videoId, String title, String aspectRatio, String language, boolean captions,
-                                  List<AssemblyShot> shots, List<AssemblyLine> narration, String musicUri, double totalSec) {
+                                  List<AssemblyShot> shots, List<AssemblyLine> narration, String musicUri, double totalSec,
+                                  int outputHeight) {
+        public AssemblyRequest(String videoId, String title, String aspectRatio, String language, boolean captions,
+                               List<AssemblyShot> shots, List<AssemblyLine> narration, String musicUri, double totalSec) {
+            this(videoId, title, aspectRatio, language, captions, shots, narration, musicUri, totalSec, 0);
+        }
     }
 
     /** @param fits per shot: which clip, its length, how it was fitted (trimmed / slowed) */

@@ -11,6 +11,7 @@ the stage before rendering (CLAUDE.md rule 10).
 from __future__ import annotations
 
 import re
+import subprocess
 import zipfile
 from pathlib import Path
 
@@ -23,6 +24,9 @@ from workers.common import beat as _beat, download, drawtext_escape as _esc, log
 
 FPS = 24  # cinematic; part 2a smooths Wan's 16 fps clips to a true 24 fps with RIFE
 SIZES = {"16:9": (1920, 1080), "9:16": (1080, 1920), "1:1": (1080, 1080), "4:5": (1080, 1350)}
+# 16:9 master sizes by requested height (projectv.video.output-height): 2K and 4K deliveries
+SIZES_16_9 = {1080: (1920, 1080), 1440: (2560, 1440), 2160: (3840, 2160)}
+SHARPEN = "unsharp=5:5:0.5:5:5:0.0"  # light luma sharpening after a Lanczos upscale (no chroma, no halos)
 FONT = "C\\:/Windows/Fonts/segoeui.ttf"
 FONTS_DIR = "C\\:/Windows/Fonts"
 MAX_STRETCH = 1.6  # slowing a clip more than this looks like slow motion: reported as a warning
@@ -126,13 +130,29 @@ def fit_plan(clip_sec: float, slot_sec: float) -> tuple[float, str]:
     return f, "slowed %.2fx%s" % (f, " (looks slow-motion)" if f > MAX_STRETCH else "")
 
 
+def media_height(path: Path) -> int:
+    from workers.common import ffprobe_bin
+
+    r = subprocess.run([ffprobe_bin(), "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=height", "-of",
+                        "default=nw=1:nk=1", str(path)], capture_output=True, text=True, check=True)
+    return int(r.stdout.strip() or 0)
+
+
+def scale_chain(src_h: int, w: int, h: int) -> list[str]:
+    """Mixed sources onto one master size: every clip is scaled to fill (Lanczos) and cropped; a clip that has to be enlarged
+    (e.g. a 720p AI clip into a 1440p master) also gets light sharpening, a native-size clip (a diagram) is left untouched."""
+    chain = [f"scale={w}:{h}:force_original_aspect_ratio=increase:flags=lanczos", f"crop={w}:{h}"]
+    if src_h and src_h < h * 0.95:
+        chain.append(SHARPEN)
+    return chain
+
+
 def _shot_clip(shot: dict, src: Path, out: Path, w: int, h: int) -> dict:
     clip_sec = media_duration(src)
     slot = float(shot["durationSec"])
     factor, note = fit_plan(clip_sec, slot)
     vf = [f"setpts={factor:.5f}*PTS" if factor != 1.0 else "setpts=PTS",
-          f"scale={w}:{h}:force_original_aspect_ratio=increase:flags=lanczos", f"crop={w}:{h}", f"fps={FPS}",
-          "format=yuv420p"]
+          *scale_chain(media_height(src), w, h), f"fps={FPS}", "format=yuv420p"]
     if shot.get("overlayText"):
         vf.append(f"drawtext=fontfile='{FONT}':text='{_esc(shot['overlayText'])}':expansion=none:x=(w-text_w)/2:y=h*0.12:"
                   f"fontsize={round(h * 0.035)}:fontcolor=white:shadowcolor=black@0.7:shadowx=2:shadowy=2")
@@ -197,6 +217,8 @@ def assemble_video(req: dict) -> dict:
              narration:[{uri, startSec, tempo, text, durationSec}], musicUri, totalSec}
     -> {masterUri, packageUri, srtUri, durationSec, width, height, fps, fits:[...], captionWords, wordTimings}"""
     w, h = SIZES.get(req.get("aspectRatio") or "16:9", SIZES["16:9"])
+    if (req.get("aspectRatio") or "16:9") == "16:9" and int(req.get("outputHeight") or 0) in SIZES_16_9:
+        w, h = SIZES_16_9[int(req["outputHeight"])]
     vertical = h > w
     shots = sorted(req["shots"], key=lambda s: s["startSec"])
     with workdir("assemble") as tmp:
