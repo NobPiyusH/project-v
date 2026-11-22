@@ -193,7 +193,16 @@ export interface Budget {
   modal?: { meteredUsd: number; creditsUsedUsd: number; billedUsd: number; freeCreditUsd: number; creditLeftUsd: number; fxInrPerUsd: number; fetchedAt: string }
 }
 
+/** GPU broker: per-provider readiness (preflight quote, canary proof, monthly cap) and the pod leases the watchdog tracks. */
+export interface GpuBrokerProvider {
+  provider: string; configured: boolean; preflightOk: boolean | null; preflightAt: string | null; preflightNote: string | null
+  proven: boolean; provenNote: string | null; monthlyCapUsd: number; inAutoSearch: boolean
+}
+export interface GpuLease { pod_id: string; provider: string; name: string; purpose: string; created_at: string; heartbeat_at: string; released_at: string | null }
+
 export const api = {
+  gpuBrokerProviders: () => call<GpuBrokerProvider[]>('GET', '/gpu/broker/providers'),
+  gpuWatchdog: () => call<{ leases: GpuLease[] }>('GET', '/gpu/watchdog'),
   gpuPods: () => call<GpuPods>('GET', '/gpu/pods'),
   gpuLogs: (id: string, since: string | null) =>
     call<GpuLogPage>('GET', `/gpu/pods/${encodeURIComponent(id)}/logs${since ? `?since=${encodeURIComponent(since)}` : '?tail=150'}`),

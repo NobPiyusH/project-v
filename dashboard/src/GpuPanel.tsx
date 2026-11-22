@@ -54,10 +54,10 @@ function LogView({ podId }: { podId: string }) {
 }
 
 /**
- * Side panel with the live log of a RunPod pod. It only talks to the backend while it is open: the pod list every
- * 10 s and the log every 4 s (the backend does one bounded read per call), so a closed panel costs nothing.
+ * The pod list and live log. It only talks to the backend while mounted: the pod list every 10 s and the log every 4 s
+ * (the backend does one bounded read per call), so a closed panel costs nothing.
  */
-export function GpuPanel({ onClose }: { onClose: () => void }) {
+export function GpuLogs() {
   const [pods, setPods] = useState<GpuPod[] | null>(null)
   const [note, setNote] = useState<string | null>(null)
   const [picked, setPicked] = useState<string | null>(null)
@@ -82,12 +82,7 @@ export function GpuPanel({ onClose }: { onClose: () => void }) {
   // the owner's pick wins while that pod still exists; otherwise the first running pod
   const pod = pods?.find((p) => p.id === picked) ?? pods?.find((p) => p.status === 'RUNNING') ?? pods?.[0]
   return (
-    <aside className="gpu-panel" aria-label="GPU logs">
-      <div className="gpu-head">
-        <strong>GPU logs</strong>
-        <span className="spacer" />
-        <button className="icon-btn" onClick={onClose} aria-label="Close GPU logs">Close</button>
-      </div>
+    <>
       {note && <p className="small" style={{ color: 'var(--bad)' }}>{note}</p>}
       {pods && pods.length === 0 && !note && <p className="muted small">No pods on the RunPod account. Nothing is billing.</p>}
       {pods && pods.length > 0 && (
@@ -104,6 +99,20 @@ export function GpuPanel({ onClose }: { onClose: () => void }) {
         </div>
       )}
       {pod && <LogView key={pod.id} podId={pod.id} />}
+    </>
+  )
+}
+
+/** Classic side panel (opened from the old top bar). */
+export function GpuPanel({ onClose }: { onClose: () => void }) {
+  return (
+    <aside className="gpu-panel" aria-label="GPU logs">
+      <div className="gpu-head">
+        <strong>GPU logs</strong>
+        <span className="spacer" />
+        <button className="icon-btn" onClick={onClose} aria-label="Close GPU logs">Close</button>
+      </div>
+      <GpuLogs />
     </aside>
   )
 }

@@ -228,7 +228,7 @@ export function VideoDetail({ id, stages }: { id: string; stages: StageInfo[] })
   )
 }
 
-function latestRuns(runs: StageRun[]): Record<string, StageRun> {
+export function latestRuns(runs: StageRun[]): Record<string, StageRun> {
   const out: Record<string, StageRun> = {}
   for (const r of runs) {
     const cur = out[r.stage]
@@ -237,7 +237,7 @@ function latestRuns(runs: StageRun[]): Record<string, StageRun> {
   return out
 }
 
-function StageRow(props: {
+export function StageRow(props: {
   index: number; stage: StageInfo; run?: StageRun; mode: Mode; attempts: number; locked: boolean
   inspection?: Inspection
   stages: StageInfo[]; canRedo: boolean; onRedo: () => void
@@ -325,7 +325,7 @@ const VERDICT: Record<Inspection['verdict'], [string, string]> = {
 }
 
 /** Second-level check results for a stage: what the Inspector looked at and what it found. */
-function InspectorPanel({ report }: { report: Inspection }) {
+export function InspectorPanel({ report }: { report: Inspection }) {
   const [open, setOpen] = useState(report.verdict === 'FAIL')
   const [cls, label] = VERDICT[report.verdict]
   const issues = report.findings.filter((f) => f.severity !== 'INFO')
@@ -351,7 +351,7 @@ function InspectorPanel({ report }: { report: Inspection }) {
   )
 }
 
-function PlanCard({ video }: { video: Detail }) {
+export function PlanCard({ video }: { video: Detail }) {
   if (!video.plan_json) {
     return <section className="card"><h2>Plan</h2><p className="muted">The planner is working…</p></section>
   }
@@ -393,7 +393,7 @@ const WASTED = new Set(['FAILED', 'INSPECTION_FAILED', 'REJECTED'])
  * Where a video's time and money went, per stage: time spent (incl. waiting for your approval), time lost on failed
  * or redone attempts, and cost. The three slowest stages are highlighted (efficiency pass, 18 Nov 2026).
  */
-function TimeCostCard({ video, stages }: { video: Detail; stages: StageInfo[] }) {
+export function TimeCostCard({ video, stages }: { video: Detail; stages: StageInfo[] }) {
   const rows = new Map<string, { secs: number; wasted: number; attempts: number; inr: number }>()
   const row = (s: string) => rows.get(s) ?? rows.set(s, { secs: 0, wasted: 0, attempts: 0, inr: 0 }).get(s)!
   for (const r of video.stageRuns) {
@@ -446,7 +446,7 @@ function TimeCostCard({ video, stages }: { video: Detail; stages: StageInfo[] })
   )
 }
 
-function CostsCard({ video }: { video: Detail }) {
+export function CostsCard({ video }: { video: Detail }) {
   return (
     <section className="card">
       <div className="card-head"><h2>Cost ledger</h2><span className="pill">₹{Number(video.spent_inr).toFixed(2)} spent</span></div>
