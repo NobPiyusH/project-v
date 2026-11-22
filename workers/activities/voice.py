@@ -17,6 +17,8 @@ import shutil
 import subprocess
 import tempfile
 import threading
+import time
+import urllib.error
 import urllib.request
 import wave
 from pathlib import Path
@@ -151,6 +153,7 @@ def _speak(req: dict, line: dict) -> dict:
 # - a full narration that fails part-way on ElevenLabs is re-voiced entirely with Gemini.
 
 ELEVEN_URL = "https://api.elevenlabs.io"
+ELEVEN_RETRIES = 4  # tries per line when ElevenLabs answers 429
 ELEVEN_TAKES = 2
 ELEVEN_HEADROOM = 1.3
 
@@ -229,10 +232,19 @@ def _eleven_tts(cfg: dict, text: str, language: str | None) -> tuple[bytes, int]
     request = urllib.request.Request(
         f"{ELEVEN_URL}/v1/text-to-speech/{cfg['voiceId']}?output_format=pcm_24000", json.dumps(body).encode(),
         {"xi-api-key": cfg["key"], "Content-Type": "application/json", "User-Agent": "projectv"})
-    with urllib.request.urlopen(request, timeout=120) as r:
-        pcm = r.read()
-        billed = int(r.headers.get("character-cost") or len(text))
-    return pcm_to_wav(pcm, rate=24000), billed
+    for attempt in range(1, ELEVEN_RETRIES + 1):
+        try:
+            with urllib.request.urlopen(request, timeout=120) as r:
+                pcm = r.read()
+                billed = int(r.headers.get("character-cost") or len(text))
+            return pcm_to_wav(pcm, rate=24000), billed
+        except urllib.error.HTTPError as e:
+            if e.code != 429 or attempt == ELEVEN_RETRIES:
+                raise
+            wait = min(float(e.headers.get("Retry-After") or 2 ** attempt), 30.0)  # busy, not broken: back off and retry the line
+            log.warning("ElevenLabs 429 (too many requests); retry %d/%d in %.0f s", attempt, ELEVEN_RETRIES - 1, wait)
+            time.sleep(wait)
+    raise RuntimeError("unreachable")
 
 
 def _speak_eleven(req: dict, cfg: dict, line: dict) -> dict:
@@ -396,9 +408,12 @@ def _to_wav24(data: bytes) -> bytes:
         return dst.read_bytes()
 
 
-def _run(req: dict, speak) -> list[dict]:
+ELEVEN_CONCURRENCY = 2  # ElevenLabs' free plan allows 2 concurrent requests: 3 workers got HTTP 429 and the whole video fell back to Gemini (22 Nov 2026)
+
+
+def _run(req: dict, speak, workers: int = 3) -> list[dict]:
     results = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
         futures = [pool.submit(speak, line) for line in req["lines"]]
         for f in concurrent.futures.as_completed(futures):
             results.append(f.result())
@@ -434,7 +449,7 @@ def synthesize_narration(req: dict) -> dict:
             provider = "gemini"
     if provider == "elevenlabs":
         try:
-            lines = _run(req, lambda line: _speak_eleven(req, cfg, line))
+            lines = _run(req, lambda line: _speak_eleven(req, cfg, line), workers=ELEVEN_CONCURRENCY)
             chars = sum(l.pop("characters", 0) for l in lines)
             log.info("ElevenLabs voiced %d lines (%d characters; %s left before)", len(lines), chars, remaining)
             return {"lines": lines, "model": f"elevenlabs:{cfg['model']}", "voiceName": cfg["voiceName"],

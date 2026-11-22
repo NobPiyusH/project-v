@@ -85,3 +85,34 @@ def test_line_delivery_goes_into_the_directors_notes_not_the_transcript(monkeypa
     first = seen[0]
     assert "This line: slow, tender" in first.split("### TRANSCRIPT")[0]
     assert first.split("### TRANSCRIPT (read only this)\n")[1] == "Protect the dark."
+
+
+def test_elevenlabs_429_is_retried_and_uses_two_workers(monkeypatch):
+    import io
+    import urllib.error
+
+    calls = {"n": 0}
+
+    class _Resp:
+        headers = {"character-cost": "5"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            return b"\x00\x00" * 100
+
+    def fake_urlopen(request, timeout=0):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise urllib.error.HTTPError("u", 429, "Too Many Requests", {"Retry-After": "0"}, io.BytesIO(b""))
+        return _Resp()
+
+    monkeypatch.setattr(V.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(V.time, "sleep", lambda s: None)
+    wav, billed = V._eleven_tts({"key": "k", "voiceId": "v", "model": "m"}, "hello", None)
+    assert calls["n"] == 3 and billed == 5 and wav
+    assert V.ELEVEN_CONCURRENCY == 2
