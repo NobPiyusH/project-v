@@ -169,3 +169,50 @@ def fallback_spec(title: str, lines: list[str] | None = None, duration: float = 
         steps.append({"at": min(1.6 + i * 0.9, duration - 0.9), "dur": 0.7, "do": "show", "target": eid, "from": "up"})
     steps.append({"at": max(0.0, duration - 1.6), "dur": 1.2, "do": "pulse", "target": "rule"})
     return {"version": 1, "title": title, "duration": duration, "fallback": True, "elements": els, "steps": steps}
+
+# ------------------------------------------------------------------------------------------------- ambient motion
+
+AMBIENT_PULSE = ("box", "layer", "circle", "dots_grid", "particles", "rgb_mix", "callout")
+AMBIENT_FLOW = ("beam", "line", "arrow")
+TEXT_SCALE = 1.3          # on-screen words were too small at 2K: larger type (min 34, max 72)
+PULSE_PERIOD = 2.0        # seconds per gentle breathing cycle
+MAX_TOTAL_STEPS = 240
+
+
+def enrich_motion(spec: dict) -> dict:
+    """A copy of a valid spec in which nothing sits still: after an element has appeared it breathes (a small pulse
+    every PULSE_PERIOD seconds, staggered), and lines/arrows/beams carry travelling dots for the rest of the shot.
+    Text is made larger and something is visible at t=0 (no black opening). Deterministic; the Director's own steps are
+    kept as they are (22 Nov 2026: most diagram shots were frozen for most of their length)."""
+    import copy
+
+    out = copy.deepcopy(spec)
+    d = float(out["duration"])
+    els, steps = out["elements"], out.setdefault("steps", [])
+    for e in els:
+        if e.get("text"):
+            e["size"] = min(72, max(34, round(float(e.get("size", 26)) * TEXT_SCALE)))
+    appears = {s["target"] for s in steps if s.get("do") in ("show", "draw")}
+    if els and all(e["id"] in appears and not e.get("visible") for e in els):
+        first = next((e for e in els if e["type"] == "text"), els[0])
+        first["visible"] = True
+    ready: dict[str, float] = {}
+    for s in steps:
+        if s.get("do") in ("show", "draw"):
+            ready[s["target"]] = max(ready.get(s["target"], 0.0), float(s["at"]) + float(s["dur"]))
+    flowing = {s["target"] for s in steps if s.get("do") == "flow"}
+    extra: list[dict] = []
+    for i, e in enumerate(els):
+        t0 = min(ready.get(e["id"], 0.0) + 0.2, d - 1.0)
+        typ = e["type"]
+        if typ in AMBIENT_PULSE:
+            t = t0 + (i * 0.37) % 1.0
+            while d - t >= 0.8:
+                extra.append({"at": round(t, 3), "dur": round(min(PULSE_PERIOD, d - t), 3), "do": "pulse",
+                              "target": e["id"], "amount": 0.04})
+                t += PULSE_PERIOD
+        elif typ in AMBIENT_FLOW and e["id"] not in flowing and d - t0 >= 0.8:
+            extra.append({"at": round(t0, 3), "dur": round(d - t0, 3), "do": "flow", "target": e["id"], "count": 3,
+                          "loops": max(1, round((d - t0) / 2.2)), "r": 0.07, "color": e.get("color", "cyan")})
+    steps.extend(extra[: max(0, MAX_TOTAL_STEPS - len(steps))])
+    return out

@@ -112,3 +112,36 @@ def test_diagram_size_is_passed_to_the_renderer(monkeypatch, tmp_path):
     monkeypatch.setattr(R, "render_to_file", lambda spec, out, timeout=900, width=0, height=0: seen.update(w=width, h=height))
     R.render_or_fallback(TEMPLATES["rgb-colour-mixing"](), tmp_path / "o.mp4", width=2560, height=1440)
     assert (seen["w"], seen["h"]) == (2560, 1440)
+
+
+def _active(steps, t):
+    return any(s["at"] <= t < s["at"] + s["dur"] for s in steps)
+
+
+def test_enrich_motion_keeps_the_directors_steps_and_leaves_no_second_still():
+    from workers.diagram.spec import enrich_motion, validate_spec
+
+    spec = {"version": 1, "title": "t", "duration": 8.0,
+            "elements": [{"id": "gun", "type": "box", "x": -3, "y": 0, "w": 2, "h": 1, "text": "Gun"},
+                         {"id": "beam", "type": "beam", "x1": -2, "y1": 0, "x2": 3, "y2": 0},
+                         {"id": "head", "type": "text", "x": 0, "y": 3, "text": "Title"}],
+            "steps": [{"at": 0.2, "dur": 1.0, "do": "show", "target": "gun"}]}
+    assert validate_spec(spec) == []
+    out = enrich_motion(spec)
+    assert spec["steps"] == [{"at": 0.2, "dur": 1.0, "do": "show", "target": "gun"}]  # the input is not changed
+    assert out["steps"][0] == spec["steps"][0]  # the Director's step is kept first
+    assert any(s["do"] == "flow" and s["target"] == "beam" for s in out["steps"])
+    assert any(s["do"] == "pulse" and s["target"] == "gun" for s in out["steps"])
+    assert all(_active(out["steps"], t / 2) for t in range(1, 15)), "something must move every half second"
+    assert next(e for e in out["elements"] if e["id"] == "head")["size"] >= 34  # larger type
+    assert out["steps"] == enrich_motion(spec)["steps"]  # deterministic
+
+
+def test_enrich_motion_shows_something_at_the_start_when_everything_is_hidden():
+    from workers.diagram.spec import enrich_motion
+
+    spec = {"version": 1, "title": "t", "duration": 6.0,
+            "elements": [{"id": "a", "type": "text", "x": 0, "y": 1, "text": "A"}, {"id": "b", "type": "circle", "x": 0, "y": 0, "r": 1}],
+            "steps": [{"at": 1.0, "dur": 1.0, "do": "show", "target": "a"}, {"at": 2.0, "dur": 1.0, "do": "show", "target": "b"}]}
+    out = enrich_motion(spec)
+    assert any(e.get("visible") for e in out["elements"])

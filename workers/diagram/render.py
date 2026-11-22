@@ -20,7 +20,7 @@ import tempfile
 import zlib
 from pathlib import Path
 
-from workers.diagram.spec import PALETTE, color_hex, fallback_spec, validate_spec
+from workers.diagram.spec import PALETTE, color_hex, enrich_motion, fallback_spec, validate_spec
 
 import os
 
@@ -371,6 +371,8 @@ def main(argv: list[str]) -> int:
     if errs:
         print("invalid spec: " + "; ".join(errs), file=sys.stderr)
         return 3
+    if not spec.get("fallback") and os.environ.get("DIAGRAM_AMBIENT_MOTION", "1") != "0":
+        spec = enrich_motion(spec)  # nothing sits still; the Director's steps are kept
     w, h = (int(argv[2]), int(argv[3])) if len(argv) == 4 else (WIDTH, HEIGHT)
     if w % 2 or h % 2 or not (640 <= w <= 3840) or not (360 <= h <= 2160):
         print(f"bad size {w}x{h}", file=sys.stderr)
