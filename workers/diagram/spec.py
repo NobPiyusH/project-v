@@ -189,8 +189,8 @@ def enrich_motion(spec: dict) -> dict:
     out = copy.deepcopy(spec)
     d = float(out["duration"])
     els, steps = out["elements"], out.setdefault("steps", [])
-    for e in els:
-        if e.get("text"):
+    for e in els:  # only the title and the caption (top and bottom edge) grow; bigger labels overlapped each other
+        if e.get("text") and e["type"] == "text" and abs(float(e.get("y", 0))) >= 2.9:
             e["size"] = min(72, max(34, round(float(e.get("size", 26)) * TEXT_SCALE)))
     appears = {s["target"] for s in steps if s.get("do") in ("show", "draw")}
     if els and all(e["id"] in appears and not e.get("visible") for e in els):
