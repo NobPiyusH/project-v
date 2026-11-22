@@ -1,5 +1,6 @@
 package com.projectv.autopilot;
 
+import com.projectv.dream.DreamLooks;
 import com.projectv.agents.Llm;
 import com.projectv.autopilot.AutopilotTypes.PostKit;
 import com.projectv.dream.DreamService;
@@ -272,7 +273,7 @@ public class AutopilotService {
         String look = jdbc.sql("SELECT look FROM autopilot_idea WHERE idea = :i AND look IS NOT NULL LIMIT 1").param("i", idea)
                 .query(String.class).optional().orElse(s.look());
         if (look == null) { // rotate through the looks, one per day
-            List<String> looks = DreamService.LOOK_ORDER;
+            List<String> looks = DreamLooks.LOOK_ORDER;
             look = looks.get(((LocalDate) toLocalDate(run.get("run_date"))).getDayOfYear() % looks.size());
         }
         try {

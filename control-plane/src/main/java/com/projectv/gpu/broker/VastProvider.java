@@ -1,11 +1,13 @@
 package com.projectv.gpu.broker;
 
+import static com.projectv.gpu.broker.ProviderHttp.abbreviate;
+import static com.projectv.gpu.broker.ProviderHttp.str;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
-import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
@@ -19,7 +21,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.regex.Pattern;
 
 /**
  * Vast.ai adapter (REST v0, {@code https://console.vast.ai/api/v0}, bearer key). Vast hosts are other people's machines, so
@@ -45,7 +46,6 @@ public class VastProvider implements GpuProvider {
 
     private static final Logger log = LoggerFactory.getLogger(VastProvider.class);
     static final String LABEL_PREFIX = "projectv-";
-    private static final Pattern SAFE_ENV = Pattern.compile("[A-Za-z0-9+/=._:@-]*");
 
     private final VastConfig cfg;
     private final String baseUrl;
@@ -82,7 +82,7 @@ public class VastProvider implements GpuProvider {
                         @Value("${projectv.vast.session-key:}") String sessionKey,
                         @Value("${projectv.vast.totp-secret:}") String totpSecret) {
         this(cfg, baseUrl, apiKey, sessionKeySource(sessionKey, Path.of(System.getProperty("user.home"), ".config", "vastai", "vast_tfa_key")),
-                totpSecret, client(), cfg.pollSeconds() * 1000L);
+                totpSecret, ProviderHttp.client(30_000, ProviderHttp.USER_AGENT), cfg.pollSeconds() * 1000L);
     }
 
     VastProvider(VastConfig cfg, String baseUrl, String apiKey, java.util.function.Supplier<String> sessionKey, RestClient http, long pollMillis) {
@@ -120,13 +120,6 @@ public class VastProvider implements GpuProvider {
     }
 
     static final String SESSION_HELP = "Vast 2FA session expired: run `vastai tfa login --method-type totp -c <code>`";
-
-    private static RestClient client() {
-        SimpleClientHttpRequestFactory f = new SimpleClientHttpRequestFactory();
-        f.setConnectTimeout(10_000);
-        f.setReadTimeout(30_000);
-        return RestClient.builder().requestFactory(f).defaultHeader("User-Agent", "projectv-studio/1.0").build();
-    }
 
     @Override
     public String provider() {
@@ -482,7 +475,7 @@ public class VastProvider implements GpuProvider {
         StringBuilder env = new StringBuilder();
         if (req.env() != null) {
             for (Map.Entry<String, String> e : req.env().entrySet()) {
-                if (!SAFE_ENV.matcher(e.getKey()).matches() || e.getKey().isEmpty() || !SAFE_ENV.matcher(e.getValue()).matches()) {
+                if (!ProviderHttp.safeEnv(e.getKey(), e.getValue())) {
                     throw new IllegalArgumentException("env " + e.getKey() + " has characters that cannot go into Vast's env string");
                 }
                 env.append("-e ").append(e.getKey()).append('=').append(e.getValue()).append(' ');
@@ -662,15 +655,7 @@ public class VastProvider implements GpuProvider {
         }
     }
 
-    private static String abbreviate(String s) {
-        return s == null ? "" : s.length() > 200 ? s.substring(0, 200) : s;
-    }
-
     private static double num(Object o) {
         return o instanceof Number n ? n.doubleValue() : 0;
-    }
-
-    private static String str(Object o) {
-        return o == null ? "" : o.toString();
     }
 }

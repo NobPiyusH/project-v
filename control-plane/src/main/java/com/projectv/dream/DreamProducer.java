@@ -82,7 +82,7 @@ public class DreamProducer implements DreamProducerActivities {
         }
         UUID id = UUID.fromString(dreamId);
         Map<String, Object> d = dreams.dream(id);
-        if (DreamService.unfiltered(d)) {
+        if (DreamLooks.unfiltered(d)) {
             return null; // the Producer judges "feel-good, no people": not the owner's own, unfiltered prompt
         }
         List<Map<String, Object>> shots = dreams.shots(id);

@@ -157,7 +157,7 @@ public class DreamStudio {
     UUID create(NewDream req, Continuation cont) {
         // Unfiltered (owner, 20 Nov 2026): the prompt is used exactly as written, so nothing that rewrites or judges it is on:
         // no idea pack, Scout, hook title, path-choice end card, editing rules (music cut, ambience, pacing) or Producer.
-        boolean raw = DreamService.UNFILTERED.equals(req.look());
+        boolean raw = DreamLooks.UNFILTERED.equals(req.look());
         boolean seeded = !raw && req.ideaPack() != null && !req.ideaPack().isBlank() && req.ideaId() != null && !req.ideaId().isBlank();
         var seed = seeded ? DreamIdeaPacks.idea(req.ideaPack(), req.ideaId()) : java.util.Optional.<DreamIdeaPacks.Idea>empty();
         if (seeded && seed.isEmpty()) {
@@ -167,9 +167,9 @@ public class DreamStudio {
             throw new IllegalArgumentException("Type an idea first");
         }
         String ideaText = req.idea() == null || req.idea().isBlank() ? seed.get().concept() : req.idea().strip();
-        String look = req.look() != null && DreamService.LOOKS.containsKey(req.look()) ? req.look() : DreamService.LOOK_ORDER.getFirst();
+        String look = req.look() != null && DreamLooks.LOOKS.containsKey(req.look()) ? req.look() : DreamLooks.LOOK_ORDER.getFirst();
         if (seeded) { // the pack decides the look; the idea comes from the pack, so there is nothing for the Scout to research
-            look = DreamIdeaPacks.pack(req.ideaPack()).map(DreamIdeaPacks.Pack::look).filter(DreamService.LOOKS::containsKey).orElse(look);
+            look = DreamIdeaPacks.pack(req.ideaPack()).map(DreamIdeaPacks.Pack::look).filter(DreamLooks.LOOKS::containsKey).orElse(look);
         }
         boolean hookTitle = !raw && Boolean.TRUE.equals(req.hookTitle());
         String hookText = !hookTitle ? null : req.hookText() != null && !req.hookText().isBlank() ? req.hookText().strip()

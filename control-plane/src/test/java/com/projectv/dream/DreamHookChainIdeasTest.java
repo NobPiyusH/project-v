@@ -406,10 +406,10 @@ class DreamHookChainIdeasTest {
         assertEquals(1, jobs.size());
         assertEquals("a goalkeeper dives in the rain, anime style, a man is crying", jobs.getFirst().prompt(), "no look style, camera or 'no people' added");
         assertNull(jobs.getFirst().negative(), "no negative prompt added");
-        assertEquals(0, DreamService.look("unfiltered").dissolveSec(), "hard cuts");
-        assertEquals(1.0, DreamService.look("unfiltered").speed());
-        assertEquals(81, DreamService.frames(DreamService.look("unfiltered").shotSeconds()), "the longest Wan clip: 5 s per line of the script");
-        assertEquals("", DreamService.look("unfiltered").pictureStyle());
+        assertEquals(0, DreamLooks.look("unfiltered").dissolveSec(), "hard cuts");
+        assertEquals(1.0, DreamLooks.look("unfiltered").speed());
+        assertEquals(81, DreamLooks.frames(DreamLooks.look("unfiltered").shotSeconds()), "the longest Wan clip: 5 s per line of the script");
+        assertEquals("", DreamLooks.look("unfiltered").pictureStyle());
     }
 
     @Test
