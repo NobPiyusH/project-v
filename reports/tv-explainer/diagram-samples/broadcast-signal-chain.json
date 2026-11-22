@@ -1,0 +1,402 @@
+{
+ "version": 1,
+ "title": "Broadcast signal chain",
+ "duration": 11.0,
+ "elements": [
+  {
+   "id": "title",
+   "type": "text",
+   "x": 0,
+   "y": 3.5,
+   "text": "From studio to your living room",
+   "size": 42,
+   "color": "white"
+  },
+  {
+   "id": "cam",
+   "type": "box",
+   "x": -5.75,
+   "y": 0.3,
+   "w": 1.95,
+   "h": 1.2,
+   "text": "Camera",
+   "size": 21,
+   "color": "cyan"
+  },
+  {
+   "id": "cam_n",
+   "type": "text",
+   "x": -5.75,
+   "y": -1.2,
+   "text": "Light becomes\nan electric signal",
+   "size": 19,
+   "color": "muted"
+  },
+  {
+   "id": "enc",
+   "type": "box",
+   "x": -3.45,
+   "y": 0.3,
+   "w": 1.95,
+   "h": 1.2,
+   "text": "Encoder",
+   "size": 21,
+   "color": "blue"
+  },
+  {
+   "id": "enc_n",
+   "type": "text",
+   "x": -3.45,
+   "y": -1.2,
+   "text": "Picture and sound\nare compressed",
+   "size": 19,
+   "color": "muted"
+  },
+  {
+   "id": "a1",
+   "type": "arrow",
+   "x1": -4.75,
+   "y1": 0.3,
+   "x2": -4.45,
+   "y2": 0.3,
+   "color": "white",
+   "width": 4
+  },
+  {
+   "id": "tx",
+   "type": "box",
+   "x": -1.1500000000000004,
+   "y": 0.3,
+   "w": 1.95,
+   "h": 1.2,
+   "text": "Transmitter",
+   "size": 21,
+   "color": "violet"
+  },
+  {
+   "id": "tx_n",
+   "type": "text",
+   "x": -1.1500000000000004,
+   "y": -1.2,
+   "text": "Signal rides a\nradio wave",
+   "size": 19,
+   "color": "muted"
+  },
+  {
+   "id": "a2",
+   "type": "arrow",
+   "x1": -2.45,
+   "y1": 0.3,
+   "x2": -2.1500000000000004,
+   "y2": 0.3,
+   "color": "white",
+   "width": 4
+  },
+  {
+   "id": "ant",
+   "type": "box",
+   "x": 1.1499999999999995,
+   "y": 0.3,
+   "w": 1.95,
+   "h": 1.2,
+   "text": "Antenna",
+   "size": 21,
+   "color": "orange"
+  },
+  {
+   "id": "ant_n",
+   "type": "text",
+   "x": 1.1499999999999995,
+   "y": -1.2,
+   "text": "Wave crosses\nthe air",
+   "size": 19,
+   "color": "muted"
+  },
+  {
+   "id": "a3",
+   "type": "arrow",
+   "x1": -0.15000000000000058,
+   "y1": 0.3,
+   "x2": 0.14999999999999947,
+   "y2": 0.3,
+   "color": "white",
+   "width": 4
+  },
+  {
+   "id": "tun",
+   "type": "box",
+   "x": 3.4499999999999993,
+   "y": 0.3,
+   "w": 1.95,
+   "h": 1.2,
+   "text": "Tuner",
+   "size": 21,
+   "color": "green"
+  },
+  {
+   "id": "tun_n",
+   "type": "text",
+   "x": 3.4499999999999993,
+   "y": -1.2,
+   "text": "Picks your channel,\nrecovers the signal",
+   "size": 19,
+   "color": "muted"
+  },
+  {
+   "id": "a4",
+   "type": "arrow",
+   "x1": 2.1499999999999995,
+   "y1": 0.3,
+   "x2": 2.4499999999999993,
+   "y2": 0.3,
+   "color": "white",
+   "width": 4
+  },
+  {
+   "id": "scr",
+   "type": "box",
+   "x": 5.75,
+   "y": 0.3,
+   "w": 1.95,
+   "h": 1.2,
+   "text": "Screen",
+   "size": 21,
+   "color": "yellow"
+  },
+  {
+   "id": "scr_n",
+   "type": "text",
+   "x": 5.75,
+   "y": -1.2,
+   "text": "Signal is drawn\nas pixels",
+   "size": 19,
+   "color": "muted"
+  },
+  {
+   "id": "a5",
+   "type": "arrow",
+   "x1": 4.45,
+   "y1": 0.3,
+   "x2": 4.75,
+   "y2": 0.3,
+   "color": "white",
+   "width": 4
+  },
+  {
+   "id": "wire",
+   "type": "beam",
+   "x1": -6.2,
+   "y1": 1.9,
+   "x2": 6.2,
+   "y2": 1.9,
+   "color": "orange",
+   "width": 3
+  },
+  {
+   "id": "wire_l",
+   "type": "text",
+   "x": 0,
+   "y": 2.45,
+   "text": "the signal",
+   "size": 22,
+   "color": "orange"
+  },
+  {
+   "id": "cap",
+   "type": "text",
+   "x": 0,
+   "y": -3.7,
+   "text": "Everything you watch travels this chain in a fraction of a second.",
+   "size": 26,
+   "color": "muted"
+  }
+ ],
+ "steps": [
+  {
+   "at": 0.2,
+   "dur": 0.8,
+   "do": "show",
+   "target": "title",
+   "from": "up"
+  },
+  {
+   "at": 0.8,
+   "dur": 0.6,
+   "do": "show",
+   "target": "cam",
+   "from": "up"
+  },
+  {
+   "at": 1.1,
+   "dur": 0.6,
+   "do": "show",
+   "target": "cam_n"
+  },
+  {
+   "at": 1.8,
+   "dur": 0.6,
+   "do": "show",
+   "target": "enc",
+   "from": "up"
+  },
+  {
+   "at": 2.1,
+   "dur": 0.6,
+   "do": "show",
+   "target": "enc_n"
+  },
+  {
+   "at": 1.6,
+   "dur": 0.4,
+   "do": "draw",
+   "target": "a1"
+  },
+  {
+   "at": 2.8,
+   "dur": 0.6,
+   "do": "show",
+   "target": "tx",
+   "from": "up"
+  },
+  {
+   "at": 3.0999999999999996,
+   "dur": 0.6,
+   "do": "show",
+   "target": "tx_n"
+  },
+  {
+   "at": 2.5999999999999996,
+   "dur": 0.4,
+   "do": "draw",
+   "target": "a2"
+  },
+  {
+   "at": 3.8,
+   "dur": 0.6,
+   "do": "show",
+   "target": "ant",
+   "from": "up"
+  },
+  {
+   "at": 4.1,
+   "dur": 0.6,
+   "do": "show",
+   "target": "ant_n"
+  },
+  {
+   "at": 3.5999999999999996,
+   "dur": 0.4,
+   "do": "draw",
+   "target": "a3"
+  },
+  {
+   "at": 4.8,
+   "dur": 0.6,
+   "do": "show",
+   "target": "tun",
+   "from": "up"
+  },
+  {
+   "at": 5.1,
+   "dur": 0.6,
+   "do": "show",
+   "target": "tun_n"
+  },
+  {
+   "at": 4.6,
+   "dur": 0.4,
+   "do": "draw",
+   "target": "a4"
+  },
+  {
+   "at": 5.8,
+   "dur": 0.6,
+   "do": "show",
+   "target": "scr",
+   "from": "up"
+  },
+  {
+   "at": 6.1,
+   "dur": 0.6,
+   "do": "show",
+   "target": "scr_n"
+  },
+  {
+   "at": 5.6,
+   "dur": 0.4,
+   "do": "draw",
+   "target": "a5"
+  },
+  {
+   "at": 6.2,
+   "dur": 0.6,
+   "do": "show",
+   "target": "wire"
+  },
+  {
+   "at": 6.2,
+   "dur": 0.6,
+   "do": "show",
+   "target": "wire_l"
+  },
+  {
+   "at": 6.6,
+   "dur": 3.2,
+   "do": "flow",
+   "target": "wire",
+   "count": 9,
+   "loops": 1,
+   "color": "yellow",
+   "ease": "linear"
+  },
+  {
+   "at": 6.8,
+   "dur": 0.7,
+   "do": "pulse",
+   "target": "cam",
+   "amount": 0.12
+  },
+  {
+   "at": 7.3,
+   "dur": 0.7,
+   "do": "pulse",
+   "target": "enc",
+   "amount": 0.12
+  },
+  {
+   "at": 7.8,
+   "dur": 0.7,
+   "do": "pulse",
+   "target": "tx",
+   "amount": 0.12
+  },
+  {
+   "at": 8.3,
+   "dur": 0.7,
+   "do": "pulse",
+   "target": "ant",
+   "amount": 0.12
+  },
+  {
+   "at": 8.8,
+   "dur": 0.7,
+   "do": "pulse",
+   "target": "tun",
+   "amount": 0.12
+  },
+  {
+   "at": 9.3,
+   "dur": 0.7,
+   "do": "pulse",
+   "target": "scr",
+   "amount": 0.12
+  },
+  {
+   "at": 9.4,
+   "dur": 0.8,
+   "do": "show",
+   "target": "cap",
+   "from": "up"
+  }
+ ]
+}

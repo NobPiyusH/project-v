@@ -1,0 +1,207 @@
+{
+ "version": 1,
+ "title": "RGB additive colour mixing",
+ "duration": 10.0,
+ "elements": [
+  {
+   "id": "title",
+   "type": "text",
+   "x": 0,
+   "y": 3.5,
+   "text": "Colour on a screen: red + green + blue",
+   "size": 42,
+   "color": "white"
+  },
+  {
+   "id": "mix",
+   "type": "rgb_mix",
+   "x": -1.0,
+   "y": -0.6,
+   "r": 1.4
+  },
+  {
+   "id": "t0",
+   "type": "text",
+   "x": 4.6,
+   "y": 1.3,
+   "text": "Red + Green = Yellow",
+   "size": 26,
+   "color": "yellow"
+  },
+  {
+   "id": "t1",
+   "type": "text",
+   "x": 4.6,
+   "y": 0.5,
+   "text": "Green + Blue = Cyan",
+   "size": 26,
+   "color": "cyan"
+  },
+  {
+   "id": "t2",
+   "type": "text",
+   "x": 4.6,
+   "y": -0.3,
+   "text": "Red + Blue = Magenta",
+   "size": 26,
+   "color": "#FF3DF0"
+  },
+  {
+   "id": "t3",
+   "type": "text",
+   "x": 4.6,
+   "y": -1.1,
+   "text": "All three = White",
+   "size": 26,
+   "color": "white"
+  },
+  {
+   "id": "sub_l",
+   "type": "text",
+   "x": -5.3,
+   "y": 1.9,
+   "text": "One pixel =\nthree dots",
+   "size": 24,
+   "color": "text"
+  },
+  {
+   "id": "sub0",
+   "type": "box",
+   "x": -5.9,
+   "y": 0.5,
+   "w": 0.4,
+   "h": 1.0,
+   "color": "pure_red",
+   "fill": 0.9
+  },
+  {
+   "id": "sub1",
+   "type": "box",
+   "x": -5.4,
+   "y": 0.5,
+   "w": 0.4,
+   "h": 1.0,
+   "color": "pure_green",
+   "fill": 0.9
+  },
+  {
+   "id": "sub2",
+   "type": "box",
+   "x": -4.9,
+   "y": 0.5,
+   "w": 0.4,
+   "h": 1.0,
+   "color": "pure_blue",
+   "fill": 0.9
+  },
+  {
+   "id": "cap",
+   "type": "text",
+   "x": 0,
+   "y": -3.7,
+   "text": "A TV never makes yellow: it lights red and green side by side and your eye blends them.",
+   "size": 26,
+   "color": "muted"
+  }
+ ],
+ "steps": [
+  {
+   "at": 0.2,
+   "dur": 0.8,
+   "do": "show",
+   "target": "title",
+   "from": "up"
+  },
+  {
+   "at": 1.0,
+   "dur": 3.2,
+   "do": "mix",
+   "target": "mix",
+   "ease": "ease_in_out"
+  },
+  {
+   "at": 3.4,
+   "dur": 0.6,
+   "do": "show",
+   "target": "t0",
+   "from": "right"
+  },
+  {
+   "at": 4.1,
+   "dur": 0.6,
+   "do": "show",
+   "target": "t1",
+   "from": "right"
+  },
+  {
+   "at": 4.8,
+   "dur": 0.6,
+   "do": "show",
+   "target": "t2",
+   "from": "right"
+  },
+  {
+   "at": 5.5,
+   "dur": 0.6,
+   "do": "show",
+   "target": "t3",
+   "from": "right"
+  },
+  {
+   "at": 5.6,
+   "dur": 0.6,
+   "do": "show",
+   "target": "sub_l",
+   "from": "left"
+  },
+  {
+   "at": 5.8,
+   "dur": 0.5,
+   "do": "show",
+   "target": "sub0",
+   "from": "up"
+  },
+  {
+   "at": 7.0,
+   "dur": 0.9,
+   "do": "pulse",
+   "target": "sub0",
+   "amount": 0.35
+  },
+  {
+   "at": 6.1,
+   "dur": 0.5,
+   "do": "show",
+   "target": "sub1",
+   "from": "up"
+  },
+  {
+   "at": 7.3,
+   "dur": 0.9,
+   "do": "pulse",
+   "target": "sub1",
+   "amount": 0.35
+  },
+  {
+   "at": 6.3999999999999995,
+   "dur": 0.5,
+   "do": "show",
+   "target": "sub2",
+   "from": "up"
+  },
+  {
+   "at": 7.6,
+   "dur": 0.9,
+   "do": "pulse",
+   "target": "sub2",
+   "amount": 0.35
+  },
+  {
+   "at": 7.6,
+   "dur": 0.8,
+   "do": "show",
+   "target": "cap",
+   "from": "up"
+  }
+ ]
+}

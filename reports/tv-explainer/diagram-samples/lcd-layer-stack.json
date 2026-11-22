@@ -1,0 +1,214 @@
+{
+ "version": 1,
+ "title": "LCD layer stack",
+ "duration": 11.0,
+ "elements": [
+  {
+   "id": "title",
+   "type": "text",
+   "x": 0,
+   "y": 3.5,
+   "text": "Inside an LCD screen",
+   "size": 42,
+   "color": "white"
+  },
+  {
+   "id": "bl",
+   "type": "layer",
+   "x": 1.3,
+   "y": -2.5,
+   "w": 6.2,
+   "h": 0.8,
+   "skew": 0.7,
+   "text": "Backlight (white LEDs)",
+   "size": 22,
+   "color": "yellow"
+  },
+  {
+   "id": "p1",
+   "type": "layer",
+   "x": 1.3,
+   "y": -1.35,
+   "w": 6.2,
+   "h": 0.8,
+   "skew": 0.7,
+   "text": "Rear polariser (vertical)",
+   "size": 22,
+   "color": "violet"
+  },
+  {
+   "id": "lc",
+   "type": "layer",
+   "x": 1.3,
+   "y": -0.2,
+   "w": 6.2,
+   "h": 0.8,
+   "skew": 0.7,
+   "text": "Liquid crystal + transistor grid",
+   "size": 22,
+   "color": "cyan"
+  },
+  {
+   "id": "cf",
+   "type": "layer",
+   "x": 1.3,
+   "y": 0.95,
+   "w": 6.2,
+   "h": 0.8,
+   "skew": 0.7,
+   "text": "Red / green / blue colour filter",
+   "size": 22,
+   "color": "orange"
+  },
+  {
+   "id": "p2",
+   "type": "layer",
+   "x": 1.3,
+   "y": 2.1,
+   "w": 6.2,
+   "h": 0.8,
+   "skew": 0.7,
+   "text": "Front polariser (horizontal)",
+   "size": 22,
+   "color": "violet"
+  },
+  {
+   "id": "light",
+   "type": "beam",
+   "x1": -3.4,
+   "y1": -3.0,
+   "x2": -3.4,
+   "y2": 2.9,
+   "color": "white",
+   "width": 3
+  },
+  {
+   "id": "light_l",
+   "type": "text",
+   "x": -5.6,
+   "y": -3.0,
+   "text": "light",
+   "size": 22,
+   "color": "muted"
+  },
+  {
+   "id": "note",
+   "type": "text",
+   "x": -5.3,
+   "y": 0.6,
+   "text": "A voltage twists the\ncrystals: the pixel\npasses light or blocks it",
+   "size": 23,
+   "color": "text"
+  },
+  {
+   "id": "cap",
+   "type": "text",
+   "x": 0,
+   "y": -3.7,
+   "text": "Every pixel is a tiny light valve; the colour filter turns it into red, green or blue.",
+   "size": 26,
+   "color": "muted"
+  }
+ ],
+ "steps": [
+  {
+   "at": 0.2,
+   "dur": 0.8,
+   "do": "show",
+   "target": "title",
+   "from": "up"
+  },
+  {
+   "at": 0.8,
+   "dur": 0.7,
+   "do": "show",
+   "target": "bl",
+   "from": "down"
+  },
+  {
+   "at": 1.5,
+   "dur": 0.7,
+   "do": "show",
+   "target": "p1",
+   "from": "down"
+  },
+  {
+   "at": 2.2,
+   "dur": 0.7,
+   "do": "show",
+   "target": "lc",
+   "from": "down"
+  },
+  {
+   "at": 2.8999999999999995,
+   "dur": 0.7,
+   "do": "show",
+   "target": "cf",
+   "from": "down"
+  },
+  {
+   "at": 3.5999999999999996,
+   "dur": 0.7,
+   "do": "show",
+   "target": "p2",
+   "from": "down"
+  },
+  {
+   "at": 4.4,
+   "dur": 0.6,
+   "do": "show",
+   "target": "light"
+  },
+  {
+   "at": 4.6,
+   "dur": 4.8,
+   "do": "flow",
+   "target": "light",
+   "count": 7,
+   "loops": 2,
+   "color": "white"
+  },
+  {
+   "at": 5.2,
+   "dur": 0.8,
+   "do": "show",
+   "target": "note",
+   "from": "left"
+  },
+  {
+   "at": 6.0,
+   "dur": 1.0,
+   "do": "color",
+   "target": "lc",
+   "to": "red"
+  },
+  {
+   "at": 6.0,
+   "dur": 1.0,
+   "do": "pulse",
+   "target": "lc",
+   "amount": 0.08
+  },
+  {
+   "at": 7.6,
+   "dur": 1.0,
+   "do": "color",
+   "target": "lc",
+   "to": "cyan"
+  },
+  {
+   "at": 8.0,
+   "dur": 1.0,
+   "do": "pulse",
+   "target": "cf",
+   "amount": 0.08
+  },
+  {
+   "at": 9.2,
+   "dur": 0.8,
+   "do": "show",
+   "target": "cap",
+   "from": "up"
+  }
+ ]
+}

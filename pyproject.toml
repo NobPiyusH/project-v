@@ -24,6 +24,7 @@ dependencies = [
     "scrapling>=0.5.1",
     # misaki (Kokoro's English phonemizer) needs spaCy's small English model; uv venvs have no pip to fetch it later.
     "en_core_web_sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl",
+    "manim>=0.19",
 ]
 
 [dependency-groups]

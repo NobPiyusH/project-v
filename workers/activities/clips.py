@@ -495,8 +495,62 @@ def _wan(req: dict, containers: int):
     return cls()
 
 
+def _diagram_one(video_id: str, j: dict) -> dict:
+    """Diagram lane: j["prompt"] is the shot's scene spec (JSON). Rendered on the laptop with Manim, free, no GPU.
+    An invalid spec or a failed render becomes the animated text card, never a missing shot."""
+    from workers.diagram.render import render_or_fallback
+
+    try:
+        spec = json.loads(j["prompt"])
+    except ValueError:
+        spec = None
+    title = (spec or {}).get("title") if isinstance(spec, dict) else None
+    try:
+        with workdir("diagram") as tmp:
+            out = Path(tmp) / "diagram.mp4"
+            res = render_or_fallback(spec, out, title=title or "", duration=int(j["numFrames"]) / 24.0)
+            uri = put_file(clip_key(video_id, j), out, "video/mp4")
+        note = f"text card: {res['reason']}" if res["fallback"] else None
+        if note:
+            log.warning("Diagram shot %s fell back to a text card: %s", j["shotNumber"], res["reason"])
+        d = _clip(video_id, j, {"uri": uri, "seconds": 0, "frames": int(j["numFrames"]), "fps": 24, "mode": "diagram"})
+        d["note"] = note
+        return d
+    except Exception as e:  # noqa: BLE001 - one failed diagram never fails the batch
+        return _clip(video_id, j, {"mp4": None, "seconds": 0, "error": f"{type(e).__name__}: {e}"[:600]})
+
+
+def _diagrams(req: dict, base: str, video_id: str) -> tuple[list[dict], dict]:
+    """Renders the diagram jobs of the batch (laptop, one after another). Returns (clips, request without them)."""
+    jobs = [j for j in req["jobs"] if j.get("mode") == "diagram"]
+    if not jobs:
+        return [], req
+    clips = []
+    for i, j in enumerate(jobs):
+        if _stop_requested(base, video_id):
+            clips += [_stopped(x) for x in jobs[i:]]
+            break
+        _report(base, video_id, [(x, "") for x in jobs[i:]], clips, {}, len(req["jobs"]))
+        clips.append(_diagram_one(video_id, j))
+    return clips, {**req, "jobs": [j for j in req["jobs"] if j.get("mode") != "diagram"]}
+
+
 @activity.defn(name="generate_clips")
 def generate_clips(req: dict) -> dict:
+    """Diagram shots render first on the laptop; the rest goes to the provider (omni / pod / Modal Wan)."""
+    video_id = req["videoId"]
+    base = (req.get("progressUrl") or "http://127.0.0.1:8080").rstrip("/")
+    drawn, rest = _diagrams(req, base, video_id)
+    if not rest["jobs"] or any(c.get("error") == "stopped" for c in drawn):
+        _post(f"{base}/api/internal/clips/progress", {"videoId": video_id, "clips": [], "finished": True})
+        return {"clips": drawn + [_stopped(j) for j in rest["jobs"]], "containers": 0,
+                "stopped": any(c.get("error") == "stopped" for c in drawn), "coldStarts": 0}
+    out = _generate_clips(rest)
+    out["clips"] = drawn + out["clips"]
+    return out
+
+
+def _generate_clips(req: dict) -> dict:
     """req: ClipRequest {videoId, modalApp, modalClass, progressUrl, containers,
              jobs:[{shotId, shotNumber, take, kind, mode, imageUri, prompt, width, height, numFrames, seed}]}
     -> ClipResult {clips:[{shotId, take, kind, uri, gpuSeconds, frames, fps, mode, error}], containers, stopped}"""

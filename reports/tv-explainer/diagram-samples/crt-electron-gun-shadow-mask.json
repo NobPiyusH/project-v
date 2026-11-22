@@ -1,0 +1,410 @@
+{
+ "version": 1,
+ "title": "CRT: gun, deflection, shadow mask, phosphor",
+ "duration": 11.0,
+ "elements": [
+  {
+   "id": "title",
+   "type": "text",
+   "x": 0,
+   "y": 3.5,
+   "text": "Inside a CRT television",
+   "size": 42,
+   "color": "white"
+  },
+  {
+   "id": "gun",
+   "type": "box",
+   "x": -5.6,
+   "y": 0,
+   "w": 2.3,
+   "h": 1.5,
+   "text": "Electron\ngun",
+   "color": "cyan"
+  },
+  {
+   "id": "coil1",
+   "type": "box",
+   "x": -2.4,
+   "y": 1.35,
+   "w": 2.2,
+   "h": 0.55,
+   "text": "Deflection coil",
+   "size": 20,
+   "color": "violet"
+  },
+  {
+   "id": "coil2",
+   "type": "box",
+   "x": -2.4,
+   "y": -1.35,
+   "w": 2.2,
+   "h": 0.55,
+   "text": "Deflection coil",
+   "size": 20,
+   "color": "violet"
+  },
+  {
+   "id": "mask",
+   "type": "box",
+   "x": 2.0,
+   "y": 0,
+   "w": 0.2,
+   "h": 5.0,
+   "color": "muted",
+   "fill": 0.5
+  },
+  {
+   "id": "hole",
+   "type": "circle",
+   "x": 2.0,
+   "y": 0,
+   "r": 0.12,
+   "color": "bg",
+   "fill": 1.0,
+   "width": 1
+  },
+  {
+   "id": "mask_l",
+   "type": "text",
+   "x": 1.7,
+   "y": -2.8,
+   "text": "Shadow mask\n(one hole per dot triplet)",
+   "size": 20,
+   "color": "muted"
+  },
+  {
+   "id": "screen",
+   "type": "box",
+   "x": 5.2,
+   "y": 0,
+   "w": 0.4,
+   "h": 5.0,
+   "color": "green",
+   "fill": 0.3
+  },
+  {
+   "id": "scr_l",
+   "type": "text",
+   "x": 5.2,
+   "y": -2.8,
+   "text": "Phosphor\nscreen",
+   "size": 20,
+   "color": "muted"
+  },
+  {
+   "id": "pre0",
+   "type": "beam",
+   "x1": -4.4,
+   "y1": 0.3,
+   "x2": 1.95,
+   "y2": 0,
+   "color": "pure_red",
+   "width": 3
+  },
+  {
+   "id": "post0",
+   "type": "beam",
+   "x1": 2.05,
+   "y1": 0,
+   "x2": 4.95,
+   "y2": 0.62,
+   "color": "pure_red",
+   "width": 3
+  },
+  {
+   "id": "dot0",
+   "type": "circle",
+   "x": 5.2,
+   "y": 0.62,
+   "r": 0.15,
+   "color": "pure_red",
+   "fill": 0.9
+  },
+  {
+   "id": "pre1",
+   "type": "beam",
+   "x1": -4.4,
+   "y1": 0.0,
+   "x2": 1.95,
+   "y2": 0,
+   "color": "pure_green",
+   "width": 3
+  },
+  {
+   "id": "post1",
+   "type": "beam",
+   "x1": 2.05,
+   "y1": 0,
+   "x2": 4.95,
+   "y2": 0,
+   "color": "pure_green",
+   "width": 3
+  },
+  {
+   "id": "dot1",
+   "type": "circle",
+   "x": 5.2,
+   "y": 0,
+   "r": 0.15,
+   "color": "pure_green",
+   "fill": 0.9
+  },
+  {
+   "id": "pre2",
+   "type": "beam",
+   "x1": -4.4,
+   "y1": -0.3,
+   "x2": 1.95,
+   "y2": 0,
+   "color": "pure_blue",
+   "width": 3
+  },
+  {
+   "id": "post2",
+   "type": "beam",
+   "x1": 2.05,
+   "y1": 0,
+   "x2": 4.95,
+   "y2": -0.62,
+   "color": "pure_blue",
+   "width": 3
+  },
+  {
+   "id": "dot2",
+   "type": "circle",
+   "x": 5.2,
+   "y": -0.62,
+   "r": 0.15,
+   "color": "pure_blue",
+   "fill": 0.9
+  },
+  {
+   "id": "cap",
+   "type": "text",
+   "x": 0,
+   "y": -3.7,
+   "text": "Three beams pass one hole and each lands on its own phosphor dot: red, green, blue.",
+   "size": 26,
+   "color": "muted"
+  }
+ ],
+ "steps": [
+  {
+   "at": 0.2,
+   "dur": 0.8,
+   "do": "show",
+   "target": "title",
+   "from": "up"
+  },
+  {
+   "at": 0.6,
+   "dur": 0.8,
+   "do": "show",
+   "target": "gun",
+   "from": "left"
+  },
+  {
+   "at": 1.4,
+   "dur": 0.7,
+   "do": "show",
+   "target": "coil1",
+   "from": "up"
+  },
+  {
+   "at": 1.4,
+   "dur": 0.7,
+   "do": "show",
+   "target": "coil2",
+   "from": "down"
+  },
+  {
+   "at": 2.3,
+   "dur": 0.8,
+   "do": "show",
+   "target": "mask",
+   "from": "up"
+  },
+  {
+   "at": 2.3,
+   "dur": 0.8,
+   "do": "show",
+   "target": "hole"
+  },
+  {
+   "at": 2.6,
+   "dur": 0.6,
+   "do": "show",
+   "target": "mask_l"
+  },
+  {
+   "at": 3.0,
+   "dur": 0.8,
+   "do": "show",
+   "target": "screen",
+   "from": "right"
+  },
+  {
+   "at": 3.2,
+   "dur": 0.6,
+   "do": "show",
+   "target": "scr_l"
+  },
+  {
+   "at": 3.9,
+   "dur": 1.0,
+   "do": "draw",
+   "target": "pre0",
+   "ease": "ease_in_out"
+  },
+  {
+   "at": 5.0,
+   "dur": 1.0,
+   "do": "draw",
+   "target": "post0",
+   "ease": "ease_in_out"
+  },
+  {
+   "at": 5.0,
+   "dur": 3.6,
+   "do": "flow",
+   "target": "pre0",
+   "count": 6,
+   "loops": 2,
+   "color": "white"
+  },
+  {
+   "at": 6.1,
+   "dur": 2.6,
+   "do": "flow",
+   "target": "post0",
+   "count": 5,
+   "loops": 2,
+   "color": "pure_red"
+  },
+  {
+   "at": 6.3,
+   "dur": 0.5,
+   "do": "show",
+   "target": "dot0"
+  },
+  {
+   "at": 7.2,
+   "dur": 1.4,
+   "do": "pulse",
+   "target": "dot0",
+   "amount": 0.5
+  },
+  {
+   "at": 4.1,
+   "dur": 1.0,
+   "do": "draw",
+   "target": "pre1",
+   "ease": "ease_in_out"
+  },
+  {
+   "at": 5.1,
+   "dur": 1.0,
+   "do": "draw",
+   "target": "post1",
+   "ease": "ease_in_out"
+  },
+  {
+   "at": 5.0,
+   "dur": 3.6,
+   "do": "flow",
+   "target": "pre1",
+   "count": 6,
+   "loops": 2,
+   "color": "white"
+  },
+  {
+   "at": 6.1,
+   "dur": 2.6,
+   "do": "flow",
+   "target": "post1",
+   "count": 5,
+   "loops": 2,
+   "color": "pure_green"
+  },
+  {
+   "at": 6.3,
+   "dur": 0.5,
+   "do": "show",
+   "target": "dot1"
+  },
+  {
+   "at": 7.5,
+   "dur": 1.4,
+   "do": "pulse",
+   "target": "dot1",
+   "amount": 0.5
+  },
+  {
+   "at": 4.3,
+   "dur": 1.0,
+   "do": "draw",
+   "target": "pre2",
+   "ease": "ease_in_out"
+  },
+  {
+   "at": 5.2,
+   "dur": 1.0,
+   "do": "draw",
+   "target": "post2",
+   "ease": "ease_in_out"
+  },
+  {
+   "at": 5.0,
+   "dur": 3.6,
+   "do": "flow",
+   "target": "pre2",
+   "count": 6,
+   "loops": 2,
+   "color": "white"
+  },
+  {
+   "at": 6.1,
+   "dur": 2.6,
+   "do": "flow",
+   "target": "post2",
+   "count": 5,
+   "loops": 2,
+   "color": "pure_blue"
+  },
+  {
+   "at": 6.3,
+   "dur": 0.5,
+   "do": "show",
+   "target": "dot2"
+  },
+  {
+   "at": 7.8,
+   "dur": 1.4,
+   "do": "pulse",
+   "target": "dot2",
+   "amount": 0.5
+  },
+  {
+   "at": 9.0,
+   "dur": 0.8,
+   "do": "show",
+   "target": "cap",
+   "from": "up"
+  },
+  {
+   "at": 3.5,
+   "dur": 4.5,
+   "do": "pulse",
+   "target": "coil1",
+   "amount": 0.06
+  },
+  {
+   "at": 3.5,
+   "dur": 4.5,
+   "do": "pulse",
+   "target": "coil2",
+   "amount": 0.06
+  }
+ ]
+}
