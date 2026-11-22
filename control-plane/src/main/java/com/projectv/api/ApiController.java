@@ -124,6 +124,7 @@ public class ApiController {
     public Map<String, Object> detail(@PathVariable UUID id) {
         Map<String, Object> d = new LinkedHashMap<>(videos.detail(id));
         d.put("costs", ledger.forVideo(id));
+        d.put("costByStage", ledger.stageSummary(id));
         d.put("inspections", inspector.reports(id));
         d.put("creativeReviews", creative.reports(id));
         return d;
