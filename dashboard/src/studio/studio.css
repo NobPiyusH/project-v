@@ -1,0 +1,76 @@
+/* New Studio shell (Create / Studio / Settings). Uses the app's theme variables, so light and dark both work. */
+.sv-top { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; gap: 12px; padding: 10px 16px; flex-wrap: wrap;
+  background: color-mix(in srgb, var(--surface) 88%, transparent); backdrop-filter: blur(10px); border-bottom: 1px solid var(--border); }
+.sv-top .brand { font-weight: 800; letter-spacing: 0.04em; color: var(--text); display: flex; align-items: center; gap: 8px; }
+.sv-nav { display: flex; gap: 4px; }
+.sv-nav a { padding: 6px 14px; border-radius: 8px; color: var(--muted); font-weight: 600; }
+.sv-nav a:hover { text-decoration: none; color: var(--text); }
+.sv-nav a.on { background: var(--surface-2); color: var(--text); }
+.sv-top .spacer { flex: 1; }
+.sv-main { max-width: 980px; margin: 0 auto; padding: 20px 16px 72px; display: grid; gap: 14px; }
+.sv-main h1 { font-size: 1.4rem; margin: 2px 0; }
+.sv-chips { display: flex; gap: 8px; flex-wrap: wrap; }
+.sv-chip { padding: 7px 14px; border-radius: 99px; background: none; font-weight: 500; }
+.sv-chip.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--text); }
+.sv-chip .count { margin-left: 6px; color: var(--warn); font-weight: 700; }
+.sv-note { font-size: 0.82rem; color: var(--muted); border-left: 3px solid var(--accent); padding-left: 10px; }
+.sv-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px 16px; margin-top: 10px; }
+.sv-fields label { display: grid; gap: 4px; font-size: 0.82rem; color: var(--muted); }
+.sv-fields label.check { display: flex; gap: 8px; align-items: center; color: var(--text); }
+details.sv-adv > summary { cursor: pointer; color: var(--accent); font-weight: 600; }
+
+.sv-list { display: grid; padding: 6px; }
+.sv-row { display: flex; gap: 12px; align-items: center; padding: 10px; border-radius: 10px; color: var(--text); }
+.sv-row:hover { background: var(--surface-2); text-decoration: none; }
+.sv-row .thumb { width: 54px; height: 72px; border-radius: 8px; flex: none; object-fit: cover; background: linear-gradient(160deg, var(--surface-3), var(--surface-2)); }
+.sv-row .thumb.wide { width: 96px; height: 54px; }
+.sv-row .body { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.sv-row .title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sv-row .side { text-align: right; font-size: 0.82rem; color: var(--muted); white-space: nowrap; }
+.sv-kind { font-size: 0.7rem; font-weight: 700; padding: 1px 7px; border-radius: 6px; background: var(--surface-3); color: var(--muted); margin-right: 6px; }
+.st-needs { color: var(--warn); } .st-running { color: var(--accent); } .st-done { color: var(--ok); } .st-failed { color: var(--bad); } .st-stopped { color: var(--muted); }
+
+.sv-head { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.sv-tl { display: flex; overflow-x: auto; padding: 4px 0; scrollbar-width: thin; }
+.sv-stg { flex: 1 0 74px; text-align: center; font-size: 0.78rem; position: relative; color: var(--muted); background: none; border: 0; padding: 0 2px; font-weight: 500; }
+.sv-stg i { display: block; width: 16px; height: 16px; border-radius: 50%; margin: 0 auto 6px; border: 2px solid var(--border); background: var(--bg); position: relative; z-index: 1; }
+.sv-stg:not(:last-child)::after { content: ""; position: absolute; top: 8px; left: calc(50% + 10px); right: calc(-50% + 10px); height: 2px; background: var(--border); }
+.sv-stg.done { color: var(--text); } .sv-stg.done i { background: var(--ok); border-color: var(--ok); }
+.sv-stg.running i { border-color: var(--accent); background: var(--accent); animation: pulse 1s ease-in-out infinite alternate; }
+.sv-stg.waiting i { background: var(--warn); border-color: var(--warn); } .sv-stg.waiting { color: var(--warn); }
+.sv-stg.failed i { background: var(--bad); border-color: var(--bad); } .sv-stg.failed { color: var(--bad); }
+.sv-stg.skipped i { border-style: dashed; } .sv-stg.skipped { opacity: 0.6; }
+.sv-stg small { display: block; font-size: 0.68rem; opacity: 0.8; }
+@media (prefers-reduced-motion: reduce) { .sv-stg.running i { animation: none; } }
+
+.sv-next { border-color: var(--warn); background: color-mix(in srgb, var(--warn-bg) 55%, var(--surface)); }
+.sv-next.bad { border-color: var(--bad); background: color-mix(in srgb, var(--bad-bg) 55%, var(--surface)); }
+.sv-two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+.sv-player { background: #000; border-radius: 12px; overflow: hidden; display: grid; place-items: center; max-height: 480px; }
+.sv-player video, .sv-player img { max-width: 100%; max-height: 480px; display: block; }
+.sv-player.empty { min-height: 200px; color: var(--muted); padding: 24px; text-align: center; }
+.sv-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 8px; }
+.sv-grid figure { margin: 0; display: grid; gap: 3px; font-size: 0.72rem; color: var(--muted); }
+.sv-grid img, .sv-grid video { width: 100%; aspect-ratio: 9 / 16; object-fit: cover; border-radius: 8px; background: #000; display: block; }
+.sv-grid.wide img, .sv-grid.wide video { aspect-ratio: 16 / 9; }
+.sv-grid a.open { color: inherit; }
+.sv-kv { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; font-size: 0.9rem; }
+.sv-kv .num { text-align: right; font-variant-numeric: tabular-nums; }
+.sv-modes td:first-child { white-space: nowrap; }
+.sv-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+.sv-adv-block { display: grid; gap: 14px; }
+.sv-adv-block > h2 { margin-top: 6px; }
+
+@media (max-width: 760px) {
+  .sv-two { grid-template-columns: 1fr; }
+  .sv-top { padding: 8px 12px; gap: 8px; }
+  .sv-main { padding: 14px 12px 72px; }
+  .sv-row .thumb { width: 44px; height: 58px; } .sv-row .thumb.wide { width: 76px; height: 43px; }
+  .sv-row .side { font-size: 0.75rem; }
+  .sv-stg { flex-basis: 62px; font-size: 0.72rem; }
+  .hide-xs { display: none; }
+}
+
+.gpu-embed { display: grid; gap: 8px; }
+.gpu-embed .gpu-log { height: 320px; }
+.sv-chip.button { display: inline-block; text-decoration: none; color: var(--text); }

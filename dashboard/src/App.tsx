@@ -10,6 +10,14 @@ import { Home } from './pages/Home'
 import { Providers } from './pages/Providers'
 import { DreamShorts } from './pages/dream/DreamShorts'
 import { VideoDetail } from './pages/VideoDetail'
+import { StudioApp } from './studio/StudioApp'
+
+/**
+ * Which shell opens at `#/`. The plan keeps the classic dashboard as the default until the owner approves the new one
+ * (docs/studio-redesign-plan.md 2.7); flip this to make the new Studio the front door. Classic routes work either way.
+ */
+const NEW_STUDIO_DEFAULT = false
+const NEW_ROUTE = /^#\/(create|studio|p\/|settings)/
 
 export default function App() {
   const route = useHashRoute()
@@ -18,11 +26,14 @@ export default function App() {
   const { data: stages, error } = usePoll(api.stages, 60000)
   const { data: budget } = usePoll(api.budget, 10000)
   const { data: videos } = usePoll(api.videos, 5000)
+  const isNew = NEW_ROUTE.test(route) || (NEW_STUDIO_DEFAULT && (route === '#/' || route === ''))
   const videoMatch = route.match(/^#\/video\/([0-9a-f-]{36})/)
   const dreamMatch = route.match(/^#\/dream\/([0-9a-f-]{36})/)
   const needsYou = (videos ?? []).filter((v) => v.status === 'WAITING').length
   const { data: autoRuns } = usePoll(autopilotApi.runs, 30000)
   const readyToPost = (autoRuns ?? []).filter((r) => r.status === 'READY').length
+
+  if (isNew) return <StudioApp route={route === '#/' || route === '' ? '#/studio' : route} theme={theme} toggleTheme={toggleTheme} />
 
   return (
     <>
@@ -39,6 +50,7 @@ export default function App() {
           </a>
         </nav>
         <span className="spacer" />
+        <a className="pill" href="#/studio" title="The simpler Create / Studio / Settings dashboard">Try new studio</a>
         {budget && <BudgetMeters budget={budget} />}
         <BackendPower />
         <button className={`icon-btn ${gpuOpen ? 'primary' : ''}`} onClick={() => setGpuOpen((o) => !o)}
