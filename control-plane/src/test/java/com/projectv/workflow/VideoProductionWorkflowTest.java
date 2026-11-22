@@ -67,11 +67,13 @@ class VideoProductionWorkflowTest {
 
         @Override
         public StageResult concept(String videoId, String ownerNotes) {
+            events.add("RAN:CONCEPT");
             return StageResult.of("concept", "{}");
         }
 
         @Override
         public StageResult script(String videoId, String ownerNotes) {
+            events.add("RAN:SCRIPT");
             return StageResult.of("script", "{}");
         }
 
@@ -98,6 +100,16 @@ class VideoProductionWorkflowTest {
         @Override
         public int lastAttempt(String videoId, Stage stage) {
             return 2;
+        }
+
+        /** Stages the fake store "already holds" (a restart finds them); empty = nothing stored. */
+        final java.util.Set<Stage> stored = java.util.EnumSet.noneOf(Stage.class);
+        final List<Stage> reuseAsked = new CopyOnWriteArrayList<>();
+
+        @Override
+        public StageResult reusableStageResult(String videoId, Stage stage) {
+            reuseAsked.add(stage);
+            return stored.contains(stage) ? StageResult.of("stored " + stage, "{}") : null;
         }
 
         @Override
@@ -720,6 +732,39 @@ class VideoProductionWorkflowTest {
         WorkflowStub.fromTyped(wf).getResult(Void.class);
         assertTrue(activities.events.contains("KEYFRAMES:1:AUTO_PASSED"));
         assertEquals("VIDEO:COMPLETED", activities.events.getLast());
+    }
+
+    @Test
+    void aFullRunTakesStoredTextStagesInsteadOfPayingAgain() {
+        activities.stored.add(Stage.CONCEPT);
+        VideoProductionWorkflow wf = start("restart", StageMode.AUTO, Map.of());
+        WorkflowStub.fromTyped(wf).getResult(Void.class);
+        assertTrue(activities.events.stream().noneMatch("RAN:CONCEPT"::equals), "concept has a stored result: no model call");
+        assertTrue(activities.events.contains("RAN:SCRIPT"), "script has none: it runs");
+        assertTrue(activities.events.contains("CONCEPT:1:AUTO_PASSED"), "the reused stage is still recorded and passes normally");
+    }
+
+    @Test
+    void ownerRejectAfterAReusedStageGeneratesAnew() {
+        activities.stored.add(Stage.CONCEPT);
+        VideoProductionWorkflow wf = start("rej", StageMode.AUTO, Map.of(Stage.CONCEPT, StageMode.MANUAL));
+        awaitWaiting(wf, Stage.CONCEPT);
+        wf.reject(Stage.CONCEPT, null);
+        awaitWaiting(wf, Stage.CONCEPT);
+        wf.approve(Stage.CONCEPT, null);
+        WorkflowStub.fromTyped(wf).getResult(Void.class);
+        assertEquals(1, activities.events.stream().filter("RAN:CONCEPT"::equals).count(), "attempt 1 reused, the Reject's attempt 2 ran");
+    }
+
+    @Test
+    void anOwnersRedoOfChosenStagesNeverAsksForAStoredResult() {
+        activities.stored.addAll(List.of(Stage.CONCEPT, Stage.SCRIPT));
+        VideoProductionWorkflow wf = client.newWorkflowStub(VideoProductionWorkflow.class,
+                WorkflowOptions.newBuilder().setWorkflowId("redo").setTaskQueue(TaskQueues.CONTROL).build());
+        WorkflowClient.start(wf::run, new VideoRequest("redo", "p", StageMode.AUTO, Map.of(), List.of(Stage.CONCEPT, Stage.SCRIPT)));
+        WorkflowStub.fromTyped(wf).getResult(Void.class);
+        assertTrue(activities.reuseAsked.isEmpty());
+        assertTrue(activities.events.contains("RAN:CONCEPT") && activities.events.contains("RAN:SCRIPT"));
     }
 
     @Test

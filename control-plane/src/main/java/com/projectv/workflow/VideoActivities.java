@@ -46,6 +46,9 @@ public interface VideoActivities {
     /** Highest attempt recorded for a stage (0 if none). Used by re-runs so attempt numbers keep increasing. */
     int lastAttempt(String videoId, Stage stage);
 
+    /** Flag projectv.cost.reuse-stored-stages (off = always null): the stored result of a finished paid text stage, so a restart does not pay again. */
+    StageResult reusableStageResult(String videoId, Stage stage);
+
     StageResult shotPlan(String videoId, String ownerNotes);
 
     KeyframeRequest keyframeRequest(String videoId, String ownerNotes);

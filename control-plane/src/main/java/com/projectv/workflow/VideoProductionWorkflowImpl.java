@@ -168,6 +168,7 @@ public class VideoProductionWorkflowImpl implements VideoProductionWorkflow {
             modes.putAll(request.modes());
         }
         String videoId = request.videoId();
+        fullRun = request.onlyStages() == null;
         phase = "RUNNING";
         activities.setVideoStatus(videoId, "RUNNING");
 
@@ -205,6 +206,24 @@ public class VideoProductionWorkflowImpl implements VideoProductionWorkflow {
         activities.setVideoStatus(videoId, "COMPLETED");
     }
 
+    /** True in a full run (a new video, a restart or a duplicate run); false for an owner's redo of chosen stages. */
+    private boolean fullRun;
+
+    private static final java.util.Set<Stage> REUSABLE = java.util.EnumSet.of(Stage.RESEARCH, Stage.CONCEPT, Stage.SCRIPT, Stage.MUSIC, Stage.SHOT_PLAN);
+
+    /**
+     * Paid text stages that already hold a finished result are not paid for again after a restart (flag
+     * projectv.cost.reuse-stored-stages; the activity answers null when off). Only a full run's first try, with no owner notes:
+     * a redo, a Reject, an Inspector retry or REDO_WITH always generates anew.
+     */
+    private StageResult storedResult(String videoId, Stage stage) {
+        if (!fullRun || !REUSABLE.contains(stage)
+                || Workflow.getVersion("reuse-stored-stages", Workflow.DEFAULT_VERSION, 1) == Workflow.DEFAULT_VERSION) {
+            return null;
+        }
+        return activities.reusableStageResult(videoId, stage);
+    }
+
     private StageResult execute(String videoId, Stage stage, String prompt) {
         return execute(videoId, stage, prompt, 0);
     }
@@ -226,7 +245,8 @@ public class VideoProductionWorkflowImpl implements VideoProductionWorkflow {
 
             StageResult result;
             try {
-                result = runStageActivity(videoId, stage, prompt, notes, attempt);
+                StageResult reused = attempt == previousAttempts + 1 && notes == null ? storedResult(videoId, stage) : null;
+                result = reused != null ? reused : runStageActivity(videoId, stage, prompt, notes, attempt);
                 if (skipStage) {
                     skipStage = false;
                     finish(videoId, stage, attempt, "SKIPPED", result, notes);

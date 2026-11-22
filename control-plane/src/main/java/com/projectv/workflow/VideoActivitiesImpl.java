@@ -313,6 +313,18 @@ public class VideoActivitiesImpl implements VideoActivities {
                 .param("v", UUID.fromString(videoId)).param("s", stage.name()).query(Integer.class).single();
     }
 
+    private StageReuse reuse; // null in tests that build the activities by hand
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setStageReuse(StageReuse reuse) {
+        this.reuse = reuse;
+    }
+
+    @Override
+    public StageResult reusableStageResult(String videoId, Stage stage) {
+        return reuse == null ? null : reuse.reusable(UUID.fromString(videoId), stage).orElse(null);
+    }
+
     @Override
     public StageResult shotPlan(String videoId, String ownerNotes) {
         return production.shotPlan(UUID.fromString(videoId), ownerNotes);
