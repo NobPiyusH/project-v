@@ -13,8 +13,10 @@ ENV SV_ROOT=/opt/projectv PIP_NO_CACHE_DIR=1 HF_HUB_DISABLE_XET=1
 # server.py --bake is the SAME code the pod would run at boot (install(), fetch_comfy(), fetch_kjnodes()), so the image and
 # the fallback boot path can never drift apart. The pinned tag is in the folder name: a tag bump without a rebuild makes the
 # worker ignore this ComfyUI and fetch the new one.
-COPY workers/pod/server.py /tmp/bake/server.py
-RUN python /tmp/bake/server.py --bake && rm -rf /tmp/bake /root/.cache
+# The worker is bind-mounted for this one RUN only, so it never lands in any image layer (the image is public and holds
+# nothing of the studio's own code: only ComfyUI, its nodes and public pip packages).
+RUN --mount=type=bind,source=workers/pod/server.py,target=/tmp/bake/server.py \
+    python /tmp/bake/server.py --bake && rm -rf /root/.cache
 
 LABEL org.opencontainers.image.source="https://github.com/NobPiyusH/project-v" \
       org.opencontainers.image.description="Project V pod: ComfyUI + nodes + deps, no weights"
