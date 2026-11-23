@@ -30,7 +30,17 @@ import httpx
 
 from studio.agents.jfmt import fixed
 from studio.gpu import self_stop
-from studio.gpu.broker.provider import CreateRequest, GpuProvider, GpuSpec, Instance, InstanceStatus, PlanUnavailableError, Preflight, Quote, State
+from studio.gpu.broker.provider import (
+    CreateRequest,
+    GpuProvider,
+    GpuSpec,
+    Instance,
+    InstanceStatus,
+    PlanUnavailableError,
+    Preflight,
+    Quote,
+    State,
+)
 from studio.gpu.broker.runpod import LABEL_PREFIX, USER_AGENT, abbreviate, http_client, safe_env, shell_quote
 from studio.gpu.pods import Pod
 
@@ -234,7 +244,7 @@ class E2eProvider(GpuProvider):
                           f"${fixed(usd, 2)}/h (Rs {fixed(self._cfg.inr_per_usd, 0)} per $); stock unknown until create")
                 q = Quote("e2e", True, "ON-DEMAND", f"{plan.gpu}|{plan.sku}|{plan_name}|{self._image_of(plan)}", usd, detail)
                 prev = best.get(plan.sku)  # several OS templates per card: prefer the CUDA 12 one
-                best[plan.sku] = q if prev is None or (not ("Cuda12" in prev.gpu) and "Cuda12" in q.gpu) else prev
+                best[plan.sku] = q if prev is None or ("Cuda12" not in prev.gpu and "Cuda12" in q.gpu) else prev
         out = sorted(best.values(), key=lambda q: q.hourly_usd)
         self._last_why = ("" if out else "no allowed GPU plan in the E2E plan list" if not why
                           else f"every plan was rejected: {list(why)}")

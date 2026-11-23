@@ -144,9 +144,9 @@ def test_inr_prices_are_converted_to_usd_and_a_low_balance_fails_the_preflight()
 
 
 def test_config_reads_the_yaml_and_defaults():
-    from studio.gpu.broker.config import BrokerConfig  # noqa: F401  (same yaml section family)
     import yaml
 
+    from studio.gpu.broker.config import BrokerConfig  # noqa: F401  (same yaml section family)
     from studio.tests.test_pricing import TEST_CONFIG
 
     cfg = JarvislabsConfig.from_yaml(yaml.safe_load((TEST_CONFIG / "providers.yaml").read_text(encoding="utf-8")))

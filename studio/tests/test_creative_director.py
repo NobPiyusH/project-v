@@ -13,7 +13,6 @@ from studio.planner.presets import StylePresets
 from studio.production.creative_director import CreativeDirector, findings
 from studio.production.support import ProductionDeps
 from studio.tests.test_pricing import TEST_CONFIG, at
-from studio.workflow.stage import Stage
 
 SHOTS = {1: {"id": "s1", "ord": 0}, 2: {"id": "s2", "ord": 1}, 3: {"id": "s3", "ord": 2}}
 GOOD_VIDEO = VideoCritique(arc=4, hook=5, ending=4, variety=4, summary="strong", problem="")

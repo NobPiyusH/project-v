@@ -377,8 +377,8 @@ def test_an_openai_answer_is_booked_in_the_ledger_as_a_real_cost():
 
 
 def test_the_script_goes_to_the_script_model_and_the_concept_to_the_story_model():
-    from studio.agents.writer import WriterAgent
     from studio.agents.types import Concept
+    from studio.agents.writer import WriterAgent
     from studio.planner.plan import VideoPlan
     from studio.planner.presets import StylePresets
     from studio.tests.test_pricing import TEST_CONFIG

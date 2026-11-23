@@ -5,7 +5,7 @@ import json
 import logging
 import re
 import time
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import unquote
 
 import httpx
 import pytest

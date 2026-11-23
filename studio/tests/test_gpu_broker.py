@@ -9,7 +9,7 @@ import pytest
 from studio.gpu.broker import support
 from studio.gpu.broker.broker import AUTO, GpuBroker, NoGpuAvailableError, Pick, PodState, pick_key
 from studio.gpu.broker.config import BrokerConfig
-from studio.gpu.broker.provider import CreateRequest, GpuProvider, Instance, InstanceStatus, PlanUnavailableError, Quote, State
+from studio.gpu.broker.provider import GpuProvider, Instance, InstanceStatus, PlanUnavailableError, Quote, State
 from studio.gpu.broker.wallet import GpuWallet
 from studio.gpu.leases import Lease, OpenLease
 from studio.gpu.pods import GpuPodLimits, Pod
