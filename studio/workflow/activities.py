@@ -1,0 +1,365 @@
+"""Control activities of the Python control plane (port of VideoActivitiesImpl and ProducerActivitiesImpl). All database and LLM I/O happens
+here, never in workflow code. Every method takes and returns JSON-compatible values (see codec) and must be idempotent: Temporal may retry
+any call. `register()` exposes each method as a Temporal activity named `control.<method>` (`producer.<method>` for the Producer's)."""
+
+from __future__ import annotations
+
+import functools
+import json
+import uuid
+from collections.abc import Callable
+from decimal import Decimal
+from typing import Any
+
+from studio.media.types import (
+    AnimaticResult,
+    AssemblyResult,
+    ClipRequest,
+    ClipResult,
+    FootageFetchRequest,
+    FootageFetchResult,
+    FootageSearchResponse,
+    ImageReviewResult,
+    KeyframeRequest,
+    KeyframeResult,
+    MediaInspectResult,
+    MusicResult,
+    NarrationResult,
+    ProducerReviewResult,
+    ResearchRequest,
+    ResearchResult,
+    SmoothRequest,
+    SmoothResult,
+    StockRequest,
+    StockResult,
+)
+from studio.media.wire import from_json, to_json
+from studio.production.records import ImagePolicy
+from studio.video.clip_progress import ClipProgress
+from studio.workflow.codec import inspection_report_json, stage_result_json
+from studio.workflow.stage import Stage, StageMode
+from studio.workflow.types import StageResult
+
+
+def _id(s: str) -> uuid.UUID:
+    return uuid.UUID(s)
+
+
+def _ids(shot_ids: list[str] | None) -> list[uuid.UUID] | None:
+    return None if shot_ids is None else [uuid.UUID(s) for s in shot_ids]
+
+
+def _compact(o: Any) -> str:
+    return json.dumps(o, separators=(",", ":"))
+
+
+class ControlActivities:
+    """Everything the workflows ask the control plane to do. Collaborators are passed in so tests can fake any of them."""
+
+    def __init__(self, db: Any, planner: Any, *, researcher: Any, inspector: Any, creative: Any, research: Any, story: Any, music: Any, voice: Any,
+                 shots: Any, stock: Any, animatic: Any, video: Any, footage: Any, assembly: Any, finish: Any, sharpen: Any,
+                 clip_progress: ClipProgress | None = None):
+        self.db, self.planner, self.researcher = db, planner, researcher
+        self.inspector, self.creative = inspector, creative
+        self.research_stage, self.story, self.music, self.voice = research, story, music, voice
+        self.shots, self.stock_stage, self.animatic = shots, stock, animatic
+        self.video, self.footage, self.assembly, self.finish, self.sharpen = video, footage, assembly, finish, sharpen
+        self.clip_progress = clip_progress or ClipProgress()
+
+    # ---- plan and placeholder stages
+
+    def plan(self, video_id: str, prompt: str, owner_notes: str | None, attempt: int) -> dict[str, Any]:
+        outcome = self.planner.plan(_id(video_id), prompt, owner_notes)
+        artifact: dict[str, Any] = {"plan": outcome.plan.model_dump(), "stages": [s.name for s in outcome.stages], "source": outcome.source}
+        if outcome.fallback_reason is not None:
+            artifact["fallbackReason"] = outcome.fallback_reason
+        artifact_json = _compact(artifact)
+        self.db.execute("UPDATE video SET plan_json = CAST(%(plan)s AS jsonb), title = %(title)s, updated_at = now() WHERE id = %(id)s",
+                        {"plan": artifact_json, "title": outcome.plan.title, "id": _id(video_id)})
+        # The PLAN cost is booked once, by Llm, when the model answers.
+        p = outcome.plan
+        summary = (f"{p.title}: {p.format}, {p.durationSec}s, {p.aspectRatio}, preset {p.stylePreset}, narration {p.narration}, music {p.music}, "
+                   f"research {'yes' if p.needsResearch else 'no'} (planned by {outcome.source})")
+        return stage_result_json(StageResult(summary, artifact_json, outcome.stages))
+
+    def run_stage(self, video_id: str, stage: str, owner_notes: str | None, attempt: int) -> dict[str, Any]:
+        """Placeholder for stages that have no real work yet (Publish and similar): the backbone (modes, approvals, restarts) is real."""
+        st = Stage[stage]
+        artifact: dict[str, Any] = {"placeholder": True, "stage": st.name, "willDo": st.description}
+        if owner_notes is not None and owner_notes.strip():
+            artifact["ownerNotesApplied"] = owner_notes
+        summary = (f"Placeholder (real work arrives in M2+): {st.description}."
+                   + ("" if owner_notes is None or not owner_notes.strip() else f' Notes received: "{owner_notes}".'))
+        return stage_result_json(StageResult.of(summary, _compact(artifact)))
+
+    # ---- research -> concept -> script -> music -> narration
+
+    def research_request(self, video_id: str, owner_notes: str | None) -> dict[str, Any]:
+        return to_json(self.research_stage.research_request(_id(video_id), owner_notes))
+
+    def claude_research(self, video_id: str, request: dict[str, Any]) -> dict[str, Any]:
+        return to_json(self.researcher.research(_id(video_id), from_json(ResearchRequest, request)))
+
+    def save_research(self, video_id: str, result: dict[str, Any]) -> dict[str, Any]:
+        return stage_result_json(self.research_stage.save_research(_id(video_id), from_json(ResearchResult, result)))
+
+    def concept(self, video_id: str, owner_notes: str | None) -> dict[str, Any]:
+        return stage_result_json(self.story.concept(_id(video_id), owner_notes))
+
+    def script(self, video_id: str, owner_notes: str | None) -> dict[str, Any]:
+        return stage_result_json(self.story.script(_id(video_id), owner_notes))
+
+    def music_request(self, video_id: str, owner_notes: str | None) -> dict[str, Any]:
+        return to_json(self.music.music_request(_id(video_id), owner_notes))
+
+    def save_music(self, video_id: str, result: dict[str, Any]) -> dict[str, Any]:
+        return stage_result_json(self.music.save_music(_id(video_id), from_json(MusicResult, result)))
+
+    def narration_request(self, video_id: str) -> dict[str, Any]:
+        return to_json(self.voice.narration_request(_id(video_id)))
+
+    def save_narration(self, video_id: str, result: dict[str, Any]) -> dict[str, Any]:
+        return stage_result_json(self.voice.save_narration(_id(video_id), from_json(NarrationResult, result)))
+
+    def last_attempt(self, video_id: str, stage: str) -> int:
+        """Highest attempt recorded for a stage (0 if none). Used by re-runs so attempt numbers keep increasing."""
+        return int(self.db.rows("SELECT COALESCE(max(attempt), 0) AS n FROM stage_run WHERE video_id = %(v)s AND stage = %(s)s",
+                                {"v": _id(video_id), "s": stage})[0]["n"])
+
+    # ---- shot plan, keyframes, per-shot redo
+
+    def shot_plan(self, video_id: str, owner_notes: str | None) -> dict[str, Any]:
+        return stage_result_json(self.shots.shot_plan(_id(video_id), owner_notes))
+
+    def keyframe_request(self, video_id: str, owner_notes: str | None) -> dict[str, Any]:
+        return to_json(self.shots.keyframe_request(_id(video_id), owner_notes))
+
+    def save_keyframes(self, video_id: str, request: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
+        req = from_json(KeyframeRequest, request)
+        try:
+            return stage_result_json(self.shots.save_keyframes(_id(video_id), req, from_json(KeyframeResult, result)))
+        finally:
+            if req.gpu_url is not None:
+                self.shots.release_gpu(_id(video_id), "keyframes saved")
+
+    def shot_keyframe_request(self, video_id: str, shot_ids: list[str], owner_notes: str | None, policy: str | None) -> dict[str, Any]:
+        return to_json(self.shots.shot_keyframe_request(_id(video_id), _ids(shot_ids), owner_notes, ImagePolicy["AUTO" if policy is None else policy]))
+
+    def mark_shots(self, video_id: str, shot_ids: list[str], status: str | None, error: str | None) -> None:
+        self.shots.mark_shots(_id(video_id), _ids(shot_ids), status, error)
+
+    # ---- per-line voice redo
+
+    def line_narration_request(self, video_id: str, line_indexes: list[int], style_notes: str | None) -> dict[str, Any]:
+        return to_json(self.voice.line_narration_request(_id(video_id), list(line_indexes), style_notes))
+
+    def save_line_narration(self, video_id: str, result: dict[str, Any], style: str | None) -> dict[str, Any]:
+        return stage_result_json(self.voice.save_line_narration(_id(video_id), from_json(NarrationResult, result), style))
+
+    def mark_lines(self, video_id: str, line_indexes: list[int], status: str | None, why: str | None) -> None:
+        self.voice.mark_lines(_id(video_id), list(line_indexes), status, why)
+
+    def animatic_request(self, video_id: str) -> dict[str, Any]:
+        return to_json(self.animatic.animatic_request(_id(video_id)))
+
+    def save_animatic(self, video_id: str, result: dict[str, Any]) -> dict[str, Any]:
+        return stage_result_json(self.animatic.save_animatic(_id(video_id), from_json(AnimaticResult, result)))
+
+    # ---- Inspector and Creative Director
+
+    def inspection_request(self, video_id: str, stage: str) -> dict[str, Any] | None:
+        r = self.inspector.media_request(_id(video_id), Stage[stage])
+        return None if r is None else to_json(r)
+
+    def save_inspection(self, video_id: str, stage: str, attempt: int, media: dict[str, Any] | None) -> dict[str, Any]:
+        m = None if media is None else from_json(MediaInspectResult, media)
+        return inspection_report_json(self.inspector.evaluate(_id(video_id), Stage[stage], attempt, m))
+
+    def creative_shot_plan_review(self, video_id: str, attempt: int) -> list[dict[str, Any]]:
+        return to_json(self.creative.review_shot_plan(_id(video_id), attempt))
+
+    def image_review_request(self, video_id: str) -> dict[str, Any]:
+        return to_json(self.creative.image_review_request(_id(video_id)))
+
+    def save_image_review(self, video_id: str, attempt: int, result: dict[str, Any]) -> list[dict[str, Any]]:
+        return to_json(self.creative.save_image_review(_id(video_id), attempt, from_json(ImageReviewResult, result)))
+
+    def fix_keyframe_request(self, video_id: str, shot_ids: list[str], owner_notes: str | None) -> dict[str, Any]:
+        """Targeted redo of weak images: applies the Creative Director's suggested prompts, then builds the request."""
+        ids = _ids(shot_ids)
+        self.creative.apply_suggested_prompts(_id(video_id), ids)
+        return to_json(self.shots.shot_keyframe_request(_id(video_id), ids, owner_notes, ImagePolicy.AUTO))
+
+    # ---- moving video per shot
+
+    def clip_estimate(self, video_id: str, kind: str, shot_ids: list[str] | None) -> dict[str, Any]:
+        return to_json(self.video.estimate(_id(video_id), kind, _ids(shot_ids)))
+
+    def clip_request(self, video_id: str, kind: str, shot_ids: list[str] | None) -> dict[str, Any]:
+        request = self.video.clip_request(_id(video_id), kind, _ids(shot_ids))
+        self.clip_progress.start_batch(_id(video_id))
+        self.video.mark_clips(_id(video_id), [_id(j.shot_id) for j in request.jobs], "RENDERING", None)
+        return to_json(request)
+
+    def save_clips(self, video_id: str, request: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
+        req = from_json(ClipRequest, request)
+        try:
+            return stage_result_json(self.video.save_clips(_id(video_id), req, from_json(ClipResult, result)))
+        finally:
+            if req.provider == "pod":
+                self.video.release_gpu(_id(video_id), "clip batch saved")
+
+    def mark_clips(self, video_id: str, shot_ids: list[str], status: str | None, error: str | None) -> None:
+        self.video.mark_clips(_id(video_id), _ids(shot_ids), status, error)
+
+    # ---- stock lane and real footage
+
+    def stock_requests(self, video_id: str) -> list[dict[str, Any]]:
+        return to_json(self.stock_stage.requests(_id(video_id)))
+
+    def save_stock(self, video_id: str, request: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
+        return stage_result_json(self.stock_stage.save(_id(video_id), from_json(StockRequest, request), from_json(StockResult, result)))
+
+    def footage_search_request(self, video_id: str, shot_ids: list[str] | None, query: str | None) -> dict[str, Any]:
+        return to_json(self.footage.search_request(_id(video_id), _ids(shot_ids), query))
+
+    def save_footage_candidates(self, video_id: str, result: dict[str, Any]) -> dict[str, Any]:
+        return stage_result_json(self.footage.save_candidates(_id(video_id), from_json(FootageSearchResponse, result)))
+
+    def footage_fetch_request(self, video_id: str, shot_id: str, nasa_id: str, start_sec: float | None) -> dict[str, Any]:
+        return to_json(self.footage.fetch_request(_id(video_id), _id(shot_id), nasa_id, start_sec))
+
+    def save_footage(self, video_id: str, request: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
+        return stage_result_json(self.footage.save_footage(_id(video_id), from_json(FootageFetchRequest, request),
+                                                           from_json(FootageFetchResult, result)))
+
+    # ---- assembly and finishing
+
+    def assembly_request(self, video_id: str) -> dict[str, Any]:
+        return to_json(self.assembly.assembly_request(_id(video_id)))
+
+    def save_master(self, video_id: str, result: dict[str, Any]) -> dict[str, Any]:
+        return stage_result_json(self.assembly.save_master(_id(video_id), from_json(AssemblyResult, result)))
+
+    def smooth_estimate(self, video_id: str) -> dict[str, Any]:
+        return to_json(self.finish.estimate(_id(video_id)))
+
+    def smooth_request(self, video_id: str) -> dict[str, Any]:
+        return to_json(self.finish.request(_id(video_id)))
+
+    def save_smooth(self, video_id: str, request: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
+        return stage_result_json(self.finish.save(_id(video_id), from_json(SmoothRequest, request), from_json(SmoothResult, result)))
+
+    def sharp_estimate(self, video_id: str) -> dict[str, Any]:
+        return to_json(self.sharpen.estimate(_id(video_id)))
+
+    def sharp_request(self, video_id: str) -> dict[str, Any]:
+        return to_json(self.sharpen.request(_id(video_id)))
+
+    def save_sharp(self, video_id: str, request: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
+        return stage_result_json(self.sharpen.save(_id(video_id), from_json(SmoothRequest, request), from_json(SmoothResult, result)))
+
+    # ---- the database mirror of the workflow
+
+    def record_stage(self, video_id: str, stage: str, attempt: int, mode: str, status: str, summary: str | None, artifact_json: str | None,
+                     owner_notes: str | None) -> None:
+        """Upsert the stage_run row and the video's status / current stage."""
+        vid = _id(video_id)
+        done = status not in ("RUNNING", "WAITING_APPROVAL")
+        with self.db.transaction():
+            self.db.execute(
+                """
+                INSERT INTO stage_run (id, video_id, stage, attempt, mode, status, summary, artifact_json, owner_notes, finished_at)
+                VALUES (%(rid)s, %(vid)s, %(stage)s, %(attempt)s, %(mode)s, %(status)s, %(summary)s, CAST(%(artifact)s AS jsonb), %(notes)s,
+                        CASE WHEN CAST(%(done)s AS boolean) THEN now() END)
+                ON CONFLICT (video_id, stage, attempt) DO UPDATE SET
+                    mode = EXCLUDED.mode, status = EXCLUDED.status,
+                    summary = COALESCE(EXCLUDED.summary, stage_run.summary),
+                    artifact_json = COALESCE(EXCLUDED.artifact_json, stage_run.artifact_json),
+                    owner_notes = COALESCE(EXCLUDED.owner_notes, stage_run.owner_notes),
+                    finished_at = EXCLUDED.finished_at,
+                    review_deadline = CASE WHEN EXCLUDED.status = 'WAITING_APPROVAL' THEN stage_run.review_deadline END
+                """,
+                {"rid": uuid.uuid4(), "vid": vid, "stage": stage, "attempt": attempt, "mode": mode, "status": status, "summary": summary,
+                 "artifact": artifact_json, "notes": owner_notes, "done": done})
+            if status == "SKIPPED":
+                return
+            video_status = "WAITING" if status == "WAITING_APPROVAL" else "RUNNING"
+            self.db.execute("UPDATE video SET status = %(status)s, current_stage = %(stage)s, updated_at = now() "
+                            "WHERE id = %(id)s AND status NOT IN ('COMPLETED','CANCELLED')", {"status": video_status, "stage": stage, "id": vid})
+
+    def set_review_deadline(self, video_id: str, stage: str, attempt: int, deadline_iso: str | None) -> None:
+        """When a REVIEW-mode stage will continue on its own (ISO-8601 instant), or None once it is held/decided."""
+        self.db.execute("UPDATE stage_run SET review_deadline = CAST(%(d)s AS timestamptz) WHERE video_id = %(v)s AND stage = %(s)s AND attempt = %(a)s",
+                        {"d": deadline_iso, "v": _id(video_id), "s": stage, "a": attempt})
+
+    def set_video_status(self, video_id: str, status: str) -> None:
+        self.db.execute("UPDATE video SET status = CAST(%(status)s AS text), current_stage = CASE WHEN CAST(%(status)s AS text) = 'COMPLETED' "
+                        "THEN NULL ELSE current_stage END, updated_at = now() WHERE id = %(id)s", {"status": status, "id": _id(video_id)})
+
+
+class ProducerActivities:
+    """AI Producer control activities: what to review, and saving the review as advice."""
+
+    def __init__(self, producer: Any, voice: Any):
+        self.producer, self.voice = producer, voice
+
+    def review_request(self, video_id: str, stage: str) -> dict[str, Any] | None:
+        r = self.producer.review_request(_id(video_id), stage)
+        return None if r is None else to_json(r)
+
+    def save_review(self, video_id: str, stage: str, attempt: int, result: dict[str, Any]) -> dict[str, Any]:
+        return to_json(self.producer.save_review(_id(video_id), stage, attempt, from_json(ProducerReviewResult, result)))
+
+    def spend_advice(self, video_id: str, estimate_inr: float) -> str:
+        """Advice on a money step (no AI call): would the Producer approve it within the owner's limits?"""
+        return self.producer.spend_advice(_id(video_id), Decimal(str(estimate_inr)))
+
+    def deciding(self) -> bool:
+        return self.producer.deciding()
+
+    def mark_acted(self, decision_id: str | None, acted: str) -> None:
+        if decision_id is not None:
+            self.producer.mark_acted(_id(decision_id), acted)
+
+    def may_redo(self, video_id: str, round_: int) -> bool:
+        return self.producer.may_redo(_id(video_id), round_)
+
+    def shot_ids_for(self, video_id: str, item_ids: list[str]) -> list[str]:
+        return self.producer.shot_ids_for(_id(video_id), list(item_ids))
+
+    def narration_redo_request(self, video_id: str, notes: str | None) -> dict[str, Any]:
+        from studio.production.producer import with_style
+
+        return to_json(with_style(self.voice.narration_request(_id(video_id)), notes))
+
+    def spend_decision(self, video_id: str, stage: str, estimate_inr: float) -> dict[str, Any]:
+        return to_json(self.producer.spend_decision(_id(video_id), stage, Decimal(str(estimate_inr))))
+
+
+def activity_functions(control: ControlActivities, producer: ProducerActivities) -> list[Callable[..., Any]]:
+    """Every public method as a Temporal activity: `control.<method>` and `producer.<method>`. Imported lazily (temporalio is a worker dependency)."""
+    from temporalio import activity
+
+    out: list[Callable[..., Any]] = []
+    for prefix, obj in (("control", control), ("producer", producer)):
+        for name in dir(type(obj)):
+            if name.startswith("_"):
+                continue
+            fn = getattr(obj, name)
+            if not callable(fn):
+                continue
+
+            @functools.wraps(fn)
+            def wrapper(*args: Any, __fn: Callable[..., Any] = fn) -> Any:
+                return __fn(*args)
+
+            out.append(activity.defn(name=f"{prefix}.{name}")(wrapper))
+    return out
+
+
+def activity_names(control: type = ControlActivities, producer: type = ProducerActivities) -> list[str]:
+    return [f"{p}.{n}" for p, c in (("control", control), ("producer", producer)) for n in dir(c) if not n.startswith("_") and callable(getattr(c, n))]
+
+
+__all__ = ["ControlActivities", "ProducerActivities", "StageMode", "activity_functions", "activity_names"]

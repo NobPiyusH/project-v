@@ -1,5 +1,25 @@
 # Java to Python migration plan (staged, never big-bang)
 
+## Status, 23 Nov 2026 (end of S5 port; branch claude/python-migration-88b813)
+
+**S5 (video, production, workflow) is ported and green on fakes. Java stays live; nothing is switched, pushed or merged.**
+
+Done (all in `studio/`, each with ported tests; scratch Postgres with the real schema, Temporal's local time-skipping test server, no network, no spend):
+- `video/service.py` VideoService: `REDO_WITH`, guards, decisions as taste signals, behind a `WorkflowGateway`.
+- `production/`: research, story, music, voice, animatic (`stages_m2a.py`); shot plan, keyframes, per-shot redo, stock lane (`shot_stage.py`); clips (`video_stage.py`); `video_gpu.py`; footage, assembly, smooth, sharpen (`finishing_stages.py`); AI Producer control side (`producer.py`); read model; plus the earlier Inspector, Creative Director, timing, diagram specs, stop rule.
+- `workflow/`: `video_production.py` (main workflow + shot/clip/voice redo, footage, creative review workflows, new type names `*Py` on queue `projectv-control-py`), `activities.py` (`control.*` and `producer.*` activities), `codec.py`, `runtime.py` (TemporalGateway, worker builder).
+- Ported Java tests: VideoProductionWorkflowTest (all cases plus pause/status), ProductionPersistenceTest (voice, footage, master, smooth, sharpen, clips, producer), StockLaneTest, VideoGpuTest, VideoLanesTest, MoneyCapsTest, StoredLine/redo rules via earlier commits.
+
+Left (not done):
+- `VideoGpu` talks to a `PodGpu` protocol; the real one is `DreamGpu`, which is S6. Until S6 the pod route (`provider-*=broker`) has only a fake behind it.
+- Dream-short workflows and the autopilot (S6), the HTTP routes and dashboard switch (S7). The `ProductionService` front-door class was not ported (it only delegated); the dashboard routes will call the stages directly.
+- The `ProducerHooks` wiring into VideoService, the periodic `VideoGpu.release_idle` call and the worker start-up are wiring for S7.
+- A PRODUCER-mode workflow path is ported but only the Producer activities (not the workflow branch) are tested.
+
+Could not verify without spend (each needs the owner's yes): a real clip batch or keyframe batch on a pod or Modal, paid LLM calls (Writer, Director, Creative Director, Producer), a recorded run compared with Java (stop rule 4c), and the contract replay of the HTTP routes (no routes yet).
+
+Decisions to note: LLM calls in the shot plan, concept and script run before the stage's database transaction (so their cost entry is kept even if the stage then fails; Java rolled it back). Provider health is reported even when a keyframe or clip stage fails.
+
 Status: DRAFT for the owner. Written 23 Nov 2026. Direction decided 23 Nov (post-tv-queue items 10-13): Python-only studio on serverless GPU.
 Risk label: **HIGH** if done in one go; **MEDIUM** done stage by stage as below.
 

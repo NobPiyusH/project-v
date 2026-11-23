@@ -291,3 +291,29 @@ def test_animatic_needs_a_keyframe_and_save_records_the_asset(world):
     a = db.rows("SELECT a.width, a.height, p.model, p.ai_generated FROM video v JOIN asset a ON a.id = v.animatic_asset_id "
                 "JOIN provenance p ON p.id = a.provenance_id WHERE v.id = %(v)s", {"v": video})[0]
     assert a == {"width": 1080, "height": 1920, "model": "ffmpeg animatic", "ai_generated": False}
+
+
+# ---------------------------------------------------------------------------------------------------- read model
+
+
+def test_the_production_read_model_shows_what_the_dashboard_needs(world):
+    from studio.production.read_model import ProductionReadModel
+
+    db, video = world
+    model = ProductionReadModel(make_deps(db))
+    empty = model.production(video)
+    assert empty["research"] is None and empty["concept"] is None and empty["music"] is None and empty["shots"] == []
+    assert empty["script"]["voiceName"] == "Charon" and empty["animaticAssetId"] is None and empty["animaticOutdated"] is False
+    assert (empty["linesNeedingVoice"], empty["redoingLines"], empty["redoingShots"]) == (0, 0, 0)
+    ResearchStage(make_deps(db)).save_research(video, ResearchResult([Fact("x", [])], [], ["q1", "q2"], "gemini-3.6-flash", Usage(1, 1, 0, 2)))
+    VoiceStage(make_deps(db)).save_narration(video, take("s3://b/v.wav", 2.0))
+    add_shot(db, video, 0, 0.0, 3.0, "s3://b/k.png", 0)
+    st = AnimaticStage(make_deps(db))
+    st.save_animatic(video, AnimaticResult("s3://b/a.mp4", 3.0))
+    db.execute("UPDATE asset SET created_at = now() - interval '1 hour' WHERE id = (SELECT animatic_asset_id FROM video WHERE id = %(v)s)", {"v": video})
+    full = model.production(video)
+    assert full["research"]["queries"] == ["q1", "q2"] and full["research"]["version"] == 1 and json.loads(full["research"]["facts"])[0]["text"] == "x"
+    assert full["animaticAssetId"] is not None and full["animaticOutdated"] is True, "the keyframe and the voice are newer than the animatic"
+    assert full["shots"][0]["prompt_json"]["lineIndex"] == 0 and "keyframe_uri" not in full["shots"][0]
+    db.execute("UPDATE shot SET status = 'REDOING'")
+    assert model.production(video)["redoingShots"] == 1
