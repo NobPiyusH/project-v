@@ -54,6 +54,11 @@ class H(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path.startswith("/ready"):
             return self._send(200 if os.path.exists("/workspace/READY") else 503)
+        if self.path == "/log/" + TOKEN:
+            try:
+                return self._send(200, open("/workspace/logs/boot.log", "rb").read()[-6000:])
+            except Exception as e:  # noqa: BLE001
+                return self._send(200, str(e).encode())
         p, _ = self._path("/get/")
         if not p or not os.path.isfile(p):
             return self._send(404)

@@ -1,0 +1,5 @@
+[
+  {"scene": "a", "frames": "1-4", "chunk": 2, "samples": 64, "kill_after_chunks": 1, "out": "E:/project-data/blender/milky-seas/renders/a_earth_4k"},
+  {"scene": "b", "frames": "1-2", "chunk": 2, "samples": 64, "out": "E:/project-data/blender/milky-seas/renders/b_ship_4k"},
+  {"scene": "c", "frames": "1-2", "chunk": 2, "samples": 96, "out": "E:/project-data/blender/milky-seas/renders/c_macro_4k"}
+]

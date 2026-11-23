@@ -21,9 +21,10 @@ SCENES = {
     "b": {"blend": "scenes/b_ship.blend", "files": [], "remote": {"textures/milkyway_2020_8k.exr": MW_URL}},
     "c": {"blend": "scenes/c_macro.blend", "files": [], "remote": {}},
 }
-GPUS = ["NVIDIA L40S", "NVIDIA RTX 6000 Ada Generation", "NVIDIA L40", "NVIDIA A40", "NVIDIA RTX A6000"]
+GPUS = ["NVIDIA L40S", "NVIDIA RTX 6000 Ada Generation", "NVIDIA L40", "NVIDIA A40", "NVIDIA RTX A6000", "NVIDIA GeForce RTX 4090", "NVIDIA RTX 5000 Ada Generation"]
 IMAGE = "runpod/pytorch:2.8.0-py3.11-cuda12.8.1-cudnn-devel-ubuntu22.04"
 BLENDER_URL = "https://download.blender.org/release/Blender5.3/blender-5.3.0-linux-x64.tar.xz"
+LEASE = os.environ.get("GPU_LEASE", r"C:\dev\project-v	ools\gpu_lease\lease.py")
 UA = {"User-Agent": "projectv-render"}
 
 
@@ -62,18 +63,19 @@ nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader
 (nvidia-smi --query-gpu=timestamp,memory.used,utilization.gpu --format=csv,noheader -l 1 > /workspace/logs/gpu.csv 2>&1 &)
 apt-get update -qq >/dev/null 2>&1
 apt-get install -y -qq libegl1 libgl1 libxkbcommon0 libxi6 libxrender1 libsm6 libxxf86vm1 libxfixes3 libvulkan1 xz-utils bc >/dev/null 2>&1 &
+APT=$!
 echo "$REMOTE_B64" | base64 -d > /workspace/remote.txt
 while read -r dst url; do [ -n "$dst" ] && mkdir -p /workspace/ms/$(dirname $dst) && (curl -sL -o /workspace/ms/$dst "$url" &) ; done < /workspace/remote.txt
 curl -sL "$BLENDER_URL" -o /workspace/b.tar.xz && tar xf /workspace/b.tar.xz -C /workspace && mv /workspace/blender-5.3.0-linux-x64 /workspace/blender && rm /workspace/b.tar.xz
-wait
+wait $APT
 sleep 2
 echo "BOOT COMPLETE $(( $(date +%s)-T0 ))s"
 touch /workspace/READY
 sleep infinity
 '''
 
-    def __init__(self, job, args, state_dir):
-        self.job, self.args = job, args
+    def __init__(self, job, args, state_dir, scenes):
+        self.job, self.args, self.scenes = job, args, scenes
         self.key = read_key()
         self.state_path = os.path.join(state_dir, "pods.json")
         self.pod = None
@@ -123,7 +125,7 @@ sleep infinity
                {"key": "REMOTE_B64", "value": base64.b64encode(remote.encode()).decode()}, {"key": "BLENDER_URL", "value": BLENDER_URL}]
         for cloud in ("SECURE", "COMMUNITY"):
             for g in GPUS:
-                inp = {"cloudType": cloud, "gpuCount": 1, "gpuTypeId": g, "name": "projectv-blender-" + a.scene, "imageName": IMAGE,
+                inp = {"cloudType": cloud, "gpuCount": 1, "gpuTypeId": g, "name": "projectv-blender", "imageName": IMAGE,
                        "containerDiskInGb": 40, "volumeInGb": 0, "minVcpuCount": 4, "minMemoryInGb": 32, "ports": "8189/http",
                        "dockerArgs": 'bash -c "echo %s | base64 -d | bash"' % boot_b64, "env": env}
                 r = self.gql("mutation($input: PodFindAndDeployOnDemandInput){ podFindAndDeployOnDemand(input:$input){ id costPerHr } }", {"input": inp})
@@ -139,6 +141,12 @@ sleep infinity
                     subprocess.Popen([sys.executable, os.path.join(HERE, "killer.py"), d["id"], str(int(a.max_minutes * 60 + 300)), self.state_path],
                                      creationflags=0x00000008 | 0x00000200 if os.name == "nt" else 0, close_fds=True,
                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    # watchdog lease (root cause of the 'vanishing pods': the studio GPU watchdog kills projectv-* pods with no lease after 10 min)
+                    self.lease_state = os.path.join(os.path.dirname(self.state_path), "lease_%s.json" % d["id"])
+                    json.dump({"released": False}, open(self.lease_state, "w"))
+                    subprocess.Popen([sys.executable, LEASE, "keep", "runpod", d["id"], "projectv-blender", "milky seas render", "--state", self.lease_state,
+                                      "--max-minutes", str(int(a.max_minutes + 20))],
+                                     creationflags=0x08000000 | 0x00000200 if os.name == "nt" else 0, close_fds=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     cost_log("- %s rented pod `%s` %s %s $%.2f/h (job %s)" % (time.strftime("%Y-%m-%d %H:%M"), d["id"], g, cloud, price, self.job))
                     return
                 say("  no %s in %s: %s" % (g, cloud, str((r.get("errors") or [{}])[0].get("message"))[:80]))
@@ -150,6 +158,10 @@ sleep infinity
         pid = self.pod["id"]
         ok = self.terminate(pid)
         mins = (time.time() - self.pod["created"]) / 60
+        try:
+            json.dump({"released": True}, open(self.lease_state, "w"))     # lease keeper releases; watchdog sweeps the pod as a second line
+        except Exception:
+            pass
         st = json.load(open(self.state_path))
         st["released"].append(pid); json.dump(st, open(self.state_path, "w"))
         cost = mins / 60 * self.pod["price"]
@@ -201,7 +213,7 @@ sleep infinity
             self.check_dead()
             raise
 
-    def wait_ready(self, limit=12 * 60):
+    def wait_ready(self, limit=9 * 60):
         t0 = time.time()
         while time.time() - t0 < limit:
             try:
@@ -219,6 +231,10 @@ sleep infinity
             if self.api_status(self.pod["id"]) in ("GONE", "EXITED"):
                 raise PodDead("pod disappeared during boot")
             time.sleep(8)
+        try:
+            say("BOOT LOG TAIL: " + self._req("GET", "/log/" + self.pod["token"], timeout=20).decode(errors="replace")[-1500:].replace(chr(10), " | "))
+        except Exception as e:  # noqa: BLE001
+            say("pod server never answered (%s)" % type(e).__name__)
         raise PodDead("pod not ready after %d s" % limit)
 
     def put_file(self, rel, local):
@@ -248,12 +264,15 @@ sleep infinity
     def setup(self):
         self.rent()
         self.wait_ready()
-        sc = SCENES[self.args.scene]
-        for rel in [sc["blend"]] + sc["files"]:
-            self.put_file(rel, os.path.join(ROOT, rel))
         self.put_file("render_job.py", os.path.join(SCENE_SCRIPTS, "render_job.py"))
+        remote_all = []
+        for name in self.scenes:
+            sc = SCENES[name]
+            for rel in [sc["blend"]] + sc["files"]:
+                self.put_file(rel, os.path.join(ROOT, rel))
+            remote_all += list(sc["remote"])
         # remote files (the 8k star map): wait until the pod finished downloading them
-        for rel in sc["remote"]:
+        for rel in set(remote_all):
             for _ in range(30):
                 out = self.sh("stat -c%%s /workspace/ms/%s 2>/dev/null || echo 0" % rel).split("]")[-1].strip()
                 if out.isdigit() and int(out) > 100_000_000:
@@ -304,9 +323,10 @@ sleep infinity
 # ----------------------------------------------------------------------------------------------------------------
 class LocalBackend:
     """Free logic test: renders with the laptop's Blender (EEVEE, low res). Same interface; death is simulated."""
-    def __init__(self, job, args, state_dir):
-        self.job, self.args = job, args
+    def __init__(self, job, args, state_dir, scenes):
+        self.job, self.args, self.scenes = job, args, scenes
         self.dir = os.path.join(ROOT, "work", "local_" + job)
+        self.args_dir = None
         self.pod = None; self.pods_used = []; self.n_setup = 0; self.proc = None
 
     def setup(self):
@@ -342,6 +362,7 @@ class LocalBackend:
     def simulate_death(self):
         say("TEST: simulated pod death")
         if self.proc: self.proc.kill()
+        self.proc = None
         for f in os.listdir(self.dir):                 # the dead 'pod' loses its disk
             os.remove(os.path.join(self.dir, f))
         raise PodDead("simulated")
@@ -359,96 +380,117 @@ def runs(missing, chunk):
     return out
 
 
+def run_task(be, task, st):
+    """Render one task (scene, frame range, size) to completion; raises nothing but PodDead is handled by the caller loop."""
+    f0, f1 = task.f0, task.f1
+
+    def have():
+        return {f for f in range(f0, f1 + 1) if os.path.exists(os.path.join(task.out, "frame_%04d.png" % f))}
+    be.job, be.args = task.job, task
+    if hasattr(be, "dir"):
+        be.dir = os.path.join(ROOT, "work", "local_" + task.job)
+    while have() != set(range(f0, f1 + 1)):
+        if time.time() > st["deadline"]:
+            say("max minutes reached, stopping"); return False
+        if st["pods"] >= st["max_pods"]:
+            say("too many pod replacements, stopping"); return False
+        try:
+            if be.pod is None:
+                st["pods"] += 1
+                be.setup()
+            for (a, b) in runs(set(range(f0, f1 + 1)) - have(), task.chunk):
+                be.start_chunk(a, b)
+                t0 = time.time()
+                pulled = set()
+                while True:
+                    if time.time() > st["deadline"]:
+                        raise TimeoutError("deadline")
+                    time.sleep(3)
+                    try:
+                        done, fin, rc = be.poll(a, b)
+                    except PodDead:
+                        raise
+                    except Exception:
+                        continue                         # transient; check_dead() raises PodDead once it is really gone
+                    for f, d in sorted(done.items()):
+                        if f in pulled or not (a <= f <= b):
+                            continue
+                        png = be.fetch(f)
+                        tmp = os.path.join(task.out, "frame_%04d.png.part" % f)
+                        open(tmp, "wb").write(png)
+                        os.replace(tmp, os.path.join(task.out, "frame_%04d.png" % f))      # pulled to the laptop at once
+                        open(os.path.join(task.out, "frame_%04d.json" % f), "w").write(json.dumps(d))
+                        st["stats"].setdefault(task.job, {})[f] = d; pulled.add(f)
+                        say("[%s] frame %d pulled (%.1f s on pod, %d KB)" % (task.job, f, d["seconds"], len(png) // 1024))
+                    if fin and pulled >= set(range(a, b + 1)):
+                        break
+                    if fin and rc not in ("0", ""):
+                        raise RuntimeError("blender exited with %s for chunk %d-%d (see logs/chunk_%d_%d.log on the pod)" % (rc, a, b, a, b))
+                st["chunks"] += 1
+                say("[%s] chunk %d-%d done in %.0f s" % (task.job, a, b, time.time() - t0))
+                if task.kill_after_chunks and st["chunks"] == task.kill_after_chunks and not st["killed"]:
+                    st["killed"] = True
+                    be.simulate_death()                       # real run: terminates the pod; the next poll finds it dead
+        except PodDead as e:
+            say("POD DEAD (%s): renting a new one and resuming from the first missing frame (%d of %d frames of this task are safe on the laptop)" % (e, len(have()), f1 - f0 + 1))
+            cost_log("- %s pod died / was lost: %s; resuming with %d frames of %s already pulled" % (time.strftime("%H:%M"), e, len(have()), task.job))
+            be.release()
+        except TimeoutError:
+            return False
+    return True
+
+
+def parse_task(d, defaults):
+    import types
+    o = types.SimpleNamespace(**{**defaults, **d})
+    o.f0, o.f1 = [int(x) for x in str(o.frames).split("-")]
+    o.job = o.__dict__.get("job") or "%s_%dx%d_%s" % (o.scene, o.width, o.height, o.engine.lower())
+    os.makedirs(o.out, exist_ok=True)
+    return o
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--scene", required=True, choices=list(SCENES)); ap.add_argument("--frames", default="1-1")
+    ap.add_argument("--plan", help="JSON file: list of tasks {scene, frames, width, height, engine, samples, out, chunk, kill_after_chunks}; one pod serves them all")
+    ap.add_argument("--scene", choices=list(SCENES)); ap.add_argument("--frames", default="1-1")
     ap.add_argument("--width", type=int, default=2160); ap.add_argument("--height", type=int, default=3840)
     ap.add_argument("--engine", default="CYCLES"); ap.add_argument("--samples", type=int, default=64)
     ap.add_argument("--denoiser", default="OPTIX"); ap.add_argument("--chunk", type=int, default=6)
-    ap.add_argument("--out", required=True); ap.add_argument("--job", default=None)
+    ap.add_argument("--out"); ap.add_argument("--job", default=None)
     ap.add_argument("--backend", default="runpod", choices=["runpod", "local"])
-    ap.add_argument("--kill-after-chunks", type=int, default=0); ap.add_argument("--simulate-death-after", type=int, default=0)
+    ap.add_argument("--kill-after-chunks", type=int, default=0)
+    ap.add_argument("--simulate-death-after", type=int, default=0, help="local backend only")
     ap.add_argument("--max-minutes", type=float, default=40); ap.add_argument("--max-price", type=float, default=1.6)
     ap.add_argument("--max-pods", type=int, default=4)
     args = ap.parse_args()
-    f0, f1 = [int(x) for x in args.frames.split("-")]
-    job = args.job or "%s_%dx%d_%s" % (args.scene, args.width, args.height, args.engine.lower())
-    os.makedirs(args.out, exist_ok=True)
+    defaults = dict(engine=args.engine, samples=args.samples, denoiser=args.denoiser, chunk=args.chunk, width=args.width, height=args.height,
+                    kill_after_chunks=args.kill_after_chunks or args.simulate_death_after, max_minutes=args.max_minutes, max_price=args.max_price)
+    raw = json.load(open(args.plan)) if args.plan else [dict(scene=args.scene, frames=args.frames, out=args.out, job=args.job)]
+    tasks = [parse_task(d, defaults) for d in raw]
+    scenes = sorted({t.scene for t in tasks})
     state_dir = os.path.join(ROOT, "work", "pods")
-    be = (RunPodBackend if args.backend == "runpod" else LocalBackend)(job, args, state_dir)
-    deadline = time.time() + args.max_minutes * 60
-    stats = {}
-    chunks_pulled = 0
-    pods = 0
-
-    def have():
-        return {f for f in range(f0, f1 + 1) if os.path.exists(os.path.join(args.out, "frame_%04d.png" % f))}
-
+    be = (RunPodBackend if args.backend == "runpod" else LocalBackend)(tasks[0].job, tasks[0], state_dir, scenes)
+    st = {"deadline": time.time() + args.max_minutes * 60, "pods": 0, "max_pods": args.max_pods, "stats": {}, "chunks": 0, "killed": False}
+    peak = None
     try:
-        while have() != set(range(f0, f1 + 1)):
-            if time.time() > deadline:
-                say("max minutes reached, stopping with %d/%d frames" % (len(have()), f1 - f0 + 1)); break
-            if pods >= args.max_pods:
-                say("too many pod replacements, stopping"); break
-            try:
-                pods += 1
-                be.setup()
-                for (a, b) in runs(set(range(f0, f1 + 1)) - have(), args.chunk):
-                    be.start_chunk(a, b)
-                    t0 = time.time()
-                    pulled = set()
-                    while True:
-                        if time.time() > deadline:
-                            raise TimeoutError("deadline")
-                        time.sleep(3)
-                        try:
-                            done, fin, rc = be.poll(a, b)
-                        except PodDead:
-                            raise
-                        except Exception:
-                            continue                         # transient; check_dead() raises PodDead when it is really gone
-                        for f, d in sorted(done.items()):
-                            if f in pulled or not (a <= f <= b):
-                                continue
-                            png = be.fetch(f)
-                            tmp = os.path.join(args.out, "frame_%04d.png.part" % f)
-                            open(tmp, "wb").write(png)
-                            os.replace(tmp, os.path.join(args.out, "frame_%04d.png" % f))      # pulled to the laptop at once
-                            open(os.path.join(args.out, "frame_%04d.json" % f), "w").write(json.dumps(d))
-                            stats[f] = d; pulled.add(f)
-                            say("frame %d pulled (%.1f s on pod, %d KB)" % (f, d["seconds"], len(png) // 1024))
-                        if fin and pulled >= set(range(a, b + 1)):
-                            break
-                        if fin and rc not in ("0", ""):
-                            raise RuntimeError("blender exited with %s for chunk %d-%d" % (rc, a, b))
-                    chunks_pulled += 1
-                    say("chunk %d-%d done in %.0f s" % (a, b, time.time() - t0))
-                    if args.kill_after_chunks and chunks_pulled == args.kill_after_chunks and pods == 1:
-                        be.simulate_death()                       # real runs: terminates the pod; next poll detects the death
-                    if args.simulate_death_after and chunks_pulled == args.simulate_death_after and pods == 1:
-                        be.simulate_death()
-            except PodDead as e:
-                say("POD DEAD (%s): renting a new one and resuming from the first missing frame (%d of %d frames safe on the laptop)" % (e, len(have()), f1 - f0 + 1))
-                cost_log("- %s pod died / was lost: %s; resumed with %d frames already pulled" % (time.strftime("%H:%M"), e, len(have())))
-                be.release()
-                continue
-            except TimeoutError:
+        for task in tasks:
+            if not run_task(be, task, st):
                 break
     finally:
-        peak = None
         try:
             if be.pod and args.backend == "runpod":
                 peak = be.gpu_peak_mb()
         except Exception:
             pass
         be.release()
-        if stats:
-            secs = [d["seconds"] for d in stats.values()]
-            summ = {"job": job, "frames_done": len(have()), "frames_total": f1 - f0 + 1, "pods_used": len(be.pods_used), "gpu_peak_mb": peak,
-                    "seconds_per_frame_mean": round(sum(secs) / len(secs), 2), "seconds_per_frame_min": min(secs), "seconds_per_frame_max": max(secs),
-                    "vram_after_frame_mb": max((d.get("vram_mb") or 0) for d in stats.values())}
-            json.dump(summ, open(os.path.join(args.out, "summary.json"), "w"), indent=1)
-            say("SUMMARY " + json.dumps(summ))
+        for task in tasks:
+            stats = st["stats"].get(task.job)
+            if stats:
+                secs = [d["seconds"] for d in stats.values()]
+                summ = {"job": task.job, "frames_done": len(stats), "frames_total": task.f1 - task.f0 + 1, "pods_used": len(be.pods_used), "gpu_peak_mb_whole_run": peak,
+                        "seconds_per_frame": sorted(secs), "vram_after_frame_mb": max((d.get("vram_mb") or 0) for d in stats.values())}
+                json.dump(summ, open(os.path.join(task.out, "summary.json"), "w"), indent=1)
+                say("SUMMARY " + json.dumps(summ))
 
 
 if __name__ == "__main__":
