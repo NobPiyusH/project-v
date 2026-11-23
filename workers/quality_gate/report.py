@@ -23,8 +23,9 @@ def to_markdown(video: dict, results: list[CheckResult], cost: dict) -> str:
          f"Paid checks this run: ${cost.get('run_usd', 0):.4f} (Rs {cost.get('run_inr', 0):.2f}), {cost.get('calls', 0)} calls.", "",
          "| Check | Result | FAIL | WARN |", "|---|---|---|---|"]
     for r in results:
-        n = lambda s: sum(1 for f in r.findings if f.severity == s)  # noqa: E731
-        L.append(f"| {r.name} | {r.status}{' (' + r.skipped + ')' if r.skipped else ''} | {n('FAIL')} | {n('WARN')} |")
+        n_fail = sum(1 for f in r.findings if f.severity == "FAIL")
+        n_warn = sum(1 for f in r.findings if f.severity == "WARN")
+        L.append(f"| {r.name} | {r.status}{' (' + r.skipped + ')' if r.skipped else ''} | {n_fail} | {n_warn} |")
     for r in results:
         shown = [f for f in r.findings if f.severity != "INFO"]
         if not shown:

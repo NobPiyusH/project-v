@@ -54,7 +54,7 @@ def verdict(ans: dict, pass_score: int, ref: str, name: str = "picture") -> list
     if score < pass_score:
         out.append(Finding("vision", FAIL, "VISION_MISMATCH",
                            f"{name} scores {score}/5 against its shot: {'; '.join(ans['problems']) or ans.get('summary', '')}", ref))
-    elif ans["problems"]:
+    elif ans["problems"] and score <= pass_score:   # 4/5 pictures with nitpicks are not worth the owner's time
         out.append(Finding("vision", WARN, "VISION_PROBLEM", f"{name} scores {score}/5; " + "; ".join(ans["problems"]), ref))
     if ans["wrong_text"]:
         out.append(Finding("vision", WARN, "VISION_WRONG_TEXT", "Lettering looks wrong: " + "; ".join(ans["wrong_text"]), ref))

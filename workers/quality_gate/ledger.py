@@ -6,6 +6,7 @@ price BEFORE a paid step (queue item 7); `reserve` refuses a call that would pas
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import math
 import uuid
@@ -80,8 +81,6 @@ class Ledger:
             f.write(json.dumps(row) + "\n")
         self.run_usd += usd
         if self.db_sink:
-            try:
+            with contextlib.suppress(Exception):  # a failed database write must not lose the JSONL row or kill the run
                 self.db_sink(row)
-            except Exception:  # noqa: BLE001 - a failed database write must not lose the JSONL row or kill the run
-                pass
         return row
