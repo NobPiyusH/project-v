@@ -1,0 +1,31 @@
+# Quality gate settings (docs/plans/post-tv-queue.md "Quality gate"). Prices re-verified 23 Nov 2026 on
+# developers.openai.com/api/docs/pricing and the images-vision guide (CLAUDE.md rule 7: re-check before changing).
+# Never put keys here: the OpenAI key is OPENAI_API_KEY in .env.
+vision:
+  provider_id: openai_vision        # provider name written to cost_entry
+  model: gpt-5.4-mini               # cheapest current (not deprecated) vision model that is on the account; gpt-5.4-nano is the cheaper fallback to A/B
+  detail: high
+  max_side_px: 1024                 # pictures are downscaled before upload
+  patch_multiplier: 1.2             # gpt-5.4-mini/nano: billable image tokens = ceil(32px patches * 1.2)
+  reasoning_effort: low
+  max_output_tokens: 1200           # includes reasoning tokens
+  price_usd_per_1m: { input: 0.75, output: 4.50 }
+  pass_score: 3                     # a picture scoring below this (1-5) fails the shot
+caps:
+  per_run_usd: 0.50                 # hard stop inside one gate run
+  per_day_usd: 2.00                 # all gate runs on one UTC day (summed from the ledger)
+  fx_inr_per_usd: 90.0              # only for the INR column of cost_entry; the cap itself is in USD
+audio:
+  voice_over_music_db: 10.0         # target gap, voice louder than music
+  voice_over_music_min_db: 6.0      # below this a line FAILS
+  lufs_target: -14.0
+  lufs_tolerance: 1.5
+  true_peak_max_dbtp: -1.0
+timing:
+  max_start_error_sec: 0.2
+freeze:
+  black_min_sec: 0.5
+  black_max_ok_sec: 1.2             # a longer black stretch is a fault unless it is a deliberate fade (<= this)
+  freeze_min_sec: 2.5
+captions:
+  min_words_per_card: 2
