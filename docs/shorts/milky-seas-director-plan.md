@@ -1,5 +1,7 @@
 # Milky Seas: director plan v2
 
+**Status: approved by the owner, 23 Nov 2026.** Gates before publishing: firm Blender render cost approved by him, paid ElevenLabs plan, NASA/NOAA image licences checked, quality gate passed.
+
 Short, vertical 9:16, 45 s, channel Strange If True. Machine-readable version: `milky-seas-plan.json` (the first example of the future Director plan format).
 
 ## The idea in one line

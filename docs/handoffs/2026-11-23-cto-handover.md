@@ -30,7 +30,7 @@ For the next Claude (another account or a new session) that continues as Gendu's
 
 ## Uncommitted work in `C:\dev\project-v` (main) that matters
 - **OpenAI script writer (live Java), not committed, not active:** `control-plane/.../agents/OpenAiCompatChat.java` (openai: provider, `max_completion_tokens`, price ledger), `Llm.java` (cost recorded in ₹ at list price), `WriterAgent.java` (`projectv.models.script`), `application.properties` (`SCRIPT_MODEL`, default `openai:gpt-5.4-mini`; switch back with `SCRIPT_MODEL=claude:claude-sonnet-5-5` in `.env`). Compiles, agent tests pass, live OpenAI call verified. **The backend must be restarted to activate it; 11 workflows were open (9 Dream Shorts, 2 videos), so it was held until he says OK.** Also copy this to the Python port.
-- Commits since the last push: `607dad4` (lease tool; local, NOT pushed). Pushed on 23 Nov: main up to `66326f4` plus 5 branches. The OpenAI script-writer Java edits are the only code still uncommitted by design.
+- Pushed on 23 Nov: main up to `648d829` (docs, lease tool, OpenAI writer, quality gate merge) plus 5 branches. Nothing important is unpushed except the side-session branches that have not pushed yet (`milky-seas-blender`).
 - `tools/live_status/status_server.py` (live status page, committed and pushed), `docs/shorts/*`, `reports/CTO-report-2026-11-23.md` (committed earlier), media under `reports/` (not for git: several GB).
 - About 100 files show as uncommitted, mostly media. Commit only text and code; never the videos.
 
@@ -40,13 +40,19 @@ For the next Claude (another account or a new session) that continues as Gendu's
 - RunPod: key in `.env`; pods are billed per hour; the project's own watchdog (Java) is the safety net; my scripts also arm independent kill-timers (`tools/bakeoff/killer*.py`). Balance was about $5.0 on 23 Nov; about $2.7 of the owner's $5 test budget spent before the Milky Seas benchmark.
 - Vast API needs a 2FA session key (`tools/bakeoff/vastauth.py`, TOTP seed in `.env`; at most two attempts to avoid locking the account).
 
+## Status update, 23 Nov 2026 late evening ("approved all")
+Done after the owner said "approved all" and "yes push":
+- **OpenAI is the live script writer.** Backend restarted cleanly (8.5 s); all 15 open workflows survived; commit `8597f9a`, pushed. Claude Sonnet 5.5 stays the Director. First real script through it is still the proof.
+- **Quality gate merged into main** (`648d829`, pushed): checks 1-7, OpenAI vision, stock search-and-judge (the session turned it ON by default after the owner's yes; `STOCK_VISION_JUDGE=0` turns it off). 28 gate tests pass. Item 8 (Java contract tests) not built.
+- **Milky Seas director plan approved** (`docs/shorts/milky-seas-director-plan.md` + `milky-seas-plan.json`).
+- **Migration S5 go-ahead sent** to the `java-to-python` session (workflow, production, video stages), with the OpenAI writer, quality gate and watchdog-lease facts to port. It stops after S5 for his next go.
+- **`Downloads.old-move`: nothing to delete.** It holds 5 tiny leftover items (0 GB); `C:\Users\piyus\Downloads` is now a junction to `E:\Downloads` (42,581 files, 147.8 GB). The earlier "frees 150 GB" note was out of date. Warning: his certificates and ID scans now have ONE copy (on E:); suggest he keeps a second copy somewhere private (not GitHub, not any cloud job).
+
 ## Pending for the owner
-1. Rotate the keys listed above (steps already given in chat).
-2. Delete `C:\Users\piyus\Downloads.old-move`? (about 150 GB, irreversible; asked, not answered.)
-3. OK to restart the backend for the OpenAI script writer.
-4. Approve the Milky Seas director plan, then a firm cost for the Blender renders (ElevenLabs paid plan needed before publishing; check licences of real NASA/NOAA images).
-5. Migration: go-ahead for S5+ (suggest after keys are rotated and the quality gate is merged).
-6. Merge `claude/cost-cuts-a99b7a`, queue Blender automation (templates, not AI-written scenes), HyperFrames/upscale/FLUX-vs-Z-Image tests, Director plan format step 1 (done as JSON draft), quality gate merge, review 48 h/7 d analytics of the TV video.
+1. **Rotate the keys** (ElevenLabs, Hugging Face, RunPod, Vast key and TOTP seed, E2E, OpenAI): only he can; then put them in `.env` and have the CTO test them without printing.
+2. **Milky Seas production gates:** a firm Blender render cost from the `milky-seas-blender` session benchmark (his OK before any full render), the paid ElevenLabs plan (commercial licence) before publishing, and a licence check of each real NASA/NOAA image used.
+3. Optional: second private backup of his personal documents (see above).
+4. Later queue: merge `claude/cost-cuts-a99b7a`, Blender templates (automation), HyperFrames / upscale / FLUX-vs-Z-Image tests, Director plan format (draft JSON exists), RunPod Serverless test on one Short, 48 h / 7 d analytics of the TV video, Lake Natron Short (on hold).
 
 ## Other notes for the next Claude
 - The owner also ran `/auto-mode-setup` (project scope) on 23 Nov; its proposal only adds a soft-deny for spend-incurring GPU rental commands outside normal start/stop flows. Nothing was applied by the CTO chat. Auto mode blocked one message that would have told a session to evade the watchdog; route such things to the owner.
