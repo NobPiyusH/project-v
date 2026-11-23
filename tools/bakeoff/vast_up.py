@@ -61,6 +61,9 @@ if not inst:
     sys.exit("could not rent any Vast instance")
 inst.update({"created": time.time(), "released": False, "token": TOKEN, "session_key": KEY})
 json.dump(inst, open(STATE, "w"))
+subprocess.Popen([sys.executable, r"C:\\dev\\project-v\\tools\\gpu_lease\\lease.py", "keep", "vast", inst["id"], "projectv-bakeoff", "bakeoff test",
+                  "--state", STATE, "--max-minutes", str(max(20, int(MAX_HOURS * 60) - 10))],
+                 creationflags=0x00000008 | 0x08000000, close_fds=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 subprocess.Popen([sys.executable, os.path.join(WORK, "killer_vast.py"), inst["id"], str(int(MAX_HOURS * 3600))],
                  creationflags=0x00000008 | 0x00000200, close_fds=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 print("destroy-timer started (deadline %.1f h)" % MAX_HOURS, flush=True)

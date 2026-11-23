@@ -163,6 +163,10 @@ for cloud in ("SECURE", "COMMUNITY"):
 if not pod:
     sys.exit("could not rent any suitable GPU")
 json.dump(pod, open(STATE, "w"))
+# Watchdog lease (owner approved 23 Nov 2026): the studio watchdog kills projectv-* pods without a lease after 10 min.
+subprocess.Popen([sys.executable, r"C:\\dev\\project-v\\tools\\gpu_lease\\lease.py", "keep", "runpod", pod["id"], "projectv-bakeoff-" + (ONLY or "both"), "bakeoff test",
+                  "--state", STATE, "--max-minutes", str(max(20, int(MAX_HOURS * 60) - 10))],
+                 creationflags=0x00000008 | 0x08000000, close_fds=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 subprocess.Popen([sys.executable, os.path.join(WORK, "killer.py"), pod["id"], str(int(MAX_HOURS * 3600)), STATE],
                  creationflags=0x00000008 | 0x00000200, close_fds=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 print("kill-timer started (deadline %.1f h)" % MAX_HOURS, flush=True)
