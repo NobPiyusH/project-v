@@ -1,0 +1,3 @@
+b3989771-f2b0-4d7f-a7f4-623979341dbf
+2026-11-22T14:10:06Z
+v2 (ElevenLabs retry): d3e53cd1-520e-4dd3-8ecb-b6ed0714aa93; v1 b3989771 paused (Gemini voice)

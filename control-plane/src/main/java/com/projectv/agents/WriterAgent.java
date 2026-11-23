@@ -36,12 +36,16 @@ public class WriterAgent {
     private final StylePresets presets;
     /** Model tried first for this agent's most important call (Claude, owner-funded and capped); Gemini behind it. */
     private final String storyModel;
+    /** Model tried first for the script itself (owner A/B, 23 Nov 2026: OpenAI scripts preferred); blank means storyModel. */
+    private final String scriptModel;
 
     public WriterAgent(Llm llm, StylePresets presets,
-                 @org.springframework.beans.factory.annotation.Value("${projectv.models.story:}") String storyModel) {
+                 @org.springframework.beans.factory.annotation.Value("${projectv.models.story:}") String storyModel,
+                 @org.springframework.beans.factory.annotation.Value("${projectv.models.script:}") String scriptModel) {
         this.llm = llm;
         this.presets = presets;
         this.storyModel = storyModel;
+        this.scriptModel = scriptModel == null || scriptModel.isBlank() ? storyModel : scriptModel;
     }
 
     public Concept concept(UUID videoId, String prompt, VideoPlan plan, List<Fact> facts, String ownerNotes) {
@@ -99,7 +103,7 @@ public class WriterAgent {
                 blank(concept.clockLabel()) ? "none" : concept.clockLabel(),
                 concept.acts() == null ? "" : concept.acts().stream().map(a -> a.title() + " (" + a.approxSec() + "s): " + a.purpose()).collect(Collectors.joining("; ")),
                 String.join(", ", plan.mustInclude()), factsText(facts), notes(ownerNotes));
-        return llm.call(videoId, "SCRIPT", system, user, Script.class, storyModel);
+        return llm.call(videoId, "SCRIPT", system, user, Script.class, scriptModel);
     }
 
     static String factsText(List<Fact> facts) {

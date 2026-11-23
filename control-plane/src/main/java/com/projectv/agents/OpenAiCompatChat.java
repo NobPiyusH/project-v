@@ -29,6 +29,15 @@ public class OpenAiCompatChat {
 
     private final java.util.Map<String, Provider> providers;
     private final RestClient http;
+    /** OpenAI list prices (USD per 1M tokens) and the rupee rate, for the cost ledger. */
+    private final double openAiInPerM;
+    private final double openAiOutPerM;
+    private final double inrPerUsd;
+
+    /** Without OpenAI (tests). */
+    public OpenAiCompatChat(String nvidiaKey, String nvidiaUrl, String groqKey, String groqUrl, String openRouterKey, String openRouterUrl) {
+        this(nvidiaKey, nvidiaUrl, groqKey, groqUrl, openRouterKey, openRouterUrl, "", "https://api.openai.com/v1", 0.75, 4.50, 90.0);
+    }
 
     @Autowired
     public OpenAiCompatChat(@Value("${projectv.nvidia.api-key:}") String nvidiaKey,
@@ -36,17 +45,29 @@ public class OpenAiCompatChat {
                             @Value("${projectv.groq.api-key:}") String groqKey,
                             @Value("${projectv.groq.base-url:https://api.groq.com/openai/v1}") String groqUrl,
                             @Value("${projectv.openrouter.api-key:}") String openRouterKey,
-                            @Value("${projectv.openrouter.base-url:https://openrouter.ai/api/v1}") String openRouterUrl) {
+                            @Value("${projectv.openrouter.base-url:https://openrouter.ai/api/v1}") String openRouterUrl,
+                            @Value("${projectv.openai.api-key:}") String openAiKey,
+                            @Value("${projectv.openai.base-url:https://api.openai.com/v1}") String openAiUrl,
+                            @Value("${projectv.openai.price-in-usd-per-1m:0.75}") double openAiInPerM,
+                            @Value("${projectv.openai.price-out-usd-per-1m:4.50}") double openAiOutPerM,
+                            @Value("${projectv.fx.inr-per-usd:90.0}") double inrPerUsd) {
         this.providers = java.util.Map.of(
                 "nvidia", new Provider(nvidiaUrl, nvidiaKey),
                 "groq", new Provider(groqUrl, groqKey),
-                "openrouter", new Provider(openRouterUrl, openRouterKey));
+                "openrouter", new Provider(openRouterUrl, openRouterKey),
+                "openai", new Provider(openAiUrl, openAiKey));
+        this.openAiInPerM = openAiInPerM;
+        this.openAiOutPerM = openAiOutPerM;
+        this.inrPerUsd = inrPerUsd;
         this.http = client();
     }
 
     /** A single-provider client for {@code aicredits:<model>} ids (the errors-only fallback; not in {@link #handles}). */
     OpenAiCompatChat(String aicreditsUrl, String aicreditsKey) {
         this.providers = java.util.Map.of("aicredits", new Provider(aicreditsUrl, aicreditsKey));
+        this.openAiInPerM = 0;
+        this.openAiOutPerM = 0;
+        this.inrPerUsd = 90.0;
         this.http = client();
     }
 
@@ -60,7 +81,18 @@ public class OpenAiCompatChat {
     /** True for {@code nvidia:...}, {@code groq:...} and {@code openrouter:...} model ids. */
     public static boolean handles(String model) {
         return model != null && (model.startsWith("nvidia:") || model.startsWith("groq:")
-                || model.startsWith("openrouter:"));
+                || model.startsWith("openrouter:") || model.startsWith("openai:"));
+    }
+
+    /** True for paid OpenAI model ids ({@code openai:...}); the other providers here are free tiers. */
+    public static boolean isOpenAi(String model) {
+        return model != null && model.startsWith("openai:");
+    }
+
+    /** Rupee cost of one OpenAI call at the configured list prices (owner-paid, recorded as a real cost). */
+    public java.math.BigDecimal openAiInr(long promptTokens, long completionTokens) {
+        double usd = (promptTokens * openAiInPerM + completionTokens * openAiOutPerM) / 1_000_000.0;
+        return java.math.BigDecimal.valueOf(usd * inrPerUsd).setScale(4, java.math.RoundingMode.HALF_UP);
     }
 
     /** Provider name of a routed model id, for the cost ledger. */
@@ -76,13 +108,15 @@ public class OpenAiCompatChat {
             throw new IllegalStateException("not supported: no API key for " + provider(model));
         }
         BeanOutputConverter<T> converter = new BeanOutputConverter<>(type);
-        Map<String, Object> body = Map.of(
-                "model", model.substring(model.indexOf(':') + 1),
-                "temperature", 0.6,
-                "max_tokens", 8192,
-                "messages", List.of(
-                        Map.of("role", "system", "content", system),
-                        Map.of("role", "user", "content", user + "\n\n" + converter.getFormat())));
+        List<Map<String, String>> messages = List.of(
+                Map.of("role", "system", "content", system),
+                Map.of("role", "user", "content", user + "\n\n" + converter.getFormat()));
+        // OpenAI's GPT-5 family takes max_completion_tokens (reasoning included) and rejects a custom temperature.
+        Map<String, Object> body = isOpenAi(model)
+                ? Map.of("model", model.substring(model.indexOf(':') + 1), "max_completion_tokens", 16000,
+                        "reasoning_effort", "low", "messages", messages)
+                : Map.of("model", model.substring(model.indexOf(':') + 1), "temperature", 0.6, "max_tokens", 8192,
+                        "messages", messages);
         Map<String, Object> r = http.post().uri(prov.baseUrl() + "/chat/completions")
                 .header("Authorization", "Bearer " + prov.apiKey()) // never logged
                 .contentType(MediaType.APPLICATION_JSON)
