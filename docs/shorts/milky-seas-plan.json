@@ -1,0 +1,47 @@
+{
+  "plan_version": "0.1-draft",
+  "title": "Milky Seas",
+  "channel": "Strange If True",
+  "format": {"aspect": "9:16", "duration_s": 45, "fps": 24, "master": "2160x3840", "loop_end_to_start": true},
+  "style": {
+    "palette": ["#05070D", "#CFE9F2", "#FFFFFF"],
+    "grade": "soft blacks, bloom on glow only, 2% grain",
+    "camera": "slow, human, no snap zooms, no effects",
+    "text": "white small capitals, channel font, outside Shorts UI zones",
+    "rules": ["steady even glow, no splash sparkles", "label every visualisation"]
+  },
+  "voice": {"provider": "elevenlabs", "tone": "low, calm, slightly breathy", "target_lufs": -14, "music_under_voice_db": 10},
+  "facts": [
+    {"id": "F1", "claim": "First satellite detection of a milky sea was reported in 2005", "source": "Miller et al. 2005, PNAS, doi:10.1073/pnas.0507253102"},
+    {"id": "F2", "claim": "12 milky-sea events found 2012-2021 over the Indian Ocean and far western Pacific", "source": "https://www.nature.com/articles/s41598-021-94823-z"},
+    {"id": "F3", "claim": "Leading idea: luminous bacteria on algae; still a hypothesis", "source": "https://eos.org/articles/satellites-allow-scientists-to-dive-into-milky-seas"}
+  ],
+  "lines": [
+    {"n": 1, "text": "Sailors have told of nights when the sea turned white."},
+    {"n": 2, "text": "Not waves. Not moonlight. A silent glow, from the ship to the horizon."},
+    {"n": 3, "text": "Like sailing across snow."},
+    {"n": 4, "text": "It sounds like a sailor's ghost story."},
+    {"n": 5, "text": "It's real."},
+    {"n": 6, "text": "Satellites have photographed it from space: about a dozen glowing seas in nine years, over the Indian Ocean and the western Pacific.", "facts": ["F1", "F2"]},
+    {"n": 7, "text": "The leading idea: billions of glowing bacteria living on algae, all shining at once.", "facts": ["F3"]},
+    {"n": 8, "text": "But it's still an idea. No one knows for sure what switches it on.", "facts": ["F3"]},
+    {"n": 9, "text": "So if you ever wake to a white, silent sea, you might be floating on one of the biggest light shows on Earth."},
+    {"n": 10, "text": "Strange... if true."}
+  ],
+  "shots": [
+    {"n": 1, "start": 0.0, "end": 3.5, "line": 1, "source": "blender", "scene": "B", "lens_mm": 24, "camera": "slow push in from the bow", "action": "pale line on the horizon spreads until the whole sea glows", "text": "THE SEA TURNED WHITE?", "sound": ["low drone", "wood creak"], "label": "visualisation"},
+    {"n": 2, "start": 3.5, "end": 8.0, "line": 2, "source": "blender", "scene": "B", "lens_mm": 24, "camera": "low over water, slight sway", "action": "bow cutting a flat glowing surface, stars above", "sound": ["water hiss", "wind"], "label": "visualisation"},
+    {"n": 3, "start": 8.0, "end": 12.0, "line": 3, "source": "blender", "scene": "B", "lens_mm": 35, "camera": "very slow aerial descent", "action": "tiny ship on an endless white sea under the Milky Way", "text": "LIKE SNOW", "sound": ["drone swell"], "label": "visualisation"},
+    {"n": 4, "start": 12.0, "end": 15.0, "line": 4, "source": "wan", "keyframe": "flux", "lens_mm": 85, "camera": "locked, tiny drift", "action": "sailor at the rail looks out, face lit pale blue-white from below, breath visible", "sound": ["breath", "low note"], "label": "illustration"},
+    {"n": 5, "start": 15.0, "end": 17.0, "line": 5, "source": "black", "text": "IT'S REAL", "sound": ["silence", "low hit"]},
+    {"n": 6, "start": 17.0, "end": 21.0, "line": 6, "source": "real_image", "provider": "NASA Earth Observatory or NOAA", "licence": "to confirm", "camera": "slow push in on the glowing patch", "text": "SEEN FROM SPACE", "sound": ["rising tone"], "facts": ["F1"]},
+    {"n": 7, "start": 21.0, "end": 24.0, "line": 6, "source": "blender", "scene": "A", "lens_mm": 50, "camera": "slow orbit", "action": "night-side Earth, city lights, faint pale patch on the Indian Ocean", "text": "ABOUT 12 FOUND · 2012-2021", "label": "visualisation", "facts": ["F2"]},
+    {"n": 8, "start": 24.0, "end": 31.0, "line": 7, "source": "blender", "scene": "C", "lens_mm": 100, "camera": "macro drift, shallow focus", "action": "tiny glowing points drifting around a strand of algae", "text": "GLOWING BACTERIA?", "sound": ["soft crackle", "warm pad"], "label": "visualisation", "facts": ["F3"]},
+    {"n": 9, "start": 31.0, "end": 36.0, "line": 8, "source": "blender", "scene": "C", "lens_mm": 100, "camera": "hold", "action": "the glow slowly dims", "text": "STILL UNPROVEN", "label": "visualisation"},
+    {"n": 10, "start": 36.0, "end": 42.0, "line": 9, "source": "blender", "scene": "B", "lens_mm": 24, "camera": "slow pull back from the bow to the horizon", "label": "visualisation"},
+    {"n": 11, "start": 42.0, "end": 45.0, "line": 10, "source": "blender", "scene": "B", "camera": "hold on the opening frame (loop)", "text": "STRANGE IF TRUE · Which story next?", "sound": ["single note"], "label": "visualisation"}
+  ],
+  "music": {"provider": "lyria", "cue": "tension to 15 s, hit at 17 s, warm pad from 24 s, resolve at 40 s"},
+  "approvals": ["plan", "first_cut", "final"],
+  "budget": {"cap_usd": null, "note": "set after the Blender benchmark; owner approves the firm number"}
+}
