@@ -246,10 +246,11 @@ def test_music_request_and_cue(world):
 # ---------------------------------------------------------------------------------------------------- animatic
 
 
-def add_shot(db, video, ord_, start, dur, keyframe_uri=None, line_index=None, scene=[None]):
-    if scene[0] is None or scene[1] != video:
-        scene[:] = [uuid.uuid4(), video]
-        db.execute("INSERT INTO scene (id, video_id, ord, title) VALUES (%(s)s, %(v)s, 0, 'S')", {"s": scene[0], "v": video})
+def add_shot(db, video, ord_, start, dur, keyframe_uri=None, line_index=None):
+    scene = db.rows("SELECT id FROM scene WHERE video_id = %(v)s", {"v": video})
+    if not scene:
+        scene = [{"id": uuid.uuid4()}]
+        db.execute("INSERT INTO scene (id, video_id, ord, title) VALUES (%(s)s, %(v)s, 0, 'S')", {"s": scene[0]["id"], "v": video})
     asset = None
     if keyframe_uri:
         asset = uuid.uuid4()
@@ -257,7 +258,7 @@ def add_shot(db, video, ord_, start, dur, keyframe_uri=None, line_index=None, sc
     p = {"startSec": start, **({"lineIndex": line_index} if line_index is not None else {})}
     db.execute("INSERT INTO shot (id, scene_id, ord, duration_target_sec, description, prompt_json, keyframe_asset_id, overlay_text) "
                "VALUES (%(i)s, %(s)s, %(o)s, %(d)s, 'd', CAST(%(p)s AS jsonb), %(k)s, 'T')",
-               {"i": uuid.uuid4(), "s": scene[0], "o": ord_, "d": dur, "p": json.dumps(p), "k": asset})
+               {"i": uuid.uuid4(), "s": scene[0]["id"], "o": ord_, "d": dur, "p": json.dumps(p), "k": asset})
 
 
 def test_animatic_holds_the_last_shot_so_no_word_is_cut(world):
