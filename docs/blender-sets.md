@@ -37,3 +37,30 @@ Measured on the RTX 3050 4 GB: 2.4-4.5 s per 1080x1920 anchor (48 samples), 0.31
 - Decide Wan's input size (Wan 2.2 works near 480x832 or 720x1280; anchors are 1080x1920 and need a resize step).
 - Stitching: last frame of clip N versus anchor N+1 blend/handoff, and colour match.
 - Look test: Wan repaint of a Blender anchor has not been run (no GPU spend allowed in this task).
+
+## Rendering on a cloud GPU (prepared, never run on a pod)
+The set is relocatable: the `.blend` stores texture paths as `//textures/...`, and
+`python tools/blender/cathedral_bundle.py` zips `cathedral.blend`, `textures/`, `hdri/`, `LICENSES.md`, the script and the route into
+`E:\project-data\blender\library\cathedral\cathedral_bundle.zip` (about 10 MB). Checked locally: unzipped elsewhere, 0 missing images,
+chunked render works and resumes (a rerun skips frames that already exist; a frame gets its final name only when fully written).
+
+On a Linux pod with Blender 5.3 (`blender-5.3.0-linux-x64`, as `tools/cloud_render` on branch `claude/milky-seas-blender-0b808a` installs it):
+```bash
+unzip cathedral_bundle.zip
+blender -b --gpu-backend vulkan -P cathedral/cathedral_set.py -- render --blend cathedral/cathedral.blend \
+  --outdir out --frames 1-30 --res 2160x3840 --samples 48          # then 31-60, ... (301 frames for the 10 s route)
+```
+`cathedral_set.py render --frames A-B` writes `out/frame_NNNN.png` (16-bit). Pull each chunk before starting the next.
+The Milky Seas `cloud_render.py` already rents the pod, installs Blender, chunks, resumes, kills and takes the watchdog lease
+(`tools/gpu_lease/lease.py keep ...`); to reuse it add a scene entry such as
+`"cathedral": {"blend": "cathedral/cathedral.blend", "files": ["textures/...", "hdri/moonless_golf.hdr"], "remote": {}}` and call
+`cathedral_set.py render` instead of `render_job.py`. No rental code lives in this branch, so no pod can be started from here.
+
+Firm cost estimate (EEVEE, one L40S at the $1.09/h seen on 23 Nov; check the live price before renting):
+| Job | Minutes | Cost |
+|---|---|---|
+| 3 anchors at 2160x3840 | about 10 (boot and Blender download 8, render 2) | about $0.20 |
+| Full 10 s route, 301 frames at 2160x3840 | about 30 (8 setup + 301 x 4 s) | about $0.55 |
+| Cap to set (45 min) | | at most $0.82 |
+The 4 s per 4K frame is a conservative guess from the laptop (2.4-4.5 s at 1080x1920 on an RTX 3050) and the 3 s per 4K frame seen on the L40S;
+it is not measured on this set. Risk: EEVEE on a headless Linux pod was only shown working in an earlier bake-off with the Vulkan backend; if it fails, Cycles is the fallback and costs much more.

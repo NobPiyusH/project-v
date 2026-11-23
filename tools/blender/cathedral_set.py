@@ -568,7 +568,10 @@ def build(opts):
     render_defaults(sc, 1080, 1920, 48)
     out_path = opts.get('out', os.path.join(LIB, 'cathedral.blend'))
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
-    bpy.ops.wm.save_as_mainfile(filepath=out_path)
+    for im in bpy.data.images:            # relative paths ("//textures/..") so the folder can move (pod, zip)
+        if im.filepath and not im.packed_file:
+            im.filepath = bpy.path.relpath(bpy.path.abspath(im.filepath), start=os.path.dirname(os.path.abspath(out_path))).replace(chr(92), '/')
+    bpy.ops.wm.save_as_mainfile(filepath=out_path, relative_remap=True)
     print('BUILT', out_path)
 
 
@@ -652,10 +655,14 @@ def add_glare(sc):
 def render(opts):
     bpy.ops.wm.open_mainfile(filepath=opts['blend'])
     sc = bpy.context.scene
+    for im in bpy.data.images:                 # Linux pod: tolerate backslashes saved on Windows
+        if not im.packed_file:
+            im.filepath = im.filepath.replace(chr(92), '/')
     rx, ry = map(int, opts.get('res', '1080x1920').split('x'))
     render_defaults(sc, rx, ry, int(opts.get('samples', 48)))
     if 'route' in opts:
         apply_route(sc, json.load(open(opts['route'])))
+    opts['outdir'] = os.path.abspath(opts['outdir'])
     os.makedirs(opts['outdir'], exist_ok=True)
     fps = sc.render.fps
     if 'anchors' in opts:
@@ -667,6 +674,21 @@ def render(opts):
             t0 = time.time()
             bpy.ops.render.render(write_still=True)
             print(f'ANCHOR t={t}s frame={f} {time.time() - t0:.1f}s -> {sc.render.filepath}')
+    if 'frames' in opts:                       # chunked, resumable: --frames 1-30 (skips frames that already exist)
+        f0, f1 = (int(x) for x in opts['frames'].split('-'))
+        sc.render.image_settings.media_type = 'IMAGE'
+        sc.render.image_settings.file_format = 'PNG'
+        sc.render.image_settings.color_depth = opts.get('depth', '16')
+        for f in range(f0, f1 + 1):
+            path = os.path.join(opts['outdir'], 'frame_%04d.png' % f)
+            if os.path.exists(path):
+                continue
+            sc.frame_set(f)
+            sc.render.filepath = path[:-4] + '_part'
+            t0 = time.time()
+            bpy.ops.render.render(write_still=True)
+            os.replace(path[:-4] + '_part.png', path)      # final name only once fully written
+            print('FRAME_DONE', f, round(time.time() - t0, 2), flush=True)
     if 'preview' in opts:
         sc.render.image_settings.media_type = 'VIDEO'
         sc.render.image_settings.file_format = 'FFMPEG'
