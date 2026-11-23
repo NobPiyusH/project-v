@@ -688,6 +688,7 @@ def render(opts):
             t0 = time.time()
             bpy.ops.render.render(write_still=True)
             os.replace(path[:-4] + '_part.png', path)      # final name only once fully written
+            json.dump({'frame': f, 'seconds': round(time.time() - t0, 2)}, open(path[:-4] + '.json', 'w'))
             print('FRAME_DONE', f, round(time.time() - t0, 2), flush=True)
     if 'preview' in opts:
         sc.render.image_settings.media_type = 'VIDEO'

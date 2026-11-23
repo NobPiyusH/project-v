@@ -1,0 +1,6 @@
+[
+  {"scene": "cathedral", "frames": "1-1",     "chunk": 1,  "width": 2160, "height": 3840, "samples": 48, "job": "route_4k", "out": "E:/project-data/blender/library/cathedral/render_4k"},
+  {"scene": "cathedral", "frames": "151-151", "chunk": 1,  "width": 2160, "height": 3840, "samples": 48, "job": "route_4k", "out": "E:/project-data/blender/library/cathedral/render_4k"},
+  {"scene": "cathedral", "frames": "301-301", "chunk": 1,  "width": 2160, "height": 3840, "samples": 48, "job": "route_4k", "out": "E:/project-data/blender/library/cathedral/render_4k"},
+  {"scene": "cathedral", "frames": "1-301",   "chunk": 30, "width": 2160, "height": 3840, "samples": 48, "job": "route_4k", "out": "E:/project-data/blender/library/cathedral/render_4k"}
+]
