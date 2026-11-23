@@ -42,6 +42,8 @@ def conforms(java, py, where="$") -> list[str]:
     if isinstance(java, dict):
         if not isinstance(py, dict):
             return [f"{where}: Java sends an object"]
+        if java and all(k.isdigit() for k in java):  # a map keyed by index (e.g. lineStarts), not a record: compare the value types only
+            return [e for pv in py.values() for e in conforms(next(iter(java.values())), pv, f"{where}[*]")]
         out = [f"{where}: missing {k}" for k in java if k not in py] + [f"{where}: extra {k}" for k in py if k not in java]
         for k in java.keys() & py.keys():
             out += conforms(java[k], py[k], f"{where}.{k}")
@@ -293,3 +295,16 @@ def test_jobs_start_only_when_asked(scratch_db):
     on = Settings(dream_routes=True, jobs=True)
     with TestClient(create_app(db=scratch_db, settings=on, dream_ctx=ctx)) as c:
         assert c.get("/api/autopilot").status_code == 200
+
+
+def test_dates_and_jsonb_text_are_sent_the_way_java_sends_them(app_):
+    """Found by replaying live Java GETs against this app: run_date is a java.sql.Date (midnight UTC) and scout_json / check_json are Postgres jsonb text."""
+    run = uuid.uuid4()
+    app_.db.execute("INSERT INTO autopilot_run (id, run_date, status) VALUES (%(id)s, DATE '2026-11-19', 'SKIPPED')", {"id": run})
+    runs = app_.c.get("/api/autopilot/runs").json()
+    assert next(r for r in runs if r["id"] == str(run))["run_date"] == "2026-11-19T00:00:00.000Z"
+    dream = finished_short(app_)
+    app_.db.execute("UPDATE dream_short SET scout_json = CAST('{\"brief\": {\"gaps\": [\"a\"]}, \"source\": \"youtube\"}' AS jsonb) WHERE id = %(d)s", {"d": dream})
+    d = app_.c.get(f"/api/dream/{dream}").json()
+    assert isinstance(d["scout_json"], str) and '"source": "youtube"' in d["scout_json"] and ", " in d["scout_json"]
+    assert d["check_json"].startswith("{") and '": ' in d["check_json"], "Postgres text form: a space after the colon, as Java sends it"

@@ -89,8 +89,8 @@ def _as_dict(v: Any) -> dict[str, Any]:
 
 
 def _text(v: Any) -> Any:
-    """jsonb columns come back as Python objects; the dashboard gets them as JSON text, as the Java API sent them."""
-    return None if v is None else (v if isinstance(v, str) else json.dumps(v, separators=(",", ":")))
+    """jsonb columns come back as Python objects; the dashboard gets them as JSON text in Postgres' own form ({"a": 1, "b": 2}), as the Java API sent them."""
+    return None if v is None else (v if isinstance(v, str) else json.dumps(v, ensure_ascii=False))
 
 
 class DreamStudio:

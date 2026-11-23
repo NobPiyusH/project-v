@@ -30,6 +30,8 @@ from studio.routing import Router
 def _default(o: Any) -> Any:
     if isinstance(o, Decimal):  # Java sends BigDecimal as a JSON number, not a string
         return float(o)
+    if type(o).__name__ == "date":  # a java.sql.Date column: Jackson sends it as midnight UTC, e.g. autopilot_run.run_date
+        return f"{o.isoformat()}T00:00:00.000Z"
     if isinstance(o, datetime):  # Java sends timestamps as UTC with millisecond precision: 2026-11-22T18:16:06.990Z
         u = o.astimezone(UTC)
         return u.strftime("%Y-%m-%dT%H:%M:%S.") + f"{u.microsecond // 1000:03d}Z"
@@ -48,7 +50,7 @@ class JavaJson(Response):
 
 
 
-def create_app(db: Db | None = None, settings: Settings | None = None, dream_ctx: Any = None) -> FastAPI:
+def create_app(db: Db | None = None, settings: Settings | None = None, dream_ctx: Any = None, video_ctx: Any = None) -> FastAPI:
     settings = settings or Settings.from_env()
     db = db or ThreadLocalPgDb(settings.dsn)  # one connection per thread: requests and background jobs run on many
     ledger = CostLedger(db)
@@ -69,6 +71,11 @@ def create_app(db: Db | None = None, settings: Settings | None = None, dream_ctx
         from studio.api.wiring import build_dream_context
 
         ctx = build_dream_context(db, settings)
+    vctx = video_ctx
+    if vctx is None and settings.video_routes:
+        from studio.api.video_wiring import build_video_context
+
+        vctx = build_video_context(db, settings, dream_ctx=ctx)
     jobs: list[Any] = []
     if ctx is not None and settings.jobs:
         from studio.api.jobs import dream_jobs
@@ -98,6 +105,11 @@ def create_app(db: Db | None = None, settings: Settings | None = None, dream_ctx
         from studio.api.dream_routes import register_dream_routes
 
         register_dream_routes(app, ctx, JavaJson)
+
+    if vctx is not None and settings.video_routes:
+        from studio.api.video_routes import register_video_routes
+
+        register_video_routes(app, vctx, JavaJson)
 
     @app.get("/api/ledger")
     def get_ledger() -> Response:

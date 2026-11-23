@@ -1,0 +1,438 @@
+{
+ "/api/assets/{id}": {
+  "shape": {
+   "attribution_text": "NoneType",
+   "author": "NoneType",
+   "credit_required": "NoneType",
+   "duration_sec": "NoneType",
+   "fetched_at": "NoneType",
+   "height": "int",
+   "id": "str",
+   "kind": "str",
+   "licence": "str",
+   "mime_type": "str",
+   "model": "str",
+   "prompt": "str",
+   "provider": "str",
+   "seed": "int",
+   "source_id": "NoneType",
+   "source_url": "NoneType",
+   "uri_hot": "str",
+   "width": "int"
+  },
+  "status": 200
+ },
+ "/api/budget": {
+  "shape": {
+   "claudeCapInr": "float",
+   "claudeSpentInr": "float",
+   "geminiCapInr": "float",
+   "geminiRemainingInr": "float",
+   "geminiSpentInr": "float",
+   "gpuCapInr": "float",
+   "gpuSpentInr": "float",
+   "modal": {
+    "billedUsd": "float",
+    "creditLeftUsd": "float",
+    "creditsUsedUsd": "float",
+    "fetchedAt": "str",
+    "freeCreditUsd": "float",
+    "fxInrPerUsd": "float",
+    "meteredUsd": "float",
+    "periodEnd": "str",
+    "periodStart": "str"
+   }
+  },
+  "status": 200
+ },
+ "/api/ledger": {
+  "shape": [
+   {
+    "amount_inr": "float",
+    "entries": "int",
+    "provider_id": "str",
+    "unit_type": "str",
+    "units": "float"
+   }
+  ],
+  "status": 200
+ },
+ "/api/producer/rules": {
+  "shape": [
+   {
+    "enabled": "bool",
+    "evidence": "int",
+    "id": "str",
+    "rule_text": "str",
+    "source": "str",
+    "stage": "str",
+    "updated_at": "str"
+   }
+  ],
+  "status": 200
+ },
+ "/api/producer/settings": {
+  "shape": {
+   "agreement": {
+    "agreed": "int",
+    "decided": "int",
+    "rate": "int"
+   },
+   "deciding": "bool",
+   "trust": "str"
+  },
+  "status": 200
+ },
+ "/api/providers": {
+  "shape": [
+   {
+    "capabilities": "str",
+    "config": "str",
+    "enabled": "bool",
+    "id": "str",
+    "kind": "str",
+    "name": "str"
+   }
+  ],
+  "status": 200
+ },
+ "/api/shots/{shot}/clips": {
+  "shape": [
+   {
+    "active": "bool",
+    "created_at": "str",
+    "id": "str",
+    "kind": "str",
+    "model": "str"
+   }
+  ],
+  "status": 200
+ },
+ "/api/shots/{shot}/versions": {
+  "shape": [
+   {
+    "active": "bool",
+    "created_at": "str",
+    "id": "str",
+    "model": "str",
+    "provider": "str"
+   }
+  ],
+  "status": 200
+ },
+ "/api/stages": {
+  "shape": [
+   {
+    "description": "str",
+    "id": "str",
+    "label": "str",
+    "redoWith": []
+   }
+  ],
+  "status": 200
+ },
+ "/api/styles": {
+  "shape": [
+   {
+    "defaults": {
+     "aspectRatio": "str",
+     "durationSec": "int",
+     "format": "str",
+     "music": "str",
+     "narration": "str"
+    },
+    "description": "str",
+    "id": "str",
+    "name": "str",
+    "visualStyle": "str"
+   }
+  ],
+  "status": 200
+ },
+ "/api/system": {
+  "shape": {
+   "planner": "str"
+  },
+  "status": 200
+ },
+ "/api/videos": {
+  "shape": [
+   {
+    "created_at": "str",
+    "current_stage": "NoneType",
+    "current_summary": "NoneType",
+    "id": "str",
+    "master_asset_id": "str",
+    "prompt": "str",
+    "shots": "int",
+    "spent_inr": "float",
+    "status": "str",
+    "thumb_asset_id": "str",
+    "title": "str",
+    "updated_at": "str"
+   }
+  ],
+  "status": 200
+ },
+ "/api/videos/{id}": {
+  "shape": {
+   "costs": [
+    {
+     "amount_inr": "float",
+     "estimated": "bool",
+     "note": "str",
+     "provider_id": "str",
+     "ts": "str",
+     "unit_type": "str",
+     "units": "float"
+    }
+   ],
+   "created_at": "str",
+   "creativeReviews": [
+    {
+     "attempt": "int",
+     "created_at": "str",
+     "model": "str",
+     "review": {
+      "acts": [
+       {
+        "act": "str",
+        "continuity": "int",
+        "flow": "int",
+        "keyMoment": "int",
+        "mood": "int",
+        "problem": "str",
+        "shotsToFix": [
+         "int"
+        ],
+        "summary": "str"
+       }
+      ],
+      "shots": [
+       {
+        "accuracy": "int",
+        "continuity": "int",
+        "fixPrompt": "str",
+        "literal": "bool",
+        "meaning": "int",
+        "problem": "str",
+        "shot": "int",
+        "writing": "bool"
+       }
+      ],
+      "video": {
+       "arc": "int",
+       "ending": "int",
+       "hook": "int",
+       "problem": "str",
+       "summary": "str",
+       "variety": "int"
+      }
+     },
+     "stage": "str"
+    }
+   ],
+   "current_stage": "NoneType",
+   "id": "str",
+   "inspections": [
+    {
+     "attempt": "int",
+     "checked": [
+      "str"
+     ],
+     "created_at": "str",
+     "findings": [],
+     "stage": "str",
+     "verdict": "str"
+    }
+   ],
+   "master_asset_id": "str",
+   "master_captions_asset_id": "str",
+   "master_package_asset_id": "str",
+   "modes_json": "str",
+   "plan_json": "str",
+   "prompt": "str",
+   "review_minutes": "int",
+   "spent_inr": "float",
+   "stageRuns": [
+    {
+     "artifact_json": "str",
+     "attempt": "int",
+     "finished_at": "str",
+     "mode": "str",
+     "owner_notes": "NoneType",
+     "review_deadline": "NoneType",
+     "stage": "str",
+     "started_at": "str",
+     "status": "str",
+     "summary": "str"
+    }
+   ],
+   "status": "str",
+   "title": "str",
+   "updated_at": "str",
+   "workflow_id": "str"
+  },
+  "status": 200
+ },
+ "/api/videos/{id}/clips/progress": {
+  "shape": {
+   "clips": [],
+   "finished": "bool"
+  },
+  "status": 200
+ },
+ "/api/videos/{id}/producer": {
+  "shape": {
+   "agreement": {
+    "agreed": "int",
+    "decided": "int",
+    "rate": "int"
+   },
+   "decisions": [],
+   "summary": {
+    "approved": "int",
+    "asked": "int",
+    "budgetInr": "float",
+    "deciding": "bool",
+    "redone": "int",
+    "review_cost": "int",
+    "spend_approved": "int",
+    "spentInr": "float",
+    "trust": "str"
+   }
+  },
+  "status": 200
+ },
+ "/api/videos/{id}/production": {
+  "shape": {
+   "animaticAssetId": "str",
+   "animaticOutdated": "bool",
+   "concept": {
+    "acts": [
+     {
+      "approxSec": "int",
+      "purpose": "str",
+      "title": "str"
+     }
+    ],
+    "bigIdea": "str",
+    "clockLabel": "str",
+    "emotionalArc": "str",
+    "logline": "str"
+   },
+   "linesNeedingVoice": "int",
+   "music": {
+    "asset_id": "str",
+    "bpm": "float"
+   },
+   "redoingLines": "int",
+   "redoingShots": "int",
+   "research": {
+    "facts": "str",
+    "queries": [],
+    "version": "int"
+   },
+   "script": {
+    "lineStarts": {
+     "0": "float",
+     "1": "float",
+     "10": "float",
+     "11": "float",
+     "12": "float",
+     "13": "float",
+     "2": "float",
+     "3": "float",
+     "4": "float",
+     "5": "float",
+     "6": "float",
+     "7": "float",
+     "8": "float",
+     "9": "float"
+    },
+    "lines": [
+     {
+      "act": "str",
+      "audioAssetId": "str",
+      "audioUri": "str",
+      "audioVersions": [
+       {
+        "assetId": "str",
+        "check": "str",
+        "createdAt": "str",
+        "durationSec": "float",
+        "style": "str",
+        "text": "str",
+        "uri": "str"
+       }
+      ],
+      "check": "str",
+      "delivery": "str",
+      "durationSec": "float",
+      "edited": "bool",
+      "index": "int",
+      "needsVoice": "bool",
+      "originalText": "str",
+      "purpose": "str",
+      "spoken": "bool",
+      "text": "str",
+      "voiceStatus": "str"
+     }
+    ],
+    "musicBrief": "str",
+    "tempo": "float",
+    "version": "int",
+    "voiceName": "str",
+    "voiceStyle": "str"
+   },
+   "shots": [
+    {
+     "camera_move": "str",
+     "clip_error": "NoneType",
+     "clip_status": "str",
+     "description": "str",
+     "draft_clip_asset_id": "str",
+     "duration_target_sec": "float",
+     "error": "NoneType",
+     "final_clip_asset_id": "NoneType",
+     "final_wanted": "bool",
+     "footage_asset_id": "NoneType",
+     "id": "str",
+     "keyframe_asset_id": "str",
+     "keyframe_provider": "str",
+     "ord": "int",
+     "overlay_text": "NoneType",
+     "priority": "str",
+     "prompt_json": {
+      "keyframePrompt": "str",
+      "lineIndex": "int",
+      "motionPrompt": "str",
+      "sfxQuery": "str",
+      "startSec": "float"
+     },
+     "scene_title": "str",
+     "sharp_clip_asset_id": "NoneType",
+     "shot_type": "str",
+     "smooth_clip_asset_id": "NoneType",
+     "status": "str"
+    }
+   ]
+  },
+  "status": 200
+ },
+ "/api/videos/{id}/routing": {
+  "shape": [
+   {
+    "candidates": "str",
+    "capability": "str",
+    "chosen_provider_id": "str",
+    "created_at": "str",
+    "id": "str",
+    "overridden_by_owner": "bool",
+    "reason_text": "str",
+    "stage": "str"
+   }
+  ],
+  "status": 200
+ }
+}

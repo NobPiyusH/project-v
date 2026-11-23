@@ -4,8 +4,7 @@
 
 It listens on its OWN task queue (projectv-control-py), so the Java worker on projectv-control keeps every running workflow. It refuses to start
 unless STUDIO_TEMPORAL_WORKER=true, and it never rents or pays for anything by itself: it only runs workflows someone started on its queue.
-The video pipeline's worker (studio.workflow.runtime.build_worker) needs its own wiring (writer, director, inspector, voices...) and is not
-started here yet."""
+With this worker running, the Python control plane serves video, Dream and post workflows on that queue; run it only after the owner's go."""
 
 from __future__ import annotations
 
@@ -13,12 +12,13 @@ import asyncio
 import logging
 import sys
 
+from studio.api.video_wiring import build_video_context
 from studio.api.wiring import build_dream_context
 from studio.config import Settings
 from studio.db import ThreadLocalPgDb
 from studio.workflow.autopilot_workflow import AutopilotActivities
 from studio.workflow.dream_activities import DreamActivities, DreamProducerActivities
-from studio.workflow.runtime import TemporalGateway, build_dream_worker
+from studio.workflow.runtime import TemporalGateway, build_all_worker, build_dream_worker
 
 log = logging.getLogger("studio.worker")
 
@@ -27,18 +27,24 @@ def enabled(env: dict[str, str]) -> bool:
     return env.get("STUDIO_TEMPORAL_WORKER", "false").lower() == "true"
 
 
-def build(client, ctx):
-    """The worker for a connected client and a built context (separate so tests can build it on a test server)."""
-    return build_dream_worker(client, DreamActivities(ctx.dreams), DreamProducerActivities(ctx.dream_producer), AutopilotActivities(ctx.autopilot))
+def build(client, ctx, vctx=None):
+    """The worker for a connected client and built contexts (separate so tests can build it on a test server). With a video context it is ONE
+    worker for every Python workflow type on the queue (video, Dream, post); without, the Dream and post workflows only."""
+    dream, dream_producer, autopilot = DreamActivities(ctx.dreams), DreamProducerActivities(ctx.dream_producer), AutopilotActivities(ctx.autopilot)
+    if vctx is None:
+        return build_dream_worker(client, dream, dream_producer, autopilot)
+    return build_all_worker(client, vctx.control, vctx.producer_acts, dream, dream_producer, autopilot)
 
 
 async def run(settings: Settings) -> None:
     from temporalio.client import Client
 
     client = await Client.connect(settings.temporal_address)
-    ctx = build_dream_context(ThreadLocalPgDb(settings.dsn), settings, gateway=TemporalGateway(client, asyncio.get_running_loop()))
-    log.info("Python Dream worker listening on projectv-control-py at %s", settings.temporal_address)
-    await build(client, ctx).run()
+    db = ThreadLocalPgDb(settings.dsn)
+    ctx = build_dream_context(db, settings, gateway=TemporalGateway(client, asyncio.get_running_loop()))
+    vctx = build_video_context(db, settings, dream_ctx=ctx)
+    log.info("Python worker (video, Dream, post) listening on projectv-control-py at %s", settings.temporal_address)
+    await build(client, ctx, vctx).run()
 
 
 def main(env: dict[str, str] | None = None) -> int:

@@ -1,5 +1,19 @@
 # Java to Python migration plan (staged, never big-bang)
 
+## Status, 23 Nov 2026 (S7 part 2: video routes, one worker, live read-only replay; branch claude/python-migration-88b813)
+
+**Every route of the Java API is now ported (ApiController, ProducerController, Dream, DreamGpu, Autopilot, Routing, Gpu*). Java stays live and stays the default; nothing is cut over.**
+
+Done:
+- `studio/api/video_routes.py`: all of ApiController (videos, stages approve/reject/rerun, modes, shot redo/prompt/versions/keyframe, script lines and voices, clips estimate/redo/stop/progress/final-wanted/versions/select, internal clip progress and stop, NASA footage, creative review, pause/resume, production view, assets and asset content redirect, budget with Modal billing, stages list, system) and ProducerController (report, trust, rules). Java's own error handlers are kept: a refusal is a 409 `{"error"}`, a missing row a 404 `{"error"}`.
+- `studio/api/video_wiring.py` builds the whole video graph (writer, director, inspector, creative director, every stage, VideoService, ControlActivities) from settings and the same environment variables as application.properties; nothing real is called while building. `studio/worker.py` now starts ONE worker for every Python workflow type (video, Dream, post) on `projectv-control-py` (`build_all_worker`).
+- New switch, OFF by default: `STUDIO_VIDEO_ROUTES`.
+- Contract replay on real data, read-only: 56 GET exchanges recorded from the live Java API (dream list/details/chains, videos/production/producer, autopilot, producer, budget, stages...) and replayed against this app running beside it on the same database (port 8091; 8081 was taken by something else). The replay found three real differences, fixed and tested: `run_date` (Java sends midnight UTC), jsonb text form of `scout_json`/`check_json`, YouTube token lookup. The 4 that remain are not drift: the clock in `/api/autopilot`, Java's Modal billing report (the media worker reports to Java), the Gemini key and the `.secrets` folder, which are only in Java's environment. (The recording held owner data and was deleted; only key names and types are committed.)
+
+Left (not done): value-level replay of POST/PUT routes (they change data: needs a throwaway database), the cut-over (needs your yes and a week of normal use), pointing the media worker at the Python app's internal routes (`/api/internal/*`), running the Python worker against a real Temporal server.
+
+Could not verify without spend (each needs the owner's yes): same list as S6, plus a whole video run on the Python worker (paid LLM calls, GPU), and a recorded video compared with Java.
+
 ## Status, 23 Nov 2026 (S7 part 1: Dream, Dream GPU and Autopilot routes; branch claude/python-migration-88b813)
 
 **The Python app can now serve the Dream, Dream GPU and Autopilot routes on its own port, beside Java. Java stays live and stays the default; nothing is cut over. S8 / any cut-over is not started.**
@@ -12,7 +26,7 @@ Done:
 - Real `ProducerService` behind `DreamProducer` (wiring.py); a thread-local database connection per thread (`ThreadLocalPgDb`) so requests and jobs never share a transaction.
 - Worker start-up for the Dream and post workflows on `projectv-control-py` (never Java's queue). Pods still only come from `GpuBroker.acquire()`: self-stop wrapper and watchdog lease; watchdog settings untouched.
 
-Left (not done): the video pipeline's routes (`/api/videos/*`, production, stock, etc.) and the video worker's wiring (writer, director, inspector, voices: `build_worker` needs that graph), the remaining controllers of the ~130 routes, a contract replay of the routes that need real data (we compared shapes, not values), and the cut-over itself (needs your yes, and a week of normal use per the stop rule).
+Left (not done; the video routes and worker wiring are done in part 2 above): a contract replay of the routes that need real data (we compared shapes, not values), and the cut-over itself (needs your yes, and a week of normal use per the stop rule).
 
 Could not verify without spend (each needs the owner's yes): everything in the S6 list (real pod rental, paid LLM calls, Gemini watching Shorts, real YouTube upload, a recorded Dream Short compared with Java), the Temporal gateway against a real Temporal server with the Python worker (tests use the local test server and fakes), and running the Python app with `DREAM_GPU_PROVIDER=broker` against a real RunPod account.
 

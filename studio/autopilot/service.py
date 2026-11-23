@@ -336,7 +336,9 @@ class AutopilotService:
     def youtube_connected(self) -> bool:
         """The media worker keeps the owner's sign-in; the control plane only checks that the file exists (never reads it)."""
         p = Path(self.youtube_token_file)
-        return p.exists() or (Path("..") / p).exists()
+        from studio.config import REPO_ROOT
+
+        return p.exists() or (Path("..") / p).exists() or (REPO_ROOT / p).exists()
 
     def post(self, run_id: uuid.UUID, title: str | None, description: str | None, hashtags: str | None, privacy: str, gateway: Any = None) -> None:
         """The owner tapped Post: save their edits, then upload once. Refused unless the run is ready (no double posts)."""

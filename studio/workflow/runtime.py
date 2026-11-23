@@ -76,3 +76,20 @@ def build_dream_worker(client: Any, dream: Any, dream_producer: Any, autopilot: 
     return Worker(client, task_queue=queues.CONTROL, workflows=dream_workflow.WORKFLOWS + autopilot_workflow.WORKFLOWS,
                   activities=dream_activities.activity_functions(dream, dream_producer) + autopilot_workflow.activity_functions(autopilot),
                   activity_executor=executor or ThreadPoolExecutor(max_workers=16))
+
+
+def build_all_worker(client: Any, control: Any, producer: Any, dream: Any, dream_producer: Any, autopilot: Any,
+                     executor: ThreadPoolExecutor | None = None) -> Any:
+    """ONE worker for the whole Python control queue: video workflows and activities, Dream workflows and activities, and the post workflow.
+    Temporal lets a process run one worker per queue, and a task for a workflow type this worker did not register would fail, so every Python
+    workflow type is registered together. Nothing starts until S7 calls run() on it after the owner's go."""
+    from temporalio.worker import Worker
+
+    from studio.workflow import autopilot_workflow, dream_activities, dream_workflow
+    from studio.workflow.activities import activity_functions
+    from studio.workflow.video_production import WORKFLOWS
+
+    return Worker(client, task_queue=queues.CONTROL, workflows=WORKFLOWS + dream_workflow.WORKFLOWS + autopilot_workflow.WORKFLOWS,
+                  activities=activity_functions(control, producer) + dream_activities.activity_functions(dream, dream_producer)
+                  + autopilot_workflow.activity_functions(autopilot),
+                  activity_executor=executor or ThreadPoolExecutor(max_workers=16))
