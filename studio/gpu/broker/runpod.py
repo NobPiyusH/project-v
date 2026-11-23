@@ -27,6 +27,13 @@ def safe_env(key: str, value: str) -> bool:
     return bool(key) and SAFE_ENV.fullmatch(key) is not None and SAFE_ENV.fullmatch(value) is not None
 
 
+LABEL_PREFIX = "projectv-"  # every studio pod/instance/node name starts with this: the watchdog only touches such names
+
+
+def shell_quote(s: str) -> str:
+    return "'" + s.replace("'", "'\\''") + "'"
+
+
 def abbreviate(s: str | None) -> str:
     """At most 200 characters of a provider's answer, for logs and errors ('' for None)."""
     return "" if s is None else s[:200]
