@@ -50,7 +50,7 @@ Done after the owner said "approved all" and "yes push":
 
 ## Pending for the owner
 1. **Rotate the keys** (ElevenLabs, Hugging Face, RunPod, Vast key and TOTP seed, E2E, OpenAI): only he can; then put them in `.env` and have the CTO test them without printing.
-2. **Milky Seas production gates:** a firm Blender render cost from the `milky-seas-blender` session benchmark (his OK before any full render), the paid ElevenLabs plan (commercial licence) before publishing, and a licence check of each real NASA/NOAA image used.
+2. **Milky Seas production gates:** a firm Blender render cost from the `milky-seas-blender` session benchmark (his OK before any full render), ~~the paid ElevenLabs plan~~ (DONE: bought by the owner; checked 23 Nov: Starter, active, annual, 601/40,000 characters, resets 23 Dec 2026), and image licences (checked in `docs/shorts/milky-seas-director-plan.md`: NASA Earth Observatory images OK with credit, map not, NOAA unread).
 3. Optional: second private backup of his personal documents (see above).
 4. Later queue: merge `claude/cost-cuts-a99b7a`, Blender templates (automation), HyperFrames / upscale / FLUX-vs-Z-Image tests, Director plan format (draft JSON exists), RunPod Serverless test on one Short, 48 h / 7 d analytics of the TV video, Lake Natron Short (on hold).
 
