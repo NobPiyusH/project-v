@@ -35,8 +35,7 @@ ARCHIVE = "https://archive.org"
 ALL_SOURCES = ("pixabay", "archive", "commons", "pexels")  # Pexels is optional: it paused new API keys (Nov 2026)
 KEY_ENV = {"pexels": "PEXELS_API_KEY", "pixabay": "PIXABAY_API_KEY"}
 OK_LICENCE = re.compile(r"^(public domain|pd|cc0|cc[ -]by \d(\.\d)?)", re.I)  # never share-alike, NC or ND
-STOP = set("a an the of in on at to and or with for from by is are was be as it its this that into over under near "
-           "shot scene video footage clip showing shows view".split())
+STOP = set(["a", "an", "the", "of", "in", "on", "at", "to", "and", "or", "with", "for", "from", "by", "is", "are", "was", "be", "as", "it", "its", "this", "that", "into", "over", "under", "near", "shot", "scene", "video", "footage", "clip", "showing", "shows", "view"])
 MIN_FILL = 0.6  # a clip shorter than this share of the shot is rejected (assembly would have to slow it too much)
 
 
@@ -175,7 +174,7 @@ def search_pexels(query: str, aspect: str, per_page: int = 12) -> list[dict]:
     q = urllib.parse.urlencode({"query": query, "orientation": _orientation(aspect), "per_page": per_page, "size": "medium"})
     out = []
     for v in _get_json(f"{PEXELS}?{q}", {"Authorization": _key("pexels") or ""}).get("videos") or []:
-        f = pick_file([{"url": x.get("link"), "width": x.get("width"), "height": x.get("height")}
+        f = pick_file([{"url": x.get("link"), "width": x.get("width"), "height": x.get("height"), "thumb": v.get("image")}
                        for x in v.get("video_files") or [] if (x.get("file_type") or "video/mp4") == "video/mp4"])
         if not f:
             continue
@@ -183,7 +182,7 @@ def search_pexels(query: str, aspect: str, per_page: int = 12) -> list[dict]:
         out.append({"source": "pexels", "id": str(v["id"]), "pageUrl": v.get("url"), "downloadUrl": f["url"],
                     "width": f["width"], "height": f["height"], "duration": float(v.get("duration") or 0),
                     "author": user.get("name") or "", "authorUrl": user.get("url") or "",
-                    "licence": "Pexels License", "licenceUrl": "https://www.pexels.com/license/",
+                    "licence": "Pexels License", "licenceUrl": "https://www.pexels.com/license/", "thumb": f.get("thumb") or "",
                     "text": re.sub(r"[-/_]", " ", (v.get("url") or "").rstrip("/").rsplit("/", 1)[-1])})
     return out
 
@@ -193,7 +192,7 @@ def search_pixabay(query: str, aspect: str, per_page: int = 12) -> list[dict]:
                                 "video_type": "film", "safesearch": "true", "min_width": 1280})
     out = []
     for v in _get_json(f"{PIXABAY}?{q}", cache=True).get("hits") or []:
-        f = pick_file([{"url": x.get("url"), "width": x.get("width"), "height": x.get("height")}
+        f = pick_file([{"url": x.get("url"), "width": x.get("width"), "height": x.get("height"), "thumb": x.get("thumbnail")}
                        for x in (v.get("videos") or {}).values() if isinstance(x, dict)])
         if not f:
             continue
@@ -201,6 +200,7 @@ def search_pixabay(query: str, aspect: str, per_page: int = 12) -> list[dict]:
                     "width": f["width"], "height": f["height"], "duration": float(v.get("duration") or 0),
                     "author": v.get("user") or "", "authorUrl": "",
                     "licence": "Pixabay Content License", "licenceUrl": "https://pixabay.com/service/license-summary/",
+                    "thumb": f.get("thumb") or "",
                     "text": v.get("tags") or ""})
     return out
 
@@ -213,7 +213,7 @@ def search_commons(query: str, aspect: str, per_page: int = 8) -> list[dict]:
     q = urllib.parse.urlencode({
         "action": "query", "format": "json", "generator": "search", "gsrnamespace": 6, "gsrlimit": per_page * 2,
         "gsrsearch": " ".join(f'"{w}"' for w in query.split()) + " filetype:video",
-        "prop": "imageinfo", "iiprop": "url|size|mime|extmetadata|metadata"})
+        "prop": "imageinfo", "iiprop": "url|size|mime|extmetadata|metadata", "iiurlwidth": 640})
     pages = (_get_json(f"{COMMONS}?{q}").get("query") or {}).get("pages") or {}
     out = []
     for p in sorted(pages.values(), key=lambda p: p.get("index", 0)):
@@ -228,7 +228,7 @@ def search_commons(query: str, aspect: str, per_page: int = 8) -> list[dict]:
         out.append({"source": "commons", "id": p.get("title", ""), "pageUrl": info.get("descriptionurl")
                     or "https://commons.wikimedia.org/wiki/" + urllib.parse.quote(p.get("title", "").replace(" ", "_")),
                     "downloadUrl": info["url"], "width": info.get("width") or 0, "height": info.get("height") or 0,
-                    "duration": length, "title": title,
+                    "duration": length, "title": title, "thumb": info.get("thumburl") or "",
                     "author": _plain((meta.get("Artist") or {}).get("value")) or _plain((meta.get("Credit") or {}).get("value")),
                     "authorUrl": "", "licence": lic, "licenceUrl": _plain((meta.get("LicenseUrl") or {}).get("value")),
                     "text": title + " " + _plain((meta.get("ImageDescription") or {}).get("value"))})
@@ -287,6 +287,7 @@ def search_archive(query: str, aspect: str, per_page: int = 6) -> list[dict]:
                     "downloadUrl": f"{ARCHIVE}/download/{urllib.parse.quote(ident)}/{urllib.parse.quote(f['name'])}",
                     "width": int(f.get("width") or 640), "height": int(f.get("height") or 480),
                     "duration": float(f.get("length") or 0), "title": str(_first(meta.get("title")) or ident),
+                    "thumb": f"{ARCHIVE}/services/img/{urllib.parse.quote(ident)}",
                     "author": creator, "authorUrl": "", "licence": lic[0], "licenceUrl": lic[1],
                     "text": f"{meta.get('title', '')} {_first(meta.get('subject'))} {str(meta.get('description', ''))[:300]}"})
         if len(out) >= per_page:
@@ -375,6 +376,24 @@ def _miss(reason: str, queries: list[str], skipped: list[str]) -> dict:
     return {"found": False, "reason": reason, "queries": queries, "skipped": skipped}
 
 
+def _judge_enabled(req: dict) -> bool:
+    flag = req.get("visionJudge")
+    if flag is None:
+        flag = os.environ.get("STOCK_VISION_JUDGE", "0")
+    return str(flag).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _vision_pick(ranked: list[dict], req: dict) -> tuple[list[dict], list[str]]:
+    """Judge the top candidates' preview pictures (never the clips) against the shot; keep those scoring at least the minimum,
+    best first. Any failure of the judge returns the plain ranking, so the judge can never break the lane."""
+    try:
+        from workers.quality_gate import stockjudge
+        return stockjudge.pick(ranked, req.get("description") or "", req.get("narration") or "", req.get("videoId"))
+    except Exception as e:  # noqa: BLE001
+        log.warning("stock vision judge unavailable: %s", type(e).__name__)
+        return ranked, [f"vision judge skipped: {type(e).__name__}"]
+
+
 @activity.defn(name="stock_fetch")
 def stock_fetch(req: dict) -> dict:
     """req: {videoId, shotId, shotNumber, description, aspectRatio, durationSec, sources[], queryModel, maxMb}
@@ -403,6 +422,11 @@ def stock_fetch(req: dict) -> dict:
                 seen.add((c["source"], c["id"]))
                 uniq.append(c)
         ranked = rank(uniq, queries, aspect, want)
+        if ranked and _judge_enabled(req):  # optional: a vision model looks at the free preview pictures (default OFF)
+            ranked, notes = _vision_pick(ranked, req)
+            skipped += notes
+            if not ranked:
+                return _miss("no preview picture matched the shot (vision judge)", queries, skipped)
         max_bytes = int(float(req.get("maxMb") or os.environ.get("STOCK_MAX_MB") or 400) * 1_000_000)
         for c in ranked[:3]:  # the best that downloads within the cap
             try:

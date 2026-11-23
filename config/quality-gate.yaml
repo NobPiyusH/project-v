@@ -29,3 +29,8 @@ freeze:
   freeze_min_sec: 2.5
 captions:
   min_words_per_card: 2
+stock_judge:                         # picks stock clips by looking at their free preview pictures (workers/quality_gate/stockjudge.py)
+  top_n: 5                           # candidates judged per shot, in rank order
+  min_score: 4                       # a clip needs at least this (1-5) to be used; else the shot goes to the AI lane
+  thumb_max_side_px: 640
+  ledger: E:/project-data/outputs/quality-gate/ledger.jsonl
