@@ -23,9 +23,9 @@ For the next Claude (another account or a new session) that continues as Gendu's
 ## Sessions started from the CTO chat (their notes only; check before trusting)
 | Name | Task | State on 23 Nov | Branch (not pushed unless stated) |
 |---|---|---|---|
-| java-to-python | staged Java to Python migration | S0-S4 done (ledger, config/providers, routing/agents, GPU watchdog+broker+4 adapters); 253 tests on fakes; Java still live; paused before S5 (workflow, video, HTTP API) | `claude/python-migration-88b813`, pushed. NOTE its worktree directory is `.claude/worktrees/studio-svi-safety-52e8a5` |
-| quality-gate | quality gate checks 1-7 + stock judge | built, 20+ tests, TV video run cost $0.097; stock "search and judge" (off by default) works, found nothing usable for TV shots 4, 18, 25 (AI picture used instead); two script A/Bs written; item 8 (Java contract tests) not built | `claude/quality-gate-cf71ff`, not pushed |
-| milky-seas-blender | 3 photoreal Blender scenes + chunked cloud render tool + 4K/8K benchmark | running; its first pod was killed by the watchdog (no lease, about $0.11 lost); a second RunPod A40 pod (`sr9e9yhjq4kydg`, about $0.60/h) now holds a lease (keeper started by the CTO chat, 100 min cap) and was still booting at last check; spend approved: about $1 for the benchmark, full renders need his firm-number OK | `claude/milky-seas-blender-0b808a`, not pushed |
+| java-to-python | staged Java to Python migration | S0-S4 done (253 tests on fakes); owner approved S5 (workflow, production, video stages) on 23 Nov late; the session is working on it, Java still live | `claude/python-migration-88b813`, pushed. NOTE its worktree directory is `.claude/worktrees/studio-svi-safety-52e8a5` |
+| quality-gate | quality gate checks 1-7 + stock judge | MERGED into main (`648d829`, pushed); 28 gate tests pass; stock judge ON by default (`STOCK_VISION_JUDGE=0` turns it off); item 8 (Java contract tests) not built | branch merged |
+| milky-seas-blender | 3 photoreal Blender scenes + chunked cloud render tool + 4K/8K benchmark | running. First pod killed by the watchdog (no lease, about $0.11 lost). Second pod (A40 `sr9e9yhjq4kydg`) leased by the CTO chat, rendered chunk 1, then was killed ON PURPOSE to test resume. Replacement L40S (`y4wfaeu5g6nirz`, $1.09/h) had NO lease because the tool's rental code does not lease yet: the CTO chat opened a lease and keeper (100 min cap) and told the session to add the lease step to its rental code. Spend approved: about $1 for the benchmark; full renders need his firm-number OK | `claude/milky-seas-blender-0b808a`, not pushed |
 | earshot-sound-effects-te | Earshot test | done, idle | none |
 
 ## Uncommitted work in `C:\dev\project-v` (main) that matters
@@ -53,6 +53,11 @@ Done after the owner said "approved all" and "yes push":
 2. **Milky Seas production gates:** a firm Blender render cost from the `milky-seas-blender` session benchmark (his OK before any full render), ~~the paid ElevenLabs plan~~ (DONE: bought by the owner; checked 23 Nov: Starter, active, annual, 601/40,000 characters, resets 23 Dec 2026), and image licences (checked in `docs/shorts/milky-seas-director-plan.md`: NASA Earth Observatory images OK with credit, map not, NOAA unread).
 3. Optional: second private backup of his personal documents (see above).
 4. Later queue: merge `claude/cost-cuts-a99b7a`, Blender templates (automation), HyperFrames / upscale / FLUX-vs-Z-Image tests, Director plan format (draft JSON exists), RunPod Serverless test on one Short, 48 h / 7 d analytics of the TV video, Lake Natron Short (on hold).
+
+## Live state at the time of writing (23 Nov 2026, about 15:15 IST)
+- Status page `http://127.0.0.1:8099`: one pod, L40S `y4wfaeu5g6nirz` about 2 min old, balance about $4.83; the newest frame had just landed. Leases: only `y4wfaeu5g6nirz` open (keeper pid 25060, 100 min cap); the earlier A40 lease released. No watchdog kill since 09:03 UTC.
+- Pods keep dying only when they have NO lease. Always check the leases table (`docker exec projectv-postgres-1 psql -U projectv -d projectv -c "select pod_id,name,heartbeat_at,released_at from gpu_pod_lease order by created_at desc limit 5"`) when a pod is rented by any tool.
+- ElevenLabs: Starter plan active, annual, 601 / 40,000 characters used, resets 23 Dec 2026 (owner bought it; checked read-only).
 
 ## Other notes for the next Claude
 - The owner also ran `/auto-mode-setup` (project scope) on 23 Nov; its proposal only adds a soft-deny for spend-incurring GPU rental commands outside normal start/stop flows. Nothing was applied by the CTO chat. Auto mode blocked one message that would have told a session to evade the watchdog; route such things to the owner.
