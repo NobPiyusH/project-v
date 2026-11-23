@@ -22,7 +22,7 @@ for _d in ("textures", "hdri"):                                 # bundle every t
     for _r, _, _fl in os.walk(os.path.join(ROOT, _d)):
         for _f in _fl:
             SCENES["cathedral"]["files"].append(os.path.relpath(os.path.join(_r, _f), ROOT).replace(os.sep, "/"))
-GPUS = ["NVIDIA L40S"]   # owner-approved GPU only; price ceiling via --max-price
+GPUS = ["NVIDIA L40S", "NVIDIA GeForce RTX 5090", "NVIDIA A40"]   # approved order (CTO 23 Nov); price ceiling via --max-price
 GPUS_UNUSED = ["NVIDIA L40S", "NVIDIA RTX 6000 Ada Generation", "NVIDIA L40", "NVIDIA A40", "NVIDIA RTX A6000", "NVIDIA GeForce RTX 4090", "NVIDIA RTX 5000 Ada Generation"]
 IMAGE = "runpod/pytorch:2.8.0-py3.11-cuda12.8.1-cudnn-devel-ubuntu22.04"
 BLENDER_URL = "https://download.blender.org/release/Blender5.3/blender-5.3.0-linux-x64.tar.xz"
