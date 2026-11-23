@@ -24,7 +24,7 @@ SCENES = {
 GPUS = ["NVIDIA L40S", "NVIDIA RTX 6000 Ada Generation", "NVIDIA L40", "NVIDIA A40", "NVIDIA RTX A6000", "NVIDIA GeForce RTX 4090", "NVIDIA RTX 5000 Ada Generation"]
 IMAGE = "runpod/pytorch:2.8.0-py3.11-cuda12.8.1-cudnn-devel-ubuntu22.04"
 BLENDER_URL = "https://download.blender.org/release/Blender5.3/blender-5.3.0-linux-x64.tar.xz"
-LEASE = os.environ.get("GPU_LEASE", r"C:\dev\project-v	ools\gpu_lease\lease.py")
+LEASE = os.environ.get("GPU_LEASE", "C:/dev/project-v/tools/gpu_lease/lease.py")
 UA = {"User-Agent": "projectv-render"}
 
 
