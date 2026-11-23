@@ -14,7 +14,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import Response
 
 from studio.config import Settings
-from studio.db import Db, PgDb
+from studio.db import Db, ThreadLocalPgDb
 from studio.gpu.events import PgPodEvents
 from studio.gpu.leases import PgPodLeases
 from studio.gpu.logs import PodLogs
@@ -33,6 +33,8 @@ def _default(o: Any) -> Any:
     if isinstance(o, datetime):  # Java sends timestamps as UTC with millisecond precision: 2026-11-22T18:16:06.990Z
         u = o.astimezone(UTC)
         return u.strftime("%Y-%m-%dT%H:%M:%S.") + f"{u.microsecond // 1000:03d}Z"
+    if isinstance(o, uuid.UUID):
+        return str(o)
     if hasattr(o, "isoformat"):
         return o.isoformat()
     raise TypeError(type(o))
@@ -45,9 +47,10 @@ class JavaJson(Response):
         return json.dumps(content, default=_default, separators=(",", ":")).encode()
 
 
-def create_app(db: Db | None = None, settings: Settings | None = None) -> FastAPI:
+
+def create_app(db: Db | None = None, settings: Settings | None = None, dream_ctx: Any = None) -> FastAPI:
     settings = settings or Settings.from_env()
-    db = db or PgDb(settings.dsn)
+    db = db or ThreadLocalPgDb(settings.dsn)  # one connection per thread: requests and background jobs run on many
     ledger = CostLedger(db)
     providers = ProviderRegistry(db, settings.config_dir)
     pricing = Pricing(settings.config_dir)
@@ -61,14 +64,40 @@ def create_app(db: Db | None = None, settings: Settings | None = None) -> FastAP
     pod_logs = PodLogs(settings.runpod_base_url, settings.runpod_api_key)
     loop = WatchdogLoop([watchdog], settings.gpu_watchdog_poll_seconds)
 
+    ctx = dream_ctx
+    if ctx is None and settings.dream_routes:
+        from studio.api.wiring import build_dream_context
+
+        ctx = build_dream_context(db, settings)
+    jobs: list[Any] = []
+    if ctx is not None and settings.jobs:
+        from studio.api.jobs import dream_jobs
+
+        jobs = dream_jobs(ctx)
+
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         if settings.gpu_watchdog_python:
             loop.start()
+        for j in jobs:
+            j.start()
         yield
+        for j in jobs:
+            j.stop()
         loop.stop()
 
     app = FastAPI(title="Cinestack control plane (Python)", default_response_class=JavaJson, lifespan=lifespan)
+
+    @app.exception_handler(Exception)
+    async def unexpected(request: Any, e: Exception) -> Response:
+        """Like Spring's default error body: an unexpected exception is a 500 (a missing row, a refused step...)."""
+        return JavaJson({"timestamp": datetime.now(UTC), "status": 500, "error": "Internal Server Error", "message": str(e),
+                         "path": request.url.path}, status_code=500)
+
+    if ctx is not None and settings.dream_routes:
+        from studio.api.dream_routes import register_dream_routes
+
+        register_dream_routes(app, ctx, JavaJson)
 
     @app.get("/api/ledger")
     def get_ledger() -> Response:

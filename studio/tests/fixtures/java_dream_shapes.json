@@ -1,0 +1,353 @@
+{
+ "/api/autopilot": {
+  "shape": {
+   "enabled": "bool",
+   "ideasLeft": "int",
+   "now": "str",
+   "waitingOn": [
+    "str"
+   ],
+   "youtubeConnected": "bool",
+   "zone": "str"
+  },
+  "status": 200
+ },
+ "/api/autopilot/ideas": {
+  "shape": [
+   {
+    "created_at": "str",
+    "id": "str",
+    "idea": "str",
+    "look": "NoneType",
+    "source": "str",
+    "used_at": "NoneType"
+   }
+  ],
+  "status": 200
+ },
+ "/api/autopilot/runs": {
+  "shape": [
+   {
+    "created_at": "str",
+    "description": "NoneType",
+    "dream_short_id": "str",
+    "dream_status": "str",
+    "dream_step": "str",
+    "final_asset_id": "NoneType",
+    "hashtags": "NoneType",
+    "id": "str",
+    "idea": "str",
+    "message": "str",
+    "posted_at": "NoneType",
+    "privacy": "NoneType",
+    "run_date": "str",
+    "spent_inr": "float",
+    "starts_at": "str",
+    "status": "str",
+    "title": "NoneType",
+    "updated_at": "str",
+    "youtube_id": "NoneType"
+   }
+  ],
+  "status": 200
+ },
+ "/api/autopilot/settings": {
+  "shape": {
+   "dailyCapInr": "float",
+   "enabled": "bool",
+   "look": "NoneType",
+   "privacy": "str",
+   "reviewMinutes": "int",
+   "shots": "int",
+   "startMode": "str",
+   "startTime": "str",
+   "stepModes": {
+    "CLIPS": "str",
+    "FINISH": "str",
+    "MUSIC": "str",
+    "PICTURES": "str",
+    "SCOUT": "str",
+    "WRITE": "str"
+   },
+   "useScout": "bool"
+  },
+  "status": 200
+ },
+ "/api/dream": {
+  "shape": [
+   {
+    "created_at": "str",
+    "episode": "int",
+    "final_asset_id": "str",
+    "id": "str",
+    "idea": "str",
+    "look": "str",
+    "message": "str",
+    "parent_id": "NoneType",
+    "spent_inr": "float",
+    "status": "str",
+    "step": "str",
+    "thumb_asset_id": "str",
+    "title": "str",
+    "updated_at": "str"
+   }
+  ],
+  "status": 200
+ },
+ "/api/dream/calibration": {
+  "shape": [
+   {
+    "key": "str",
+    "samples": "int",
+    "source": "str",
+    "updated_at": "str",
+    "value": "float"
+   }
+  ],
+  "status": 200
+ },
+ "/api/dream/idea-packs": {
+  "shape": [
+   {
+    "description": "str",
+    "id": "str",
+    "ideas": [
+     {
+      "camera": "str",
+      "concept": "str",
+      "hook": "str",
+      "id": "str",
+      "palette": "str",
+      "title": "str"
+     }
+    ],
+    "look": "str",
+    "name": "str"
+   }
+  ],
+  "status": 200
+ },
+ "/api/dream/lessons": {
+  "shape": [],
+  "status": 200
+ },
+ "/api/dream/looks": {
+  "shape": [
+   "str"
+  ],
+  "status": 200
+ },
+ "/api/dream/{id}": {
+  "shape": {
+   "branch_json": "NoneType",
+   "chain": [
+    {
+     "chosen_path": "NoneType",
+     "episode": "int",
+     "final_asset_id": "str",
+     "id": "str",
+     "pick_source": "NoneType",
+     "status": "str",
+     "title": "str"
+    }
+   ],
+   "chain_bridge": "bool",
+   "chain_group": "int",
+   "chain_locked": "bool",
+   "chain_shots": "bool",
+   "check_json": "NoneType",
+   "children": [],
+   "chosen_path": "NoneType",
+   "clipProgress": "NoneType",
+   "costs": [
+    {
+     "amount_inr": "float",
+     "estimated": "bool",
+     "note": "str",
+     "provider_id": "str",
+     "ts": "str",
+     "unit_type": "str",
+     "units": "float"
+    }
+   ],
+   "created_at": "str",
+   "decisions": [
+    {
+     "candidates": "str",
+     "capability": "str",
+     "chosen_provider_id": "str",
+     "created_at": "str",
+     "reason_text": "str",
+     "stage": "str"
+    }
+   ],
+   "edit_ambience": "bool",
+   "edit_music": "bool",
+   "edit_pacing": "bool",
+   "episode": "int",
+   "events": [
+    {
+     "created_at": "str",
+     "data": "str",
+     "kind": "str",
+     "notes": "str",
+     "shot_ids": "NoneType",
+     "step": "NoneType"
+    }
+   ],
+   "final_asset_id": "str",
+   "gpu_choice": "NoneType",
+   "gpu_hold": "str",
+   "gpu_idle_minutes": "int",
+   "gpu_mode": "str",
+   "hook_color": "NoneType",
+   "hook_locked": "bool",
+   "hook_text": "NoneType",
+   "hook_title": "bool",
+   "id": "str",
+   "idea": "str",
+   "idea_ref": "NoneType",
+   "log": [
+    {
+     "at": "str",
+     "text": "str"
+    }
+   ],
+   "look": "str",
+   "message": "str",
+   "metrics": [
+    {
+     "asset_id": "str",
+     "created_at": "str",
+     "look": "str",
+     "metrics": "str"
+    }
+   ],
+   "modes_json": {
+    "null": "bool",
+    "type": "str",
+    "value": "str"
+   },
+   "music_asset_id": "str",
+   "music_source": "str",
+   "parent_id": "NoneType",
+   "path_a": "NoneType",
+   "path_b": "NoneType",
+   "path_choice": "bool",
+   "path_locked": "bool",
+   "pick_source": "NoneType",
+   "picture_check_json": "NoneType",
+   "picture_model": "str",
+   "producer": [],
+   "producer_decides": "bool",
+   "quality": "str",
+   "review_minutes": "int",
+   "scene_seed": "NoneType",
+   "scout": "bool",
+   "scout_angle": "int",
+   "scout_json": "NoneType",
+   "shot_count": "int",
+   "shots": [
+    {
+     "clip_asset_id": "str",
+     "clip_takes": "int",
+     "error": "NoneType",
+     "id": "str",
+     "motion_prompt": "str",
+     "ord": "int",
+     "picture_asset_id": "str",
+     "picture_prompt": "str",
+     "picture_takes": "int",
+     "scene": "str"
+    }
+   ],
+   "start_clip_asset_id": "NoneType",
+   "status": "str",
+   "step": "str",
+   "svi_between": "str",
+   "svi_scene_seconds": "int",
+   "svi_scenes": "int",
+   "timeline": [
+    {
+     "costInr": "float",
+     "finishedAt": "NoneType",
+     "startedAt": "NoneType",
+     "status": "str",
+     "step": "str",
+     "typicalSeconds": "int",
+     "workSeconds": "int"
+    }
+   ],
+   "title": "str",
+   "updated_at": "str",
+   "view": "NoneType",
+   "workflow_id": "str"
+  },
+  "status": 200
+ },
+ "/api/dream/{id}/chain": {
+  "shape": [
+   {
+    "chosen_path": "NoneType",
+    "episode": "int",
+    "final_asset_id": "str",
+    "id": "str",
+    "pick_source": "NoneType",
+    "status": "str",
+    "title": "str"
+   }
+  ],
+  "status": 200
+ },
+ "/api/dream/{id}/gpu": {
+  "shape": {
+   "boot": "NoneType",
+   "choice": "str",
+   "estimate": {
+    "hourlyUsd": "float",
+    "hours": "float",
+    "usd": "float"
+   },
+   "hold": "str",
+   "idleMinutes": "int",
+   "mode": "str",
+   "offInSeconds": "NoneType",
+   "rented": "bool",
+   "usersOnPod": "int"
+  },
+  "status": 200
+ },
+ "/api/dream/{id}/reviews": {
+  "shape": [],
+  "status": 200
+ },
+ "/api/gpu/broker": {
+  "shape": {
+   "enabled": "bool",
+   "providers": [
+    {
+     "configured": "bool",
+     "inAutoSearch": "bool",
+     "monthlyCapUsd": "float",
+     "preflightAt": "str",
+     "preflightNote": "str",
+     "preflightOk": "bool",
+     "proven": "bool",
+     "provenNote": "str",
+     "provider": "str"
+    }
+   ],
+   "today": {
+    "bookedUsd": "float",
+    "capUsd": "float",
+    "runningUsd": "float",
+    "spentUsd": "float"
+   }
+  },
+  "status": 200
+ },
+ "/api/gpu/broker/options": {
+  "shape": "NoneType",
+  "status": 0
+ }
+}

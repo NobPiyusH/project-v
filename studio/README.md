@@ -9,3 +9,9 @@ Plan: `docs/plans/java-to-python-migration.md`. The Java control plane is untouc
 - Tests: `uv run --no-sync pytest studio -q` (API and Postgres tests skip until the `studio` group is installed)
 - Run beside Java: `uv run uvicorn --factory studio.api.app:create_app --port 8081`
 - Compare with Java: `uv run python -m studio.contract record http://localhost:8080 paths.txt rec.json`, then `... compare http://localhost:8081 rec.json`
+
+## Dream, Dream GPU and Autopilot routes (S7, all OFF by default)
+
+- `STUDIO_DREAM_ROUTES=true` mounts `/api/dream`, `/api/autopilot` and the Dream GPU controls; `STUDIO_JOBS=true` runs the periodic jobs; `STUDIO_TEMPORAL_WORKER=true uv run python -m studio.worker` starts the worker (own queue `projectv-control-py`). With Java live, leave the jobs and the worker off.
+- `DREAM_GPU_PROVIDER=modal` (default): no pod can be rented. `broker`: RunPod through the GPU broker (self-stop wrapper and watchdog lease on every pod).
+- Dashboard, per area: `PROJECTV_PY_AREAS=/api/dream,/api/autopilot npm --prefix dashboard run dev` sends only those areas to the Python app on :8081; without the variable everything goes to Java as before.

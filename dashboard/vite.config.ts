@@ -88,6 +88,23 @@ function studioControl(): Plugin {
   }
 }
 
+// The dashboard switch between the Java control plane (default) and the Python one (docs/plans/java-to-python-migration.md, S7).
+// Nothing changes unless PROJECTV_PY_AREAS is set: every /api path goes to Java on :8080, exactly as before. With e.g.
+//   PROJECTV_PY_AREAS=/api/dream,/api/autopilot   (comma-separated path prefixes)
+//   PROJECTV_PY_API_URL=http://127.0.0.1:8081      (default)
+// only those areas go to the Python app (started with STUDIO_DREAM_ROUTES=true on its own port); everything else still goes to Java.
+// Unset the variable and restart the dev server to switch back.
+function apiProxy() {
+  const java = process.env.PROJECTV_API_URL || 'http://127.0.0.1:8080'
+  const py = process.env.PROJECTV_PY_API_URL || 'http://127.0.0.1:8081'
+  const areas = (process.env.PROJECTV_PY_AREAS || '').split(',').map((a) => a.trim()).filter(Boolean)
+  const proxy: Record<string, string> = { '/api': java }
+  // Vite matches proxy keys in order: the longer, more specific prefixes first.
+  const out: Record<string, string> = {}
+  for (const a of areas.sort((x, y) => y.length - x.length)) out[a] = py
+  return { ...out, ...proxy }
+}
+
 // Dev server on localhost only; /api is proxied to the Spring Boot control plane.
 export default defineConfig({
   plugins: [react(), studioControl()],
@@ -95,6 +112,6 @@ export default defineConfig({
     host: '127.0.0.1',
     port: 5173,
     // 127.0.0.1, not localhost: the control plane runs with preferIPv4Stack and Node would try ::1 first.
-    proxy: { '/api': 'http://127.0.0.1:8080' },
+    proxy: apiProxy(),
   },
 })

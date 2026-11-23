@@ -1,5 +1,21 @@
 # Java to Python migration plan (staged, never big-bang)
 
+## Status, 23 Nov 2026 (S7 part 1: Dream, Dream GPU and Autopilot routes; branch claude/python-migration-88b813)
+
+**The Python app can now serve the Dream, Dream GPU and Autopilot routes on its own port, beside Java. Java stays live and stays the default; nothing is cut over. S8 / any cut-over is not started.**
+
+Done:
+- `studio/api/dream_routes.py`: every route of DreamController, DreamGpuController and AutopilotController (about 50), same paths and JSON field names; jsonb columns Java sent as `PGobject` objects are sent the same way; timeline and log in camelCase with `Instant` times.
+- Contract check on fakes: `studio/tests/fixtures/java_dream_shapes.json` holds the key names and JSON types the LIVE Java API returned (read-only GETs on the local Java, no data stored); `test_dream_api.py` compares our responses key by key (list, detail with timeline/log/costs/decisions/metrics/producer, chain, reviews, gpu, autopilot status/settings/ideas/runs, idea packs). No difference left.
+- Switches, all OFF by default: `STUDIO_DREAM_ROUTES` (mount the routes), `STUDIO_JOBS` (periodic jobs), `STUDIO_TEMPORAL_WORKER` (`python -m studio.worker` refuses without it), `DREAM_GPU_PROVIDER` (`modal` = no pod can be rented; `broker` = RunPod only), and in the dashboard `PROJECTV_PY_AREAS=/api/dream,/api/autopilot` (with `PROJECTV_PY_API_URL`, default :8081) in `dashboard/vite.config.ts`: unset, every `/api` call goes to Java exactly as before.
+- Periodic jobs (`studio/api/jobs.py`): pod "nobody waits" check and Manual-hold idle release every 30 s (only when the broker is on), autopilot tick every minute.
+- Real `ProducerService` behind `DreamProducer` (wiring.py); a thread-local database connection per thread (`ThreadLocalPgDb`) so requests and jobs never share a transaction.
+- Worker start-up for the Dream and post workflows on `projectv-control-py` (never Java's queue). Pods still only come from `GpuBroker.acquire()`: self-stop wrapper and watchdog lease; watchdog settings untouched.
+
+Left (not done): the video pipeline's routes (`/api/videos/*`, production, stock, etc.) and the video worker's wiring (writer, director, inspector, voices: `build_worker` needs that graph), the remaining controllers of the ~130 routes, a contract replay of the routes that need real data (we compared shapes, not values), and the cut-over itself (needs your yes, and a week of normal use per the stop rule).
+
+Could not verify without spend (each needs the owner's yes): everything in the S6 list (real pod rental, paid LLM calls, Gemini watching Shorts, real YouTube upload, a recorded Dream Short compared with Java), the Temporal gateway against a real Temporal server with the Python worker (tests use the local test server and fakes), and running the Python app with `DREAM_GPU_PROVIDER=broker` against a real RunPod account.
+
 ## Status, 23 Nov 2026 (end of S6 port; branch claude/python-migration-88b813)
 
 **S6 (dream, autopilot) is ported and green on fakes. Java stays live; nothing is switched, pushed or merged. S7 (routes, dashboard switch) is not started.**

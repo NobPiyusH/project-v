@@ -42,3 +42,29 @@ class PgDb:
 
     def close(self) -> None:
         self._conn.close()
+
+
+class ThreadLocalPgDb:
+    """One psycopg connection per thread (created on first use). The API serves requests and runs background jobs on many threads, and a
+    single shared connection would interleave their transactions; Java's JdbcClient used a pool for the same reason."""
+
+    def __init__(self, dsn: str):
+        import threading
+
+        self._dsn = dsn
+        self._local = threading.local()
+
+    def _db(self) -> PgDb:
+        d = getattr(self._local, "db", None)
+        if d is None:
+            d = self._local.db = PgDb(self._dsn)
+        return d
+
+    def rows(self, sql, params=None):
+        return self._db().rows(sql, params)
+
+    def execute(self, sql, params=None):
+        return self._db().execute(sql, params)
+
+    def transaction(self):
+        return self._db().transaction()
