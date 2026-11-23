@@ -36,7 +36,8 @@ def create_app(db: Db | None = None, settings: Settings | None = None) -> FastAP
     app = FastAPI(title="Cinestack control plane (Python)", default_response_class=JavaJson)
 
     @app.get("/api/ledger")
-    def get_ledger() -> list[dict[str, Any]]:
-        return ledger.totals_by_provider()
+    def get_ledger() -> Response:
+        # Built by hand: FastAPI's own encoder would turn Decimal money into strings.
+        return JavaJson(ledger.totals_by_provider())
 
     return app
