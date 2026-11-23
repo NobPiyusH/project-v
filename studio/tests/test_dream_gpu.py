@@ -57,6 +57,7 @@ def g(scratch_db, tmp_path):
     db = scratch_db
     for t in ("routing_decision", "gpu_pod_lease", "gpu_timing"):
         db.execute(f"DELETE FROM {t}")
+    db.execute("UPDATE dream_short SET status = 'CANCELLED'")  # other tests' Shorts share this database: none may look like it waits for GPU work
     worker = tmp_path / "worker.py"
     worker.write_text("print('worker')\n")
     fake = Fake()
