@@ -8,6 +8,8 @@ import typing
 from decimal import Decimal
 from typing import Any, TypeVar
 
+from pydantic import BaseModel
+
 T = TypeVar("T")
 
 
@@ -20,6 +22,8 @@ def to_json(obj: Any) -> Any:
     """Dataclass (or list/dict of them) to plain JSON-ready data with camelCase keys. Decimal becomes a number."""
     if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
         return {camel(f.name): to_json(getattr(obj, f.name)) for f in dataclasses.fields(obj)}
+    if isinstance(obj, BaseModel):
+        return obj.model_dump()
     if isinstance(obj, (list, tuple)):
         return [to_json(x) for x in obj]
     if isinstance(obj, dict):
@@ -49,6 +53,8 @@ def _convert(tp: Any, value: Any) -> Any:
     if origin is list:
         (item,) = typing.get_args(tp)
         return [_convert(item, v) for v in value]
+    if isinstance(tp, type) and issubclass(tp, BaseModel):
+        return tp.model_validate(value)
     if dataclasses.is_dataclass(tp):
         return from_json(tp, value)
     if tp is Decimal:

@@ -10,6 +10,8 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any
 
+from studio.agents.types import CreativeReview
+
 
 @dataclass
 class Usage:
@@ -288,7 +290,7 @@ class ImageReviewRequest:
 
 @dataclass
 class ImageReviewResult:
-    review: Any  # AgentTypes.CreativeReview: typed when the agents package is ported (stage S3)
+    review: CreativeReview
     model: str
     usage: Usage
     images_sent: int

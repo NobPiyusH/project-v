@@ -134,6 +134,12 @@ class ClaudeChat:
     def configured(self) -> bool:
         return self._client is not None
 
+    def send(self, **params: Any) -> Any:
+        """A raw request (e.g. with server-side web search); the caller records the cost from the response's usage."""
+        if self._client is None:
+            raise RuntimeError("not supported: no ANTHROPIC_API_KEY configured")
+        return self._client.messages.create(**params)
+
     def call(
         self, model: str, system: str, user: str, tp: Any, effort: str = "medium",
         on_usage: Callable[[int, int], None] = lambda i, o: None,
