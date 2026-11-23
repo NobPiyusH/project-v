@@ -17,7 +17,7 @@
     "planets": [
       {"name": "mercury", "orbit_B": 5.2,  "period_days": 87.97,  "color": [0.55, 0.52, 0.50], "phase_deg": 200},
       {"name": "venus",   "orbit_B": 8.6,  "period_days": 224.7,  "color": [0.95, 0.80, 0.55], "phase_deg": 80},
-      {"name": "earth",   "orbit_B": 14.0, "period_days": 365.25, "phase_deg": 66},
+      {"name": "earth",   "orbit_B": 14.0, "period_days": 365.25, "phase_deg": 40},
       {"name": "mars",    "orbit_B": 20.0, "period_days": 686.98, "color": [0.80, 0.38, 0.22], "phase_deg": 300}
     ],
     "galaxy_disc_radius_C": 38.0, "sun_galactic_radius_C": 24.0,
@@ -27,28 +27,28 @@
   },
 
   "zoom": [
-    [0.0, 1.5], [3.5, 3.2], [7.0, 10.0], [9.0, 60.0], [11.0, 420.0], [13.5, 700.0],
+    [0.0, 1.5], [3.5, 3.2], [6.5, 10.0], [7.8, 70.0], [9.0, 300.0], [10.2, 520.0], [12.5, 750.0],
     [17.0, 3000.0], [20.0, 9000.0], [23.5, 24000.0], [27.0, 37500.0], [30.0, 41000.0]
   ],
   "note_zoom": "[time_s, half-width of the frame in A units] - interpolated monotone-cubic in log space, so the pull-back never stops or jerks",
 
-  "focus": [[0, "earth"], [8.0, "earth"], [12.0, "sun"], [19.0, "sun"], [25.0, "galaxy"], [30, "galaxy"]],
+  "focus": [[0, "earth"], [7.5, "earth"], [10.8, "sun"], [19.0, "sun"], [25.0, "galaxy"], [30, "galaxy"]],
   "elevation_deg": [[0, 14], [7, 24], [15, 34], [25, 52], [30, 58]],
   "azimuth_deg": [[0, 0], [30, -14]],
 
-  "time_scale_days_per_s": [[0, 1], [7.0, 1], [9.5, 30.4], [13.5, 30.4], [15.5, 365.25], [20.0, 365.25], [23.5, 3.65e9], [30, 3.65e9]],
+  "time_scale_days_per_s": [[0, 1], [6.5, 1], [9.0, 30.4], [13.5, 30.4], [15.5, 365.25], [20.0, 365.25], [23.5, 3.65e9], [30, 3.65e9]],
 
   "labels": {
     "titles": [
-      {"text": "THE MOON AROUND THE EARTH", "from": 0.4, "to": 8.3},
-      {"text": "THE EARTH AROUND THE SUN", "from": 7.6, "to": 20.0},
-      {"text": "THE SUN AROUND THE MILKY WAY", "from": 19.4, "to": 31.0}
+      {"text": "THE MOON AROUND THE EARTH", "from": 0.4, "to": 7.2},
+      {"text": "THE EARTH AROUND THE SUN", "from": 7.2, "to": 20.0},
+      {"text": "THE SUN AROUND THE MILKY WAY", "from": 20.0, "to": 31.0}
     ],
     "rates": [
-      {"text": "1 SECOND = 1 DAY", "from": 0.2, "to": 7.6},
-      {"text": "1 SECOND = 1 MONTH", "from": 7.0, "to": 16.0},
-      {"text": "1 SECOND = 1 YEAR", "from": 15.0, "to": 23.0},
-      {"text": "1 SECOND = 10 MILLION YEARS", "from": 22.0, "to": 31.0}
+      {"text": "1 SECOND = 1 DAY", "from": 0.2, "to": 6.6},
+      {"text": "1 SECOND = 1 MONTH", "from": 6.6, "to": 15.5},
+      {"text": "1 SECOND = 1 YEAR", "from": 15.5, "to": 22.8},
+      {"text": "1 SECOND = 10 MILLION YEARS", "from": 22.8, "to": 31.0}
     ],
     "note": "NOT TO SCALE"
   }

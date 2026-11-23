@@ -213,14 +213,14 @@ def tex(nt, path, cs='sRGB', loc=(0, 0)):
 m_earth = new_mat('earth')
 nt = m_earth.node_tree
 uv = N(nt, 'ShaderNodeTexCoord')
-base = tex(nt, os.path.join(TEX, 'earth_base_4096.jpg'))
+base = tex(nt, os.path.join(TEX, 'earth_day_8192.jpg'))
 lights = tex(nt, os.path.join(TEX, 'lights_4096.jpg'), 'Non-Color')
 L(nt, uv.outputs['UV'], base.inputs[0]); L(nt, uv.outputs['UV'], lights.inputs[0])
 sep = N(nt, 'ShaderNodeSeparateColor')
 L(nt, base.outputs['Color'], sep.inputs[0])
 sub_ = N(nt, 'ShaderNodeMath', operation='SUBTRACT')
 L(nt, sep.outputs['Blue'], sub_.inputs[0]); L(nt, sep.outputs['Red'], sub_.inputs[1])
-ocean = N(nt, 'ShaderNodeMapRange', **{'From Min': 0.02, 'From Max': 0.12, 'To Min': 0.0, 'To Max': 1.0})
+ocean = N(nt, 'ShaderNodeMapRange', **{'From Min': 0.03, 'From Max': 0.20, 'To Min': 0.0, 'To Max': 1.0})
 ocean.clamp = True
 L(nt, sub_.outputs[0], ocean.inputs['Value'])
 rough = N(nt, 'ShaderNodeMapRange', **{'From Min': 0.0, 'From Max': 1.0, 'To Min': 0.82, 'To Max': 0.16})
@@ -250,7 +250,7 @@ mixn = N(nt, 'ShaderNodeMix'); mixn.data_type = 'FLOAT'; mixn.inputs[0].default_
 L(nt, tc.outputs['Object'], mp.inputs[0]); L(nt, mp.outputs[0], nz.inputs['Vector']); L(nt, mp.outputs[0], nz2.inputs['Vector'])
 L(nt, nz.outputs['Fac'], mixn.inputs[2]); L(nt, nz2.outputs['Fac'], mixn.inputs[3])
 cr = N(nt, 'ShaderNodeValToRGB')
-cr.color_ramp.elements[0].position = 0.57; cr.color_ramp.elements[1].position = 0.77
+cr.color_ramp.elements[0].position = 0.62; cr.color_ramp.elements[1].position = 0.82
 L(nt, mixn.outputs[0], cr.inputs[0])
 cb = N(nt, 'ShaderNodeBsdfPrincipled', **{'Base Color': (0.95, 0.96, 1.0, 1), 'Roughness': 0.9})
 L(nt, cr.outputs['Color'], cb.inputs['Alpha'])
@@ -315,12 +315,16 @@ mr = N(nt, 'ShaderNodeValToRGB')
 mr.color_ramp.elements[0].position = 0.42; mr.color_ramp.elements[0].color = (0.06, 0.06, 0.065, 1)
 mr.color_ramp.elements[1].position = 0.58; mr.color_ramp.elements[1].color = (0.30, 0.29, 0.28, 1)
 L(nt, maria.outputs['Fac'], mr.inputs[0])
-shade = N(nt, 'ShaderNodeMix'); shade.data_type = 'RGBA'; shade.blend_type = 'MULTIPLY'; shade.inputs[0].default_value = 0.5
+moon_tex = tex(nt, os.path.join(TEX, 'moon_color_4096.jpg'))
+uvm = N(nt, 'ShaderNodeTexCoord'); L(nt, uvm.outputs['UV'], moon_tex.inputs[0])
+moon_gain = N(nt, 'ShaderNodeVectorMath', operation='SCALE'); moon_gain.inputs['Scale'].default_value = 1.7
+L(nt, moon_tex.outputs['Color'], moon_gain.inputs[0])
+shade = N(nt, 'ShaderNodeMix'); shade.data_type = 'RGBA'; shade.blend_type = 'MULTIPLY'; shade.inputs[0].default_value = 0.55
 ramp_h = N(nt, 'ShaderNodeValToRGB')
 ramp_h.color_ramp.elements[0].position = 0.25; ramp_h.color_ramp.elements[0].color = (0.55, 0.55, 0.55, 1)
 ramp_h.color_ramp.elements[1].position = 0.7; ramp_h.color_ramp.elements[1].color = (1.25, 1.25, 1.25, 1)
 L(nt, hfin, ramp_h.inputs[0])
-L(nt, mr.outputs['Color'], shade.inputs[6]); L(nt, ramp_h.outputs['Color'], shade.inputs[7])
+L(nt, moon_gain.outputs[0], shade.inputs[6]); L(nt, ramp_h.outputs['Color'], shade.inputs[7])
 mb = N(nt, 'ShaderNodeBsdfPrincipled', Roughness=0.95)
 L(nt, shade.outputs[2], mb.inputs['Base Color'])
 out = out_node(m_moon, mb.outputs[0])
@@ -333,16 +337,20 @@ tc = N(nt, 'ShaderNodeTexCoord')
 gr = N(nt, 'ShaderNodeTexNoise', Scale=14, Detail=6, Roughness=0.6, Distortion=0.4)
 L(nt, tc.outputs['Object'], gr.inputs['Vector'])
 cr = N(nt, 'ShaderNodeValToRGB')
-cr.color_ramp.elements[0].position = 0.35; cr.color_ramp.elements[0].color = (1.0, 0.42, 0.08, 1)
-cr.color_ramp.elements[1].position = 0.7; cr.color_ramp.elements[1].color = (1.0, 0.86, 0.45, 1)
+cr.color_ramp.elements[0].position = 0.40; cr.color_ramp.elements[0].color = (1.0, 0.62, 0.20, 1)
+cr.color_ramp.elements[1].position = 0.75; cr.color_ramp.elements[1].color = (1.0, 0.97, 0.80, 1)
 L(nt, gr.outputs['Fac'], cr.inputs[0])
-lw = N(nt, 'ShaderNodeLayerWeight', Blend=0.35)
-limb = N(nt, 'ShaderNodeMath', operation='ADD'); limb.inputs[1].default_value = 0.25
-L(nt, lw.outputs['Facing'], limb.inputs[0])
-se = N(nt, 'ShaderNodeMath', operation='MULTIPLY'); se.inputs[1].default_value = 3.0
-L(nt, limb.outputs[0], se.inputs[0])
+lw = N(nt, 'ShaderNodeLayerWeight', Blend=0.5)          # Facing: 0 at disc centre, 1 at the limb
+limbk = N(nt, 'ShaderNodeMath', operation='SUBTRACT', use_clamp=True); limbk.inputs[0].default_value = 1.0
+L(nt, lw.outputs['Facing'], limbk.inputs[1])            # 1 centre -> 0 limb
+limbmix = N(nt, 'ShaderNodeMix'); limbmix.data_type = 'RGBA'
+limbmix.inputs[7].default_value = (1.0, 0.99, 0.92, 1)  # centre: white-yellow hot
+L(nt, limbk.outputs[0], limbmix.inputs[0]); L(nt, cr.outputs['Color'], limbmix.inputs[6])
+se = N(nt, 'ShaderNodeMath', operation='MULTIPLY'); se.inputs[1].default_value = 14.0
+lk2 = N(nt, 'ShaderNodeMath', operation='ADD'); lk2.inputs[1].default_value = 0.35
+L(nt, limbk.outputs[0], lk2.inputs[0]); L(nt, lk2.outputs[0], se.inputs[0])
 emn = N(nt, 'ShaderNodeEmission')
-L(nt, cr.outputs['Color'], emn.inputs['Color']); L(nt, se.outputs[0], emn.inputs['Strength'])
+L(nt, limbmix.outputs[2], emn.inputs['Color']); L(nt, se.outputs[0], emn.inputs['Strength'])
 out_node(m_sun, emn.outputs[0])
 
 # ---------------- generic planet dot
@@ -353,18 +361,18 @@ def planet_mat(name, col):
     return m
 
 # ---------------- halo billboard (sun glow)
-def halo_mat():
-    m = emission_vis_mat('sun_halo', (1.0, 0.72, 0.38, 1), 5.0)
+def halo_mat(name='sun_halo', inner=(1.0, 0.97, 0.85, 1), outer=(1.0, 0.55, 0.15, 1), strength=7.0, power=3.0):
+    m = emission_vis_mat(name, inner, strength)
     nt = m.node_tree
     tcn = N(nt, 'ShaderNodeTexCoord')
     vsub = N(nt, 'ShaderNodeVectorMath', operation='SUBTRACT'); vsub.inputs[1].default_value = (0.5, 0.5, 0)
     ln = N(nt, 'ShaderNodeVectorMath', operation='LENGTH')
     L(nt, tcn.outputs['UV'], vsub.inputs[0]); L(nt, vsub.outputs[0], ln.inputs[0])
-    r = N(nt, 'ShaderNodeMath', operation='MULTIPLY'); r.inputs[1].default_value = 2.0
+    r = N(nt, 'ShaderNodeMath', operation='MULTIPLY', use_clamp=True); r.inputs[1].default_value = 2.0
     L(nt, ln.outputs['Value'], r.inputs[0])
     om = N(nt, 'ShaderNodeMath', operation='SUBTRACT', use_clamp=True); om.inputs[0].default_value = 1.0
     L(nt, r.outputs[0], om.inputs[1])
-    p = N(nt, 'ShaderNodeMath', operation='POWER'); p.inputs[1].default_value = 3.5
+    p = N(nt, 'ShaderNodeMath', operation='POWER'); p.inputs[1].default_value = power
     L(nt, om.outputs[0], p.inputs[0])
     vis = nt.nodes['vis']
     mm = N(nt, 'ShaderNodeMath', operation='MULTIPLY')
@@ -374,7 +382,12 @@ def halo_mat():
         if l.to_node == mix and l.to_socket == mix.inputs[0]:
             nt.links.remove(l)
     L(nt, mm.outputs[0], mix.inputs[0])
+    em = [n for n in nt.nodes if n.bl_idname == 'ShaderNodeEmission'][0]
+    cm = N(nt, 'ShaderNodeMix'); cm.data_type = 'RGBA'
+    cm.inputs[6].default_value = inner; cm.inputs[7].default_value = outer
+    L(nt, r.outputs[0], cm.inputs[0]); L(nt, cm.outputs[2], em.inputs['Color'])
     return m
+
 
 # ---------------- galaxy disc
 def galaxy_mat():
@@ -384,14 +397,22 @@ def galaxy_mat():
     t = tex(nt, os.path.join(TEX, 'galaxy_disc_4096.exr'), 'Linear Rec.709')
     t.extension = 'CLIP'
     L(nt, tcn.outputs['UV'], t.inputs[0])
+    tb = tex(nt, os.path.join(TEX, 'galaxy_blur_1024.exr'), 'Linear Rec.709')
+    tb.extension = 'CLIP'
+    L(nt, tcn.outputs['UV'], tb.inputs[0])
+    sharp = N(nt, 'ShaderNodeValue', label='sharp'); sharp.name = 'sharp'
+    cmix = N(nt, 'ShaderNodeMix'); cmix.data_type = 'RGBA'
+    L(nt, sharp.outputs[0], cmix.inputs[0]); L(nt, tb.outputs['Color'], cmix.inputs[6]); L(nt, t.outputs['Color'], cmix.inputs[7])
+    amix = N(nt, 'ShaderNodeMix'); amix.data_type = 'FLOAT'
+    L(nt, sharp.outputs[0], amix.inputs[0]); L(nt, tb.outputs['Alpha'], amix.inputs[2]); L(nt, t.outputs['Alpha'], amix.inputs[3])
     vis = N(nt, 'ShaderNodeValue', label='vis'); vis.name = 'vis'
     mc = N(nt, 'ShaderNodeVectorMath', operation='SCALE'); mc.inputs['Scale'].default_value = 2.4
-    L(nt, t.outputs['Color'], mc.inputs[0])
+    L(nt, cmix.outputs[2], mc.inputs[0])
     em = N(nt, 'ShaderNodeEmission')
     L(nt, mc.outputs[0], em.inputs['Color'])
     tr = N(nt, 'ShaderNodeBsdfTransparent')
     am = N(nt, 'ShaderNodeMath', operation='MULTIPLY', use_clamp=True)
-    L(nt, t.outputs['Alpha'], am.inputs[0]); L(nt, vis.outputs[0], am.inputs[1])
+    L(nt, amix.outputs[0], am.inputs[0]); L(nt, vis.outputs[0], am.inputs[1])
     mix = N(nt, 'ShaderNodeMixShader')
     L(nt, am.outputs[0], mix.inputs[0]); L(nt, tr.outputs[0], mix.inputs[1]); L(nt, em.outputs[0], mix.inputs[2])
     out_node(m, mix.outputs[0])
@@ -463,6 +484,7 @@ def sphere(name, mat, seg=128, rings=64):
     return finish(o, mat)
 
 OBJ = {}
+PGLOW = []
 OBJ['earth'] = sphere('earth', m_earth, 160, 80)
 OBJ['clouds'] = sphere('clouds', m_cloud, 128, 64)
 OBJ['atm'] = sphere('atm', m_atm, 96, 48)
@@ -479,6 +501,15 @@ def plane(name, mat, size=2.0):
     return finish(o, mat, False)
 OBJ['halo'] = plane('halo', halo_mat()); OBJ['halo'].visible_shadow = False
 OBJ['galaxy'] = plane('galaxy', galaxy_mat()); OBJ['galaxy'].visible_shadow = False
+OBJ['haze_a'] = plane('haze_a', galaxy_mat()); OBJ['haze_a'].visible_shadow = False   # blurred depth layers above / below the disc
+OBJ['haze_b'] = plane('haze_b', galaxy_mat()); OBJ['haze_b'].visible_shadow = False
+
+for p in BD['planets']:
+    col = p.get('color', (0.4, 0.62, 1.0))
+    OBJ['pglow_' + p['name']] = plane('pglow_' + p['name'], halo_mat('pglow_' + p['name'], (*col, 1), (*col, 1), 2.4, 2.2))
+    OBJ['pglow_' + p['name']].visible_shadow = False
+    PGLOW.append(OBJ['pglow_' + p['name']])
+
 
 def ring(name, color, strength):
     bpy.ops.curve.primitive_bezier_circle_add(radius=1.0)
@@ -492,6 +523,9 @@ for p in BD['planets']:
     OBJ['ring_' + p['name']] = ring('ring_' + p['name'], (0.55, 0.68, 1.0, 1), 0.9 if p['name'] == 'earth' else 0.45)
 OBJ['ring_moon'] = ring('ring_moon', (0.7, 0.75, 0.9, 1), 0.5)
 OBJ['ring_sun_gal'] = ring('ring_sun_gal', (1.0, 0.75, 0.45, 1), 0.7)
+for n_, c_ in (('trail_moon', (0.85, 0.9, 1.0, 1)), ('trail_earth', (0.45, 0.7, 1.0, 1)), ('trail_sun_gal', (1.0, 0.85, 0.5, 1))):
+    OBJ[n_] = ring(n_, c_, 1.8)
+    OBJ[n_].data.use_fill_caps = True
 
 # billboard halo tracks the camera
 bpy.ops.object.camera_add()
@@ -500,7 +534,8 @@ cam.data.lens = 50; cam.data.sensor_fit = 'HORIZONTAL'; cam.data.sensor_width = 
 cam.data.clip_start = 0.1; cam.data.clip_end = 20000
 cam.rotation_mode = 'QUATERNION'
 CAMD = HW * 50.0 / 18.0
-tt = OBJ['halo'].constraints.new('TRACK_TO'); tt.target = cam; tt.track_axis = 'TRACK_Z'; tt.up_axis = 'UP_Y'
+for o_ in [OBJ['halo']] + PGLOW:
+    tt = o_.constraints.new('TRACK_TO'); tt.target = cam; tt.track_axis = 'TRACK_Z'; tt.up_axis = 'UP_Y'
 
 bpy.ops.object.light_add(type='SUN')
 lamp = bpy.context.object; lamp.name = 'sunlight'
@@ -539,7 +574,7 @@ try:
     ng.interface.new_socket('Image', in_out='OUTPUT', socket_type='NodeSocketColor')
     rl = ng.nodes.new('CompositorNodeRLayers'); gl = ng.nodes.new('CompositorNodeGlare'); go = ng.nodes.new('NodeGroupOutput')
     gl.inputs['Type'].default_value = 'Bloom'
-    for k, v in (('Threshold', 1.0), ('Strength', 0.55), ('Size', 0.7), ('Quality', 'High')):
+    for k, v in (('Threshold', 0.9), ('Strength', 0.85), ('Size', 0.8), ('Quality', 'High')):
         try: gl.inputs[k].default_value = v
         except Exception as e: print('glare param', k, e)
     ng.links.new(rl.outputs['Image'], gl.inputs['Image']); ng.links.new(gl.outputs['Image'], go.inputs[0])
@@ -559,7 +594,7 @@ def key_val(mat, node, v, f):
 def quat_z(a): return Quaternion((0, 0, 1), a)
 def quat_x(a): return Quaternion((1, 0, 0), a)
 IDQ = Quaternion((1, 0, 0, 0))
-MINP, MINS = 0.009, 0.014
+MINP, MINS = 0.013, 0.016
 LINE = 0.004
 ED = {}
 earth_axis = quat_x(math.radians(23.4))
@@ -586,6 +621,25 @@ def ring_update(name, center, R, st, quat, f, vis_extra=1.0, lo=0.03, hi=0.10):
     key_val(o.data.materials[0], 'vis', a, f)
     return a
 
+def trail_update(name, center, R, st, tilt_q, angle, f, start, vis_extra=1.0, lo=0.03, hi=0.10):
+    """bright arc that trails the body along its orbit (bevel factor 'start'..1 of a circle rotated so the body sits at its end)"""
+    g = st['g']
+    s_ = R * g
+    a = smooth(lo, hi, s_) * (1 - smooth(2.0, 4.5, s_)) * vis_extra
+    o = OBJ[name]
+    if a < 0.003:
+        key_xform(o, f, (0, 0, 0), 0.0, IDQ)
+        o.data.keyframe_insert('bevel_depth', frame=f)
+        key_val(o.data.materials[0], 'vis', 0.0, f)
+        return
+    o.data.bevel_depth = LINE * 1.15 / s_
+    o.data.bevel_factor_start = start
+    o.data.bevel_factor_end = 1.0
+    o.data.keyframe_insert('bevel_depth', frame=f); o.data.keyframe_insert('bevel_factor_start', frame=f)
+    key_xform(o, f, rel(st, center), s_, tilt_q @ quat_z(angle))
+    key_val(o.data.materials[0], 'vis', a, f)
+
+
 for f in range(1, NF + 1):
     st = state(f)
     t, T, g, H, pos = st['t'], st['T'], st['g'], st['H'], st['pos']
@@ -603,7 +657,7 @@ for f in range(1, NF + 1):
     rsv = max(rs, MINS)
     key_xform(OBJ['sun'], f, sun_p, rsv, quat_z(T * 0.2))
     hv = 1.0
-    key_xform(OBJ['halo'], f, sun_p, min(rsv * 4.0, 0.9) if rsv < 0.3 else rsv * 1.8, IDQ)
+    key_xform(OBJ['halo'], f, sun_p, min(rsv * 4.5, 1.2) if rsv < 0.3 else rsv * 2.0, IDQ)
     key_val(OBJ['halo'].data.materials[0], 'vis', hv, f)
     # light: real inverse-square falloff, scaled with the world so Earth irradiance stays constant
     ldir = Vector(sub(pos['earth'], pos['sun']))   # sunlight travels Sun -> Earth (all planets share it; they are dots)
@@ -621,6 +675,8 @@ for f in range(1, NF + 1):
         r = max(0.0, BD.get(n + '_radius', 0.9)) * g
         rv = max(r, MINP) * vin
         key_xform(OBJ[n], f, rel(st, pos[n]), rv, IDQ)
+        key_xform(OBJ['pglow_' + n], f, rel(st, pos[n]), rv * 4.5 if vin > 0.01 else 0.0, IDQ)
+        key_val(OBJ['pglow_' + n].data.materials[0], 'vis', 0.85 * vin, f)
 
     # earth + shells
     ep = rel(st, pos['earth'])
@@ -630,30 +686,45 @@ for f in range(1, NF + 1):
     spin = 2 * math.pi * T / 0.99727 + math.radians(BD['earth_spin0_deg'])
     q = earth_axis @ quat_z(spin)
     key_xform(OBJ['earth'], f, ep, re_, q)
+    gl_e = (1 - smooth(MINP * 2, MINP * 6, BD['earth_radius'] * g)) * vin_e
+    key_xform(OBJ['pglow_earth'], f, ep, re_ * 4.5 if gl_e > 0.01 else 0.0, IDQ)
+    key_val(OBJ['pglow_earth'].data.materials[0], 'vis', 0.9 * gl_e, f)
+    trail_update('trail_earth', pos['sun'], R_e, st, IDQ,
+                 math.radians(PL['earth']['phase_deg']) + 2 * math.pi * T / PL['earth']['period_days'], f, 0.45)
     big = smooth(0.02, 0.08, BD['earth_radius'] * g)
     key_xform(OBJ['clouds'], f, ep, re_ * 1.010 * (1 if big > 0.01 else 0), earth_axis @ quat_z(spin * 0.985 + 0.4))
     key_xform(OBJ['atm'], f, ep, re_ * 1.045 * (1 if big > 0.01 else 0), IDQ)
 
     # moon + ring
     ma = ring_update('ring_moon', pos['earth'], BD['moon_orbit'], st,
-                     quat_x(math.radians(BD['moon_incl_deg'])), f)
+                     quat_x(math.radians(BD['moon_incl_deg'])), f, lo=0.012, hi=0.05)
     mph = math.radians(BD['moon_phase_deg']) + 2 * math.pi * T / BD['moon_period_days']
-    mr_ = max(BD['moon_radius'] * g, MINP * 0.8) * smooth(0.03, 0.10, BD['moon_orbit'] * g)
+    trail_update('trail_moon', pos['earth'], BD['moon_orbit'], st, quat_x(math.radians(BD['moon_incl_deg'])), mph, f, 0.62, lo=0.012, hi=0.05)
+    mr_ = max(BD['moon_radius'] * g, MINP * 0.8) * smooth(0.012, 0.05, BD['moon_orbit'] * g)
     key_xform(OBJ['moon'], f, rel(st, pos['moon']), mr_, quat_z(mph + math.pi))
 
     # sun's galactic orbit ring + disc
     Rg = BD['sun_galactic_radius_C'] * UC
     ring_update('ring_sun_gal', pos['galaxy'], Rg, st, quat_x(TILT), f, vis_extra=smooth(7000, 16000, H) , lo=0.2, hi=0.5)
     gv = smooth(7000.0, 24000.0, H)
+    trail_update('trail_sun_gal', pos['galaxy'], Rg, st, quat_x(TILT), st['alpha'], f, 0.62,
+                 vis_extra=smooth(7000, 16000, H), lo=0.2, hi=0.5)
     spin_g = BD['disc_spin_fraction'] * (st['alpha'] - math.radians(BD['sun_phase_deg'])) + math.radians(20)
     gq = quat_x(TILT) @ quat_z(spin_g)
     gsz = BD['galaxy_disc_radius_C'] * UC * g
     if gv < 0.003: gsz = 0.0
     key_xform(OBJ['galaxy'], f, rel(st, pos['galaxy']), gsz, gq)
     key_val(OBJ['galaxy'].data.materials[0], 'vis', gv, f)
+    key_val(OBJ['galaxy'].data.materials[0], 'sharp', smooth(18000.0, 34000.0, H), f)
+    nrm = gq @ Vector((0, 0, 1))
+    for hn, off, rot, k in (('haze_a', 0.05, 0.10, 1.08), ('haze_b', -0.05, -0.14, 0.95)):
+        o = OBJ[hn]
+        c = Vector(rel(st, pos['galaxy'])) + nrm * (off * gsz)
+        key_xform(o, f, tuple(c), gsz * k if gsz else 0.0, quat_x(TILT) @ quat_z(spin_g + rot))
+        key_val(o.data.materials[0], 'vis', gv * 0.30, f)
     # text
     for (m, t0, t1) in TXT:
-        a = smooth(t0, t0 + 0.7, t) * (1 - smooth(t1 - 0.7, t1, t)) if m is not m_note else 0.45 * smooth(0.0, 1.0, t)
+        a = smooth(t0, t0 + 0.4, t) * (1 - smooth(t1 - 0.4, t1, t)) if m is not m_note else 0.45 * smooth(0.0, 1.0, t)
         key_val(m, 'vis', a, f)
 
 # world MW band fade keyed on the world node tree

@@ -132,12 +132,21 @@ def main():
     out = argv[argv.index('--out') + 1] if '--out' in argv else '.'
     os.makedirs(out, exist_ok=True)
     path = os.path.join(out, 'galaxy_disc_4096.exr')
-    if os.path.exists(path) and '--force' not in argv:
+    if os.path.exists(path) and os.path.exists(os.path.join(out, 'galaxy_blur_1024.exr')) and '--force' not in argv:
         print('galaxy exists:', path)
         return
     print('generating galaxy disc ...')
     arr = make_galaxy()
     save_exr(arr, path, 'galaxy_disc')
+    # soft 1024px version: blends in while the disc is hugely magnified (no pixel-sized star specks)
+    a = arr[::-1]
+    k = 4
+    small = a.reshape(1024, k, 1024, k, 4).mean(axis=(1, 3))
+    for _ in range(3):
+        small = (small + np.roll(small, 1, 0) + np.roll(small, -1, 0)) / 3
+        small = (small + np.roll(small, 1, 1) + np.roll(small, -1, 1)) / 3
+    small[..., 3] = np.clip(small[..., 3] * 1.1, 0, 1)
+    save_exr(small[::-1].copy(), os.path.join(out, 'galaxy_blur_1024.exr'), 'galaxy_blur')
     print('wrote', path)
 
 
