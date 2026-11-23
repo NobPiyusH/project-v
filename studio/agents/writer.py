@@ -44,8 +44,10 @@ def notes(owner_notes: str | None) -> str:
 
 
 class WriterAgent:
-    def __init__(self, llm, presets: StylePresets, story_model: str = ""):
+    def __init__(self, llm, presets: StylePresets, story_model: str = "", script_model: str = ""):
         self._llm, self._presets, self._story_model = llm, presets, story_model
+        # Model tried first for the script itself (owner A/B, 23 Nov 2026: OpenAI scripts preferred); blank means the story model.
+        self._script_model = script_model if script_model and script_model.strip() else story_model
 
     def concept(self, video_id, prompt: str, plan: VideoPlan, facts: list[Fact] | None, owner_notes: str | None) -> Concept:
         preset = self._presets.by_id_or_default(plan.stylePreset)
@@ -103,4 +105,4 @@ Must include: {", ".join(plan.mustInclude or [])}
 Research facts:
 {facts_text(facts)}
 {notes(owner_notes)}"""
-        return self._llm.call(video_id, "SCRIPT", system, user, Script, self._story_model)
+        return self._llm.call(video_id, "SCRIPT", system, user, Script, self._script_model)

@@ -11,10 +11,13 @@ import json
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Generic, TypeVar
 
 import httpx
 from pydantic import TypeAdapter
+
+from studio.ledger.pricing import dec
 
 T = TypeVar("T")
 
@@ -64,8 +67,13 @@ def parse(tp: Any, text: str) -> Any:
 
 
 def handles_openai_compat(model: str | None) -> bool:
-    """True for nvidia:..., groq:... and openrouter:... model ids."""
-    return model is not None and model.startswith(("nvidia:", "groq:", "openrouter:"))
+    """True for nvidia:..., groq:..., openrouter:... and openai:... model ids."""
+    return model is not None and model.startswith(("nvidia:", "groq:", "openrouter:", "openai:"))
+
+
+def is_openai(model: str | None) -> bool:
+    """True for paid OpenAI model ids (openai:...); the other providers here are free tiers."""
+    return model is not None and model.startswith("openai:")
 
 
 def handles_claude(model: str | None) -> bool:
@@ -77,9 +85,12 @@ def provider_of(model: str) -> str:
 
 
 class OpenAiCompatChat:
-    def __init__(self, providers: dict[str, tuple[str, str]], client: httpx.Client | None = None):
-        """providers: name -> (base_url, api_key). `client` is injectable for tests."""
+    def __init__(self, providers: dict[str, tuple[str, str]], client: httpx.Client | None = None, *,
+                 openai_in_per_m: float = 0.0, openai_out_per_m: float = 0.0, inr_per_usd: float = 90.0):
+        """providers: name -> (base_url, api_key). `client` is injectable for tests. The OpenAI list prices (USD per 1M tokens) and
+        the rupee rate are for the cost ledger (owner-paid, recorded as a real cost)."""
         self._providers = providers
+        self._openai_in, self._openai_out, self._inr_per_usd = openai_in_per_m, openai_out_per_m, inr_per_usd
         self._http = client or httpx.Client(timeout=httpx.Timeout(300, connect=15))  # ModelFallback's limit is the real one
 
     def call(self, model: str, system: str, user: str, tp: Any) -> ChatResult:
@@ -87,15 +98,16 @@ class OpenAiCompatChat:
         if not key or not key.strip():
             # reported as a model problem so the fallback list moves on
             raise RuntimeError(f"not supported: no API key for {provider_of(model)}")
-        body = {
-            "model": model[model.index(":") + 1 :],
-            "temperature": 0.6,
-            "max_tokens": 8192,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user + "\n\n" + format_instructions(tp)},
-            ],
-        }
+        messages = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user + "\n\n" + format_instructions(tp)},
+        ]
+        name = model[model.index(":") + 1 :]
+        if is_openai(model):
+            # OpenAI's GPT-5 family takes max_completion_tokens (reasoning included) and rejects a custom temperature.
+            body = {"model": name, "max_completion_tokens": 16000, "reasoning_effort": "low", "messages": messages}
+        else:
+            body = {"model": name, "temperature": 0.6, "max_tokens": 8192, "messages": messages}
         resp = self._http.post(base_url + "/chat/completions", headers={"Authorization": f"Bearer {key}"}, json=body)  # key never logged
         resp.raise_for_status()
         r = resp.json()
@@ -116,6 +128,12 @@ class OpenAiCompatChat:
         p, c = int(u.get("prompt_tokens") or 0), int(u.get("completion_tokens") or 0)
         t = int(u["total_tokens"]) if "total_tokens" in u else p + c
         return ChatResult(entity, p, c, t)
+
+
+    def openai_inr(self, prompt_tokens: int, completion_tokens: int) -> Decimal:
+        """Rupee cost of one OpenAI call at the configured list prices."""
+        usd = (prompt_tokens * self._openai_in + completion_tokens * self._openai_out) / 1_000_000.0
+        return dec(usd * self._inr_per_usd).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
 
 
 class ClaudeChat:

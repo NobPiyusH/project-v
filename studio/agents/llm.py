@@ -20,6 +20,7 @@ from studio.agents.chat import (
     format_instructions,
     handles_claude,
     handles_openai_compat,
+    is_openai,
     parse,
     provider_of,
 )
@@ -145,6 +146,12 @@ class Llm:
         entity, usage = a.value
         if handles_claude(a.model):
             pass  # already recorded when the response arrived (a paid call is recorded even if it could not be used)
+        elif is_openai(a.model):
+            # OpenAI is owner-paid: record the real cost at list price (CLAUDE.md rule 6).
+            self._ledger.record(
+                video_id, "openai", self._nvidia.openai_inr(usage.prompt_tokens, usage.output_tokens), Decimal(usage.total_tokens),
+                "tokens", True, f"{purpose} ({a.model})",
+            )
         elif handles_openai_compat(a.model):
             # NVIDIA NIM and Groq free tiers: record the call (₹0) so every call stays in the ledger.
             self._ledger.record(

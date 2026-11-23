@@ -1,6 +1,7 @@
 """Ports of ModelFallbackTest, OpenAiCompatChatTest, ClaudeChatTest (offline parts), AiCreditsFallbackTest, plus Llm tests.
 No network, no spend: clients, ledger, guard and router are fakes."""
 
+import json
 import socket
 import time
 from decimal import Decimal
@@ -12,7 +13,7 @@ from pydantic import BaseModel
 
 from studio.agents import model_fallback as mf
 from studio.agents.aicredits import AiCreditsFallback, should_fall_back
-from studio.agents.chat import ChatResult, ClaudeChat, OpenAiCompatChat, clean, handles_openai_compat
+from studio.agents.chat import ChatResult, ClaudeChat, OpenAiCompatChat, clean, handles_openai_compat, is_openai
 from studio.agents.llm import Llm
 from studio.ledger import BudgetExceededError
 from studio.ledger.budget_guard import AICREDITS
@@ -343,3 +344,65 @@ def test_all_models_failing_raises_a_clear_error_naming_the_purpose():
     llm, _ = make_llm(gemini)
     with pytest.raises(RuntimeError, match="SCRIPT failed: RuntimeError: 500 boom"):
         llm.call_with_model("v", "SCRIPT", "s", "u", str)
+
+
+# ---- OpenAI script writer (owner A/B 23 Nov 2026): body shape, list-price booking, writer default
+
+
+def test_openai_uses_the_gpt5_body_and_is_booked_at_list_price():
+    seen = {}
+
+    def handler(request):
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(200, json={"choices": [{"message": {"content": '{"title":"t","lines":["a"]}'}, "finish_reason": "stop"}],
+                                         "usage": {"prompt_tokens": 1_000_000, "completion_tokens": 1_000_000}})
+
+    chat = OpenAiCompatChat({"openai": ("http://x/v1", "k")}, httpx.Client(transport=httpx.MockTransport(handler)),
+                            openai_in_per_m=0.75, openai_out_per_m=4.50, inr_per_usd=90.0)
+    r = chat.call("openai:gpt-5.4-mini", "s", "u", Haiku)
+    b = seen["body"]
+    assert b["model"] == "gpt-5.4-mini" and b["max_completion_tokens"] == 16000 and b["reasoning_effort"] == "low"
+    assert "temperature" not in b and "max_tokens" not in b
+    assert chat.openai_inr(r.prompt_tokens, r.completion_tokens) == Decimal("472.5000")  # (0.75 + 4.50) USD x 90
+    assert handles_openai_compat("openai:gpt-5.4-mini") and is_openai("openai:x") and not is_openai("groq:x")
+
+
+def test_an_openai_answer_is_booked_in_the_ledger_as_a_real_cost():
+    chat = SimpleNamespace(call=lambda m, s, u, t: ChatResult("script", 2_000, 1_000, 3_000), openai_inr=lambda i, o: Decimal("1.2345"))
+    llm, ledger = make_llm(None, models="openai:gpt-5.4-mini")
+    llm._nvidia = chat
+    a = llm.call_with_model("v", "SCRIPT", "s", "u", str)
+    assert a.model == "openai:gpt-5.4-mini"
+    assert ledger.records[0][1:7] == ("openai", Decimal("1.2345"), Decimal(3000), "tokens", True, "SCRIPT (openai:gpt-5.4-mini)")
+
+
+def test_the_script_goes_to_the_script_model_and_the_concept_to_the_story_model():
+    from studio.agents.writer import WriterAgent
+    from studio.agents.types import Concept
+    from studio.planner.plan import VideoPlan
+    from studio.planner.presets import StylePresets
+    from studio.tests.test_pricing import TEST_CONFIG
+
+    calls = []
+
+    class L:
+        def call(self, video_id, purpose, system, user, tp, preferred=None):
+            calls.append((purpose, preferred))
+            return tp()
+
+    plan = VideoPlan(title="t", durationSec=60, narration="full", stylePreset="documentary_story", mustInclude=[])
+    w = WriterAgent(L(), StylePresets(TEST_CONFIG), "claude:story", "openai:gpt-5.4-mini")
+    w.concept("v", "p", plan, None, None)
+    w.script("v", "p", plan, Concept(logline="l"), None, None)
+    assert calls == [("CONCEPT", "claude:story"), ("SCRIPT", "openai:gpt-5.4-mini")]
+    calls.clear()
+    w2 = WriterAgent(L(), StylePresets(TEST_CONFIG), "claude:story")  # blank script model: falls back to the story model
+    w2.script("v", "p", plan, Concept(logline="l"), None, None)
+    assert calls == [("SCRIPT", "claude:story")]
+
+
+def test_settings_default_to_openai_scripts_and_the_switch_back():
+    from studio.config import Settings
+
+    assert Settings().script_model == "openai:gpt-5.4-mini" and Settings().story_model == "claude:claude-sonnet-5-5"
+    assert (Settings().openai_price_in_usd_per_1m, Settings().openai_price_out_usd_per_1m, Settings().inr_per_usd) == (0.75, 4.50, 90.0)

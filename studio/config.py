@@ -28,7 +28,13 @@ class Settings:
         "gemini-3.5-flash,nvidia:nvidia/nemotron-3-ultra-550b-a55b,nvidia:stepfun-ai/step-5-preview,groq:openai/gpt-oss-120b,"
         "openrouter:baidu/ernie-5.5-flash-preview:free,gemini-3.5-flash-lite,openrouter:google/gemma-4-31b-it:free"
     )
-    story_model: str = "claude:claude-sonnet-5-5"
+    story_model: str = "claude:claude-sonnet-5-5"  # the Director: concept and shot plan
+    script_model: str = "openai:gpt-5.4-mini"  # the script writer (owner A/B 23 Nov 2026); SCRIPT_MODEL=claude:claude-sonnet-5-5 switches back
+    openai_api_key: str = ""
+    openai_base_url: str = "https://api.openai.com/v1"
+    openai_price_in_usd_per_1m: float = 0.75  # list prices, re-verified 23 Nov 2026: re-check before changing
+    openai_price_out_usd_per_1m: float = 4.50
+    inr_per_usd: float = 90.0  # the rupee rate OpenAI calls are booked at (projectv.fx.inr-per-usd)
     agents_timeout_seconds: float = 75
     nvidia_api_key: str = ""
     nvidia_base_url: str = "https://integrate.api.nvidia.com/v1"
@@ -80,6 +86,11 @@ class Settings:
             text_model=e.get("GEMINI_MODEL", cls.text_model),
             text_fallbacks=e.get("GEMINI_TEXT_FALLBACKS", cls.text_fallbacks),
             story_model=e.get("CLAUDE_STORY_MODEL", cls.story_model),
+            script_model=e.get("SCRIPT_MODEL", cls.script_model),
+            openai_api_key=e.get("OPENAI_API_KEY", ""),
+            openai_base_url=e.get("OPENAI_BASE_URL", cls.openai_base_url),
+            openai_price_in_usd_per_1m=float(e.get("OPENAI_PRICE_IN", "0.75")),
+            openai_price_out_usd_per_1m=float(e.get("OPENAI_PRICE_OUT", "4.50")),
             nvidia_api_key=e.get("NVIDIA_API_KEY", ""),
             groq_api_key=e.get("GROQ_API_KEY", ""),
             openrouter_api_key=e.get("OPENROUTER_API_KEY", ""),
