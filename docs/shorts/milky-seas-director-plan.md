@@ -75,3 +75,10 @@ A new picture or text change arrives every 3 to 5 s.
 - Bacteria (Vibrio harveyi) on algae: from water samples of a 1995 ship sighting; a hypothesis, not proven.
 - Do not state: any area figure, the year of the Java event (sources disagree), what triggers it.
 - To verify before using in the voiceover: that the glow is steady rather than triggered by movement (used only as a visual rule for now).
+
+## Image licence check (23 Nov 2026; not legal advice)
+Source pages: NASA Earth Observatory "Hunting Milky Seas by Satellite" and NASA media usage guidelines (nasa.gov/nasa-brand-center/images-and-media). NOAA page (nesdis.noaa.gov/node/8461) returned 403 and was NOT read: no NOAA image is cleared.
+- Satellite images 1 and 2 (VIIRS night view of Java and nearby seas, 4 Aug 2019; MODIS chlorophyll view): made by NASA Earth Observatory. NASA says its imagery is generally not subject to US copyright; non-promotional editorial use is allowed with NASA acknowledged. Monetised YouTube is not addressed (unclear, low risk). Credit line to show: "NASA Earth Observatory image by Joshua Stevens, data from the Suomi NPP VIIRS day-night band". Never imply NASA endorses the channel or anything it sells.
+- The milky-seas MAP (reports 1796 to 2021) uses data "courtesy of Miller et al. (2021)": rights unclear, do NOT use it; draw our own map.
+- Our Blender shots are our own visualisations; Earth textures from NASA (Blue Marble / Black Marble) follow the same NASA rules, credit "NASA".
+- Do not use NASA logos (the "meatball" and "worm") or any image marked "not yet cleared".
