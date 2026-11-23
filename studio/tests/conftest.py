@@ -48,5 +48,7 @@ def scratch_db(scratch_dsn):
     from studio.db import PgDb
 
     conn = psycopg.connect(scratch_dsn, row_factory=dict_row, autocommit=True)
+    # The scratch database lives for the whole session: every test starts with an empty ledger, so monthly caps and wallet sums are its own.
+    conn.execute("DELETE FROM cost_entry")
     yield PgDb("", conn=conn)
     conn.close()
