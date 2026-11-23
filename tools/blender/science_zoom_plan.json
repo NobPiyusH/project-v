@@ -1,0 +1,55 @@
+{
+  "name": "science-zoom-3d",
+  "fps": 30,
+  "seconds": 30,
+  "resolution": [2160, 3840],
+  "samples": 64,
+  "library": "E:/project-data/blender/library/science-zoom",
+  "view_halfwidth": 1.5,
+
+  "levels": {"A": 1.0, "B": 30.0, "C": 840.0},
+  "note_levels": "unit of each layer in Earth-radius units (A). Earth-Moon layer: Earth radius 1. Sun-Earth layer: 1 B = 30 A. Galaxy layer: 1 C = 840 A. Every size is deliberately compressed (not to scale).",
+
+  "bodies": {
+    "earth_radius": 1.0,
+    "moon_radius": 0.45, "moon_orbit": 7.0, "moon_period_days": 27.32, "moon_incl_deg": 5.1,
+    "sun_radius_B": 2.2,
+    "planets": [
+      {"name": "mercury", "orbit_B": 5.2,  "period_days": 87.97,  "color": [0.55, 0.52, 0.50], "phase_deg": 200},
+      {"name": "venus",   "orbit_B": 8.6,  "period_days": 224.7,  "color": [0.95, 0.80, 0.55], "phase_deg": 80},
+      {"name": "earth",   "orbit_B": 14.0, "period_days": 365.25, "phase_deg": 66},
+      {"name": "mars",    "orbit_B": 20.0, "period_days": 686.98, "color": [0.80, 0.38, 0.22], "phase_deg": 300}
+    ],
+    "galaxy_disc_radius_C": 38.0, "sun_galactic_radius_C": 24.0,
+    "sun_galactic_period_years": 230e6, "sun_phase_deg": -62, "galaxy_tilt_deg": 28,
+    "disc_spin_fraction": 0.7,
+    "moon_phase_deg": 150, "earth_spin0_deg": 185
+  },
+
+  "zoom": [
+    [0.0, 1.5], [3.5, 3.2], [7.0, 10.0], [9.0, 60.0], [11.0, 420.0], [13.5, 700.0],
+    [17.0, 3000.0], [20.0, 9000.0], [23.5, 24000.0], [27.0, 37500.0], [30.0, 41000.0]
+  ],
+  "note_zoom": "[time_s, half-width of the frame in A units] - interpolated monotone-cubic in log space, so the pull-back never stops or jerks",
+
+  "focus": [[0, "earth"], [8.0, "earth"], [12.0, "sun"], [19.0, "sun"], [25.0, "galaxy"], [30, "galaxy"]],
+  "elevation_deg": [[0, 14], [7, 24], [15, 34], [25, 52], [30, 58]],
+  "azimuth_deg": [[0, 0], [30, -14]],
+
+  "time_scale_days_per_s": [[0, 1], [7.0, 1], [9.5, 30.4], [13.5, 30.4], [15.5, 365.25], [20.0, 365.25], [23.5, 3.65e9], [30, 3.65e9]],
+
+  "labels": {
+    "titles": [
+      {"text": "THE MOON AROUND THE EARTH", "from": 0.4, "to": 8.3},
+      {"text": "THE EARTH AROUND THE SUN", "from": 7.6, "to": 20.0},
+      {"text": "THE SUN AROUND THE MILKY WAY", "from": 19.4, "to": 31.0}
+    ],
+    "rates": [
+      {"text": "1 SECOND = 1 DAY", "from": 0.2, "to": 7.6},
+      {"text": "1 SECOND = 1 MONTH", "from": 7.0, "to": 16.0},
+      {"text": "1 SECOND = 1 YEAR", "from": 15.0, "to": 23.0},
+      {"text": "1 SECOND = 10 MILLION YEARS", "from": 22.0, "to": 31.0}
+    ],
+    "note": "NOT TO SCALE"
+  }
+}
