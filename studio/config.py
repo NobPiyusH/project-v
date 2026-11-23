@@ -41,6 +41,18 @@ class Settings:
     aicredits_api_key: str = ""
     aicredits_base_url: str = "https://api.aicredits.in/v1"
     aicredits_fallback_enabled: bool = False
+    # GPU pods (application.properties defaults: those win over the Java @Value defaults)
+    runpod_api_key: str = ""
+    runpod_base_url: str = "https://api.runpod.io/v2"
+    gpu_watchdog_dry_run: bool = False
+    gpu_watchdog_poll_seconds: int = 180
+    gpu_pod_prefix: str = "projectv-"
+    gpu_max_runtime_minutes: int = 180
+    gpu_idle_minutes: int = 15
+    gpu_lease_grace_minutes: int = 10
+    gpu_max_pods: int = 1
+    gpu_max_hourly_usd: float = 2.0
+    gpu_watchdog_python: bool = False  # run the Python watchdog loop inside this app (off: the Java one stays in charge)
 
     @property
     def dsn(self) -> str:
@@ -76,4 +88,15 @@ class Settings:
             aicredits_api_key=e.get("AICREDITS_API_KEY", ""),
             aicredits_base_url=e.get("AICREDITS_BASE_URL", cls.aicredits_base_url),
             aicredits_fallback_enabled=e.get("AICREDITS_FALLBACK_ENABLED", "false").lower() == "true",
+            runpod_api_key=e.get("RUNPOD_API_KEY", ""),
+            runpod_base_url=e.get("RUNPOD_BASE_URL", cls.runpod_base_url),
+            gpu_watchdog_dry_run=e.get("GPU_WATCHDOG_DRY_RUN", "false").lower() == "true",
+            gpu_watchdog_poll_seconds=int(e.get("GPU_WATCHDOG_POLL_SECONDS", "180")),
+            gpu_pod_prefix=e.get("GPU_POD_PREFIX", "projectv-"),
+            gpu_max_runtime_minutes=int(e.get("GPU_MAX_RUNTIME_MINUTES", "180")),
+            gpu_idle_minutes=int(e.get("GPU_IDLE_MINUTES", "15")),
+            gpu_lease_grace_minutes=int(e.get("GPU_LEASE_GRACE_MINUTES", "10")),
+            gpu_max_pods=int(e.get("GPU_MAX_PODS", "1")),
+            gpu_max_hourly_usd=float(e.get("GPU_MAX_HOURLY_USD", "2.0")),
+            gpu_watchdog_python=e.get("STUDIO_GPU_WATCHDOG", "false").lower() == "true",
         )

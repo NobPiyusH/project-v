@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+from contextlib import asynccontextmanager
+import math
 import uuid
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -12,6 +15,11 @@ from fastapi.responses import Response
 
 from studio.config import Settings
 from studio.db import Db, PgDb
+from studio.gpu.events import PgPodEvents
+from studio.gpu.leases import PgPodLeases
+from studio.gpu.logs import PodLogs
+from studio.gpu.pods import GpuPodLimits, RunPodApi
+from studio.gpu.watchdog import PodWatchdog, WatchdogLoop
 from studio.ledger import BudgetGuard, CostLedger, Pricing
 from studio.media.wire import to_json
 from studio.planner.presets import StylePresets
@@ -22,6 +30,9 @@ from studio.routing import Router
 def _default(o: Any) -> Any:
     if isinstance(o, Decimal):  # Java sends BigDecimal as a JSON number, not a string
         return float(o)
+    if isinstance(o, datetime):  # Java sends timestamps as UTC with millisecond precision: 2026-11-22T18:16:06.990Z
+        u = o.astimezone(UTC)
+        return u.strftime("%Y-%m-%dT%H:%M:%S.") + f"{u.microsecond // 1000:03d}Z"
     if hasattr(o, "isoformat"):
         return o.isoformat()
     raise TypeError(type(o))
@@ -42,7 +53,22 @@ def create_app(db: Db | None = None, settings: Settings | None = None) -> FastAP
     pricing = Pricing(settings.config_dir)
     router = Router(db, BudgetGuard(db, pricing), pricing)
     presets = StylePresets(settings.config_dir)
-    app = FastAPI(title="Cinestack control plane (Python)", default_response_class=JavaJson)
+    # ---- GPU pods (S4a): the watchdog loop runs only when STUDIO_GPU_WATCHDOG=true; by default the Java one stays in charge
+    pod_api = RunPodApi(settings.runpod_base_url, settings.runpod_api_key)
+    leases = PgPodLeases(db)
+    pod_events = PgPodEvents(db, ledger, pricing)
+    watchdog = PodWatchdog(pod_api, leases, pod_events, GpuPodLimits.from_settings(settings))
+    pod_logs = PodLogs(settings.runpod_base_url, settings.runpod_api_key)
+    loop = WatchdogLoop([watchdog], settings.gpu_watchdog_poll_seconds)
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        if settings.gpu_watchdog_python:
+            loop.start()
+        yield
+        loop.stop()
+
+    app = FastAPI(title="Cinestack control plane (Python)", default_response_class=JavaJson, lifespan=lifespan)
 
     @app.get("/api/ledger")
     def get_ledger() -> Response:
@@ -88,5 +114,44 @@ def create_app(db: Db | None = None, settings: Settings | None = None) -> FastAP
     @app.get("/api/styles")
     def styles() -> Response:
         return JavaJson(to_json(presets.all()))
+
+    # ---- GPU (GpuWatchdogController, GpuLogsController)
+    @app.get("/api/gpu/watchdog")
+    def gpu_watchdog() -> Response:
+        last = watchdog.last()
+        return JavaJson({
+            "limits": watchdog.limits().to_json(),
+            "lastSweep": last.to_json() if last else None,  # None until the first sweep
+            "lastSweepVast": None,  # Vast.ai arrives with the providers (S4c)
+            "leases": leases.recent(20),
+            "terminations": pod_events.recent(20),
+        })
+
+    @app.get("/api/gpu/pods")
+    def gpu_pods() -> Response:
+        out: dict[str, Any] = {"configured": pod_api.configured()}
+        if not pod_api.configured():
+            out["pods"] = []
+            return JavaJson(out)
+        try:
+            now = datetime.now(UTC)
+            pods = []
+            for p in pod_api.list_pods():
+                hours = 0.0 if p.created_at is None else int((now - p.created_at).total_seconds()) / 3600.0
+                pods.append({
+                    "id": p.id, "name": p.name, "status": p.status, "costPerHrUsd": p.cost_per_hr_usd,
+                    "createdAt": None if p.created_at is None else p.created_at.isoformat().replace("+00:00", "Z"),
+                    "runningMinutes": math.floor(hours * 60 + 0.5),
+                    "spentUsdEstimate": math.floor(hours * p.cost_per_hr_usd * 100 + 0.5) / 100.0,
+                })
+            out["pods"] = pods
+        except Exception as e:  # noqa: BLE001
+            out["pods"] = []
+            out["error"] = f"Could not list pods: {type(e).__name__}"
+        return JavaJson(out)
+
+    @app.get("/api/gpu/pods/{pod_id}/logs")
+    def gpu_pod_logs(pod_id: str, since: str | None = None, tail: int = 150) -> Response:
+        return JavaJson(pod_logs.read(pod_id, since, tail).to_json())
 
     return app
