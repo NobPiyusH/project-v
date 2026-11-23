@@ -124,6 +124,10 @@ public class Llm {
             com.projectv.media.MediaTypes.Usage usage = r.usage();
             if (ClaudeChat.handles(a.model())) {
                 // Already recorded when the response arrived (a paid call is recorded even if it couldn't be used).
+            } else if (OpenAiCompatChat.isOpenAi(a.model())) {
+                // OpenAI is owner-paid: record the real cost at list price (CLAUDE.md rule 6).
+                ledger.record(videoId, "openai", nvidia.openAiInr(usage.promptTokens(), usage.outputTokens()),
+                        BigDecimal.valueOf(usage.totalTokens()), "tokens", true, purpose + " (" + a.model() + ")");
             } else if (OpenAiCompatChat.handles(a.model())) {
                 // NVIDIA NIM and Groq free tiers: record the call (₹0) so every call stays in the ledger.
                 ledger.record(videoId, OpenAiCompatChat.provider(a.model()), BigDecimal.ZERO, BigDecimal.valueOf(usage.totalTokens()),
