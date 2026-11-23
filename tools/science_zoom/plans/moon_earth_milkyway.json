@@ -1,0 +1,42 @@
+{
+  "title": "Moon, Earth, Sun, Milky Way: one continuous zoom-out",
+  "video": {"width": 1080, "height": 1920, "fps": 30, "duration": 30},
+  "look": {
+    "background": "#02040a",
+    "star_seed": 7,
+    "far_stars": 380,
+    "near_stars": 520
+  },
+  "zoom": {
+    "first_orbit_screen_radius": 1.9,
+    "last_orbit_screen_radius": 0.45,
+    "note": "Frame is 4.5 x 8 units. Log zoom: the view width grows by the same factor every second."
+  },
+  "stages": [
+    {
+      "id": "moon", "name": "EARTH AND MOON",
+      "orbit_radius_m": 3.84e8, "true_orbit_radius_m": 3.84e8,
+      "period_days": 27.32, "phase0": 0.15,
+      "rate_days_per_s": 10, "label": "1 s = 10 days",
+      "fade_in_radius": null, "fade_out_radius": [0.22, 0.06]
+    },
+    {
+      "id": "earth", "name": "SUN AND EARTH",
+      "orbit_radius_m": 1.15e10, "true_orbit_radius_m": 1.496e11,
+      "period_days": 365.25, "phase0": 0.62,
+      "rate_days_per_s": 61, "label": "1 s = 2 months",
+      "fade_in_radius": [5.4, 3.7], "fade_out_radius": [0.22, 0.06],
+      "handover": [4.0, 1.4]
+    },
+    {
+      "id": "galaxy", "name": "MILKY WAY",
+      "orbit_radius_m": 3.45e11, "true_orbit_radius_m": 2.46e20,
+      "period_days": 8.4e10, "phase0": 0.05,
+      "rate_days_per_s": 1.8e10, "label": "1 s = 50 million years",
+      "fade_in_radius": [9, 4.2], "fade_out_radius": null,
+      "handover": [4.0, 1.4],
+      "disc_radius_factor": 2.0
+    }
+  ],
+  "note_text": "NOT TO SCALE"
+}
