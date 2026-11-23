@@ -171,11 +171,30 @@ subprocess.Popen([sys.executable, r"C:\dev\project-v\.claude\worktrees\cathedral
                  creationflags=0x00000008 | 0x00000200, close_fds=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 print("kill-timer started (deadline %.1f h)" % MAX_HOURS, flush=True)
 
+
+# CUDA gate (23 Nov retry): the first pod had a host where torch could not init CUDA. Check at once; kill the pod if bad.
+def _sh(cmd):
+    req = urllib.request.Request(f"https://{pod['id']}-8189.proxy.runpod.net/x/{TOKEN}", data=cmd.encode(), headers={"User-Agent": "x"}, method="POST")
+    return urllib.request.urlopen(req, timeout=100).read().decode(errors="replace")
+_t = time.time(); ok = None
+while time.time() - _t < 8 * 60 and ok is None:
+    time.sleep(10)
+    try:
+        out = _sh("python3 -c 'import torch;print(\"CUDAOK\" if torch.cuda.is_available() else \"CUDABAD\")' 2>/dev/null")
+        ok = "CUDAOK" in out if ("CUDAOK" in out or "CUDABAD" in out) else None
+    except Exception:
+        pass
+print("CUDA gate:", ok, flush=True)
+if ok is not True:
+    gql(TERMINATE, {"input": {"podId": pod["id"]}})
+    pod["released"] = True; json.dump(pod, open(STATE, "w"))
+    sys.exit("CUDA gate failed; pod terminated")
+
 base = f"https://{pod['id']}-8188.proxy.runpod.net"
 logu = f"https://{pod['id']}-8189.proxy.runpod.net/boot.log"
 t0 = time.time()
 seen = 0
-while time.time() - t0 < 25 * 60:
+while time.time() - t0 < 35 * 60:
     time.sleep(20)
     try:
         txt = urllib.request.urlopen(urllib.request.Request(logu, headers={"User-Agent": "x"}), timeout=15).read().decode(errors="replace")
@@ -193,5 +212,5 @@ while time.time() - t0 < 25 * 60:
     except Exception:
         pass
 else:
-    print("ComfyUI not up after 25 min; pod kept for inspection (kill-timer still armed)", flush=True)
+    print("ComfyUI not up after 35 min; pod kept for inspection (kill-timer still armed)", flush=True)
     sys.exit(3)
