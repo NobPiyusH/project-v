@@ -19,13 +19,15 @@ def build_prompt(description: str, narration: str = "", overlay_text: str = "", 
         parts.append(f"Narration line spoken over this shot: {narration.strip()}")
     if overlay_text:
         parts.append(f"On-screen text that will be added later (not expected in the picture): {overlay_text.strip()}")
-    what = "stock video frame" if kind == "stock" else "generated picture"
+    what = {"stock": "stock video frame", "diagram": "frame of an animated explainer diagram"}.get(kind, "generated picture")
+    extra = (" For a diagram also report overlapping labels, labels over shapes they do not belong to, and labels cut off at the "
+             "frame edge in problems, and misspelled or implausible labels in wrong_text.") if kind == "diagram" else ""
     parts.append(
         f"This is a {what}. Score how well it matches the description and narration: 5 = exactly right, "
         "4 = right with minor differences, 3 = acceptable but loosely related, 2 = wrong subject or wrong "
         "era/technology, 1 = unrelated. List concrete problems (wrong object, anachronism such as a flat screen where "
         "a CRT tube is described, warped hands or faces, garbled or misspelled lettering). Put any visible lettering "
-        "that looks wrong in wrong_text and set cut_off_text true if text touches or crosses the frame edge. "
+        "that looks wrong in wrong_text and set cut_off_text true if text touches or crosses the frame edge." + extra + " "
         f"Answer as JSON only: {SCHEMA_HINT}")
     return "\n".join(parts)
 
