@@ -5,6 +5,7 @@ from __future__ import annotations
 import dataclasses
 import types
 import typing
+import uuid
 from decimal import Decimal
 from typing import Any, TypeVar
 
@@ -30,6 +31,8 @@ def to_json(obj: Any) -> Any:
         return {k: to_json(v) for k, v in obj.items()}
     if isinstance(obj, Decimal):
         return float(obj)
+    if isinstance(obj, uuid.UUID):
+        return str(obj)
     return obj
 
 
@@ -57,6 +60,8 @@ def _convert(tp: Any, value: Any) -> Any:
         return tp.model_validate(value)
     if dataclasses.is_dataclass(tp):
         return from_json(tp, value)
+    if tp is uuid.UUID:
+        return value if isinstance(value, uuid.UUID) else uuid.UUID(str(value))
     if tp is Decimal:
         return Decimal(repr(value) if isinstance(value, float) else str(value))
     if tp is float and isinstance(value, int):
