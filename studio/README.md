@@ -2,7 +2,8 @@
 
 Plan: `docs/plans/java-to-python-migration.md`. The Java control plane is untouched and stays live.
 
-- Done: S0 skeleton + contract harness, S1 ledger (`GET /api/ledger`), S2 media types/assets/provider registry (`GET /api/providers`).
+- Done: S0 skeleton + contract harness, S1 ledger (`GET /api/ledger`), S2 media types/assets/provider registry (`GET /api/providers`), S3a routing/planner/LLM stack (`/api/routing/*`, `/api/styles`).
+- Tests that change data run on a throwaway database made from the real migrations (never the live `projectv` DB).
 - Install once (needs network): `uv sync --group studio`
 - Tests: `uv run --no-sync pytest studio -q` (API and Postgres tests skip until the `studio` group is installed)
 - Run beside Java: `uv run uvicorn --factory studio.api.app:create_app --port 8081`
