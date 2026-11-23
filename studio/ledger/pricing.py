@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
@@ -10,20 +9,14 @@ from typing import Any, Callable
 
 import yaml
 
+from studio.media.types import Usage  # the shared Usage record (also re-exported from studio.ledger)
+
 _FOUR = Decimal("0.0001")
 
 
 def dec(x: float | int) -> Decimal:
     """Java's BigDecimal.valueOf(double): the shortest decimal text of the double."""
     return Decimal(repr(float(x)))
-
-
-@dataclass(frozen=True)
-class Usage:
-    prompt_tokens: int
-    output_tokens: int
-    thought_tokens: int
-    total_tokens: int
 
 
 class Pricing:

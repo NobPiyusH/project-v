@@ -17,6 +17,10 @@ class Settings:
     postgres_user: str = "projectv"
     postgres_password: str = "projectv-local"
     config_dir: Path = REPO_ROOT / "config"
+    s3_endpoint: str = "http://127.0.0.1:8333"
+    s3_access_key: str = "projectv"
+    s3_secret_key: str = "projectv-local-secret"
+    s3_bucket: str = "projectv"
 
     @property
     def dsn(self) -> str:
@@ -36,4 +40,8 @@ class Settings:
             postgres_user=e.get("POSTGRES_USER", "projectv"),
             postgres_password=e.get("POSTGRES_PASSWORD", "projectv-local"),
             config_dir=Path(e.get("PROJECTV_CONFIG_DIR", str(REPO_ROOT / "config"))),
+            s3_endpoint=e.get("S3_ENDPOINT", "http://127.0.0.1:8333"),
+            s3_access_key=e.get("S3_ACCESS_KEY", "projectv"),
+            s3_secret_key=e.get("S3_SECRET_KEY", "projectv-local-secret"),
+            s3_bucket=e.get("S3_BUCKET", "projectv"),
         )

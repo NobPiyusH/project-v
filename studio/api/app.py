@@ -12,6 +12,7 @@ from fastapi.responses import Response
 from studio.config import Settings
 from studio.db import Db, PgDb
 from studio.ledger import CostLedger
+from studio.provider.registry import ProviderRegistry
 
 
 def _default(o: Any) -> Any:
@@ -33,11 +34,16 @@ def create_app(db: Db | None = None, settings: Settings | None = None) -> FastAP
     settings = settings or Settings.from_env()
     db = db or PgDb(settings.dsn)
     ledger = CostLedger(db)
+    providers = ProviderRegistry(db, settings.config_dir)
     app = FastAPI(title="Cinestack control plane (Python)", default_response_class=JavaJson)
 
     @app.get("/api/ledger")
     def get_ledger() -> Response:
         # Built by hand: FastAPI's own encoder would turn Decimal money into strings.
         return JavaJson(ledger.totals_by_provider())
+
+    @app.get("/api/providers")
+    def get_providers() -> Response:
+        return JavaJson(providers.all())
 
     return app
