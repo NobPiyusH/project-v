@@ -10,3 +10,5 @@ CLIP_REDO_WORKFLOW = "ClipRedoWorkflowPy"
 VOICE_REDO_WORKFLOW = "VoiceRedoWorkflowPy"
 FOOTAGE_WORKFLOW = "FootageWorkflowPy"
 CREATIVE_REVIEW_WORKFLOW = "CreativeReviewWorkflowPy"
+
+DREAM_WORKFLOW = "DreamShortWorkflowPy"

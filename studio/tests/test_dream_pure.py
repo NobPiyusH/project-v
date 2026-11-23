@@ -10,7 +10,7 @@ from studio.dream import branches, idea_packs, looks, svi, timeline
 from studio.dream.branches import PathPick
 from studio.dream.settings import RentalEstimate, clean_picture_model
 from studio.dream.timeline import Cost, Event
-from studio.dream.types import PlannedScene
+from studio.dream.wire_types import PlannedScene
 
 # ------------------------------------------------------------------------------------------------ choose the path
 
@@ -155,7 +155,7 @@ def test_scene_lengths_need_three_four_or_five_beats():
 
 
 def test_writer_scenes_are_flattened_to_beats_and_padded():
-    beats = svi.flatten([PlannedScene("a pier", ["walk", "turn"]), PlannedScene("a door", ["rise", "drift", "push", "extra"])], 2, 3)
+    beats = svi.flatten([PlannedScene(scene="a pier", beats=["walk", "turn"]), PlannedScene(scene="a door", beats=["rise", "drift", "push", "extra"])], 2, 3)
     assert len(beats) == 6
     assert beats[2] == svi.Beat(1, 3, "a pier", "turn"), "a missing beat repeats the scene's last motion"
     assert beats[3] == svi.Beat(2, 1, "a door", "rise")

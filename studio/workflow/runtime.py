@@ -40,7 +40,19 @@ class TemporalGateway:
 
     def signal(self, workflow_id: str, name: str, *args: Any) -> None:
         handle = self._client.get_workflow_handle(workflow_id)
-        self._run(handle.signal(name, args=[_plain(a) for a in args]))
+        try:
+            self._run(handle.signal(name, args=[_plain(a) for a in args]))
+        except Exception as e:  # a signal to a workflow that already ended and left the server is answered NOT_FOUND
+            from temporalio.service import RPCError, RPCStatusCode
+
+            if isinstance(e, RPCError) and e.status == RPCStatusCode.NOT_FOUND:
+                from studio.dream.dream_studio import WorkflowNotFoundError
+
+                raise WorkflowNotFoundError(workflow_id) from e
+            raise
+
+    def query(self, workflow_id: str, name: str) -> Any:
+        return self._run(self._client.get_workflow_handle(workflow_id).query(name))
 
 
 def build_worker(client: Any, control: Any, producer: Any, executor: ThreadPoolExecutor | None = None) -> Any:
@@ -51,4 +63,16 @@ def build_worker(client: Any, control: Any, producer: Any, executor: ThreadPoolE
     from studio.workflow.video_production import WORKFLOWS
 
     return Worker(client, task_queue=queues.CONTROL, workflows=WORKFLOWS, activities=activity_functions(control, producer),
+                  activity_executor=executor or ThreadPoolExecutor(max_workers=16))
+
+
+def build_dream_worker(client: Any, dream: Any, dream_producer: Any, autopilot: Any, executor: ThreadPoolExecutor | None = None) -> Any:
+    """The Dream Shorts worker (same control queue): the Dream workflow and `dream.*` / `dreamProducer.*` activities, and the post workflow
+    with `autopilot.*`. Like build_worker, nothing starts until S7 calls run() on it after the owner's go."""
+    from temporalio.worker import Worker
+
+    from studio.workflow import autopilot_workflow, dream_activities, dream_workflow
+
+    return Worker(client, task_queue=queues.CONTROL, workflows=dream_workflow.WORKFLOWS + autopilot_workflow.WORKFLOWS,
+                  activities=dream_activities.activity_functions(dream, dream_producer) + autopilot_workflow.activity_functions(autopilot),
                   activity_executor=executor or ThreadPoolExecutor(max_workers=16))

@@ -1,5 +1,24 @@
 # Java to Python migration plan (staged, never big-bang)
 
+## Status, 23 Nov 2026 (end of S6 port; branch claude/python-migration-88b813)
+
+**S6 (dream, autopilot) is ported and green on fakes. Java stays live; nothing is switched, pushed or merged. S7 (routes, dashboard switch) is not started.**
+
+Done (all in `studio/`, each with ported tests; scratch Postgres with the real schema, Temporal's local time-skipping test server, no network, no spend):
+- `dream/`: settings and rental estimate; idea packs (same `idea-packs.json`); lessons; "choose the path" helpers and `PathPick`; SVI scene rules; looks; step timeline and live log; evidence (events, metrics, GPU timings, recalibration); `DreamService` (writer, pictures, clips, music, finish, quality checks, pod rhythm, branch memory); Scout; music bed; `DreamStudio` (create with every option, rerun, approve/redo/mode/retry/cancel/stop, continue-this-dream, chain, hook, paths); `DreamProducer` (review, stop rule, spend decision, daily cap); `DreamGpu` (the Dream door to the GPU broker).
+- `workflow/`: `dream_workflow.py` (DreamShortWorkflowPy: gates, cost gate, batch order, Producer mode, retry, cancel), `dream_activities.py` (`dream.*` and `dreamProducer.*`), `autopilot_workflow.py` (PostWorkflowPy, one upload attempt) and `runtime.py` (`query`, NOT_FOUND on a signal to an ended workflow, `build_dream_worker`).
+- `autopilot/service.py`: settings, ideas (owner first, then unused Scout angles), the daily tick rules, runs, post kit, posting, dismiss, retry.
+- Ported Java tests: DreamServicePersistenceTest, DreamChoosePathTest (the service part), DreamHookChainIdeasTest, DreamBrokerRouteTest (all cases: one pod booked and ended, batch order, shared pod ends at empty, SVI beats on the pod, FLUX provenance), DreamStudioCancelTest, DreamGpuPowerTest, WarmImageTest, DreamBranchesTest, DreamIdeaPacksTest, DreamTimelineTest, DreamSviTest, RentalEstimateTest, DreamProducerTest, AutopilotDailyCapTest, DreamShortWorkflowTest, AutopilotRulesTest, AutopilotPersistenceTest, the post workflow.
+- Every pod rented from Dream goes through `GpuBroker.acquire()`, so it still gets the self-stop wrapper and the watchdog lease (a test checks the lease row and the `bash` wrapper). Watchdog settings are untouched.
+
+Left (not done):
+- HTTP: the Dream, DreamGpu and Autopilot controllers (all routes) and the dashboard switch are S7. The `DreamController` JSON shapes are therefore not replayed yet.
+- Wiring for S7: the periodic calls (`DreamService.release_gpu_if_nobody_waits_scheduled` every 30 s, `DreamGpu.release_idle_manual` every 30 s, `AutopilotService.tick` every minute), the worker start-up, and a real `ProducerService` behind `DreamProducer` in the app (tests use a stub for the trust switch).
+
+Could not verify without spend (each needs the owner's yes): a real pod rental with picture and clip batches (FLUX/Wan/SVI), real paid LLM calls (Writer, Scout brief, Producer, post kit), Gemini watching Shorts (Scout, quality check), the real YouTube upload, a recorded Dream Short compared with Java, and the contract replay of the HTTP routes (no routes yet).
+
+Decisions to note: the writer's and Scout's LLM calls run before the step's database transaction (their cost entries are kept even if the step then fails; Java rolled them back). A signal to an ended workflow raises `WorkflowNotFoundError`, which `cancel` treats as "already ended" like Java's NOT_FOUND handling. `getVersion` gates are dropped (new workflow types).
+
 ## Status, 23 Nov 2026 (end of S5 port; branch claude/python-migration-88b813)
 
 **S5 (video, production, workflow) is ported and green on fakes. Java stays live; nothing is switched, pushed or merged.**

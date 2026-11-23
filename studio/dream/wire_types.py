@@ -8,40 +8,18 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from decimal import Decimal
 
+from studio.dream.llm_types import (  # noqa: F401  (re-exported: the LLM-facing types live in llm_types)
+    DreamWorld,
+    PlannedDreamShot,
+    PlannedScene,
+    ScoutAngle,
+    ScoutBrief,
+    Similar,
+    SimilarShot,
+)
 from studio.media.types import Usage
 
 DREAM_STEPS = ["SCOUT", "WRITE", "PICTURES", "CLIPS", "MUSIC", "FINISH"]
-
-
-@dataclass
-class PlannedDreamShot:
-    scene: str | None = None
-    motion: str | None = None
-
-
-@dataclass
-class PlannedScene:
-    scene: str | None = None
-    beats: list[str] | None = None
-
-
-@dataclass
-class DreamWorld:
-    """The writer's output: one world shared by every shot. hero: the one recurring object described exactly once; camera_path:
-    locked scene only; hook: the 3-6 word hook title (the starred word is the big coloured one); paths: choose-the-path only;
-    style/scenes: SVI scenes only."""
-
-    title: str | None = None
-    world: str | None = None
-    palette: str | None = None
-    light: str | None = None
-    hero: str | None = None
-    shots: list[PlannedDreamShot] = field(default_factory=list)
-    hook: str | None = None
-    camera_path: str | None = None
-    paths: list[str] | None = None
-    style: str | None = None
-    scenes: list[PlannedScene] | None = None
 
 
 @dataclass
@@ -164,32 +142,6 @@ class DreamScoutResult:
     source: str | None = None
     searches: int = 0
     error: str | None = None
-
-
-@dataclass
-class ScoutAngle:
-    title: str | None = None
-    idea: str | None = None
-    why: str | None = None
-
-
-@dataclass
-class ScoutBrief:
-    cliches: list[str] = field(default_factory=list)
-    gaps: list[str] = field(default_factory=list)
-    angles: list[ScoutAngle] = field(default_factory=list)
-
-
-@dataclass
-class SimilarShot:
-    shot: int = 0
-    like: str | None = None
-    why: str | None = None
-
-
-@dataclass
-class Similar:
-    similar: list[SimilarShot] = field(default_factory=list)
 
 
 @dataclass
