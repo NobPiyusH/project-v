@@ -17,6 +17,7 @@ def _cand(id="1", source="pexels", w=1920, h=1080, dur=10.0, text="living room t
 def _no_keys(monkeypatch):
     for k in ("PEXELS_API_KEY", "PIXABAY_API_KEY"):
         monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("STOCK_VISION_JUDGE", "0")  # these tests have no network and no paid calls
 
 
 def test_keyword_fallback_when_no_model():

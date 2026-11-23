@@ -379,7 +379,7 @@ def _miss(reason: str, queries: list[str], skipped: list[str]) -> dict:
 def _judge_enabled(req: dict) -> bool:
     flag = req.get("visionJudge")
     if flag is None:
-        flag = os.environ.get("STOCK_VISION_JUDGE", "0")
+        flag = os.environ.get("STOCK_VISION_JUDGE", "1")
     return str(flag).strip().lower() in ("1", "true", "yes", "on")
 
 
@@ -422,7 +422,7 @@ def stock_fetch(req: dict) -> dict:
                 seen.add((c["source"], c["id"]))
                 uniq.append(c)
         ranked = rank(uniq, queries, aspect, want)
-        if ranked and _judge_enabled(req):  # optional: a vision model looks at the free preview pictures (default OFF)
+        if ranked and _judge_enabled(req):  # optional: a vision model looks at the free preview pictures (default ON since the owner's yes, 23 Nov 2026; STOCK_VISION_JUDGE=0 turns it off)
             ranked, notes = _vision_pick(ranked, req)
             skipped += notes
             if not ranked:

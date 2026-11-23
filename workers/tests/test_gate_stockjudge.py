@@ -57,12 +57,11 @@ def test_candidate_without_preview_is_skipped_not_scored(tmp_path):
 
 
 # ---- the stock lane: switch default OFF, judge failure never breaks the lane ----------------------------------
-def test_switch_is_off_by_default_and_turns_on_by_request_or_env(monkeypatch):
+def test_switch_is_on_by_default_and_can_be_turned_off(monkeypatch):
     monkeypatch.delenv("STOCK_VISION_JUDGE", raising=False)
-    assert not S._judge_enabled({})
-    assert S._judge_enabled({"visionJudge": True})
-    monkeypatch.setenv("STOCK_VISION_JUDGE", "1")
     assert S._judge_enabled({}) and not S._judge_enabled({"visionJudge": False})
+    monkeypatch.setenv("STOCK_VISION_JUDGE", "0")
+    assert not S._judge_enabled({}) and S._judge_enabled({"visionJudge": True})
 
 
 def test_judge_crash_keeps_the_plain_ranking(monkeypatch):
