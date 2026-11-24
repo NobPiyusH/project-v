@@ -28,6 +28,15 @@ THRESHOLDS: dict[str, float] = {
     # flicker = mean |second difference| of per-frame mean luma (0..255 scale); smooth camera/lighting moves score near 0.
     "flicker_warn_above": 1.5,
     "flicker_fail_above": 4.0,
+    "scene_threshold": 0.4,  # ffmpeg scene score above this is a cut (0..1)
+    "min_shot_s": 0.5,  # cuts closer than this to a shot boundary are ignored (flashes, fades)
+    # independent motion = mean luma residual (0..255, at lm_width px) after one global affine camera move is removed (localmotion.py).
+    # Calibrated 25 Nov 2026 on few clips: panned still 0.9, zoomed still 3.4, near-static real shots 2.7-3.4, real moving shots 6.3-10.8.
+    "lm_fail_below": 1.5,
+    "lm_warn_below": 4.5,
+    "lm_fps": 4.0,  # frames sampled per second for this analysis
+    "lm_gap_s": 0.5,  # frame pairs this far apart are compared
+    "lm_width": 160,
     "analysis_width": 640,  # frames are scaled to this width before sharpness is measured
     # --- Tier 3 (VLM judge) ---
     "frames_per_shot": 6,

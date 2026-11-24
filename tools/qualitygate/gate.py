@@ -5,15 +5,17 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from . import tier1, tier2
+from . import cuts, localmotion, tier1, tier2
 from .config import THRESHOLDS
 from .ffprobe import probe, run_filter
 from .tier3 import Judge, judge_shot
 from .types import CheckResult, GateReport, Shot, Status
 
 
-def load_shots(path: str | None, duration: float) -> list[Shot]:
-    """shots.json: [{"id": "s1", "start": 0, "end": 4.5}, ...]. Without a file the whole video is one shot."""
+def load_shots(path: str | None, duration: float, video: str | None = None, cfg: dict[str, float] = THRESHOLDS) -> list[Shot]:
+    """shots.json: [{"id": "s1", "start": 0, "end": 4.5}, ...]. "auto" detects cuts in `video`; no file means one shot."""
+    if path == "auto" and video:
+        return cuts.shots_from_cuts(cuts.parse_cuts(run_filter(video, cuts.cut_args(cfg))), duration, cfg)
     if not path:
         return [Shot("all", 0.0, duration)]
     items = json.loads(Path(path).read_text(encoding="utf-8"))
@@ -39,11 +41,17 @@ def run_gate(video: str, shots_path: str | None = None, captions_path: str | Non
         report.checks.extend(tier1.check_captions(cues, info.duration, cfg))
 
     # Tier 2
-    shots = load_shots(shots_path, info.duration)
+    shots = load_shots(shots_path, info.duration, video, cfg)
     motion = tier2.parse_signalstats(run_filter(video, tier2.motion_args(cfg)))
     sharp = tier2.parse_signalstats(run_filter(video, tier2.sharpness_args(cfg)))
+    frames = localmotion.read_gray_frames(video, info.width, info.height, cfg["lm_fps"], cfg) if localmotion.available() else None
     for shot in shots:
         report.checks.extend(tier2.score_shot(motion, sharp, shot, cfg))
+        if frames is None:
+            add(CheckResult("independent_motion", Status.SKIP, message="numpy not installed", shot=shot.id))
+        else:
+            value = localmotion.shot_independent_motion(frames, cfg["lm_fps"], shot, cfg)
+            add(localmotion.check_independent_motion(value, shot, cfg))
 
     # Tier 3 (off unless a judge is injected)
     if judge is not None:

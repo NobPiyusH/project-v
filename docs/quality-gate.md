@@ -15,12 +15,15 @@ Prints a short report, then the JSON. Exit code 1 if any check fails. `shots.jso
 | 1 | Frozen frames | `freezedetect` | a frozen run of 2 s or more (shorter warns) |
 | 1 | Captions | SRT parse | a cue outside the video, or overlapping; warns on cues under 0.7 s or over 7 s; reading speed over 20 cps warns, over 25 fails |
 | 2 | Motion | mean luma difference between frames, per shot | below 0.25 (warn below 0.6): near-static shot |
+| 2 | Independent motion | motion left after removing one global camera move (pan/zoom/rotate fit); needs numpy, else `skip` | below 1.5 (warn below 4.5): a slid or zoomed still, or a static shot |
 | 2 | Sharpness | mean edge (Laplacian) response at 640 px wide | below 0.8 (warn below 1.6) |
 | 2 | Flicker | mean absolute second difference of per-frame mean luma | above 4.0 (warn above 1.5) |
 
 All numbers live in `tools/qualitygate/config.py` (`THRESHOLDS`, documented line by line). Each result is a `CheckResult` (status pass/warn/fail/skip, value, unit, `where` spans in seconds, shot id).
 
-Limit: a panned still has steady, non-zero frame difference, so the motion score only catches shots that barely move. Telling real motion from a sliding still is the Tier 3 judge's job (the rubric's `composition` criterion asks for it).
+Panned stills: the plain frame-difference `motion` score cannot catch them (a panned still scored 4.2, higher than real gentle shots at 0.9-1.9). `independent_motion` (`localmotion.py`) does: it fits a single affine camera move between frames half a second apart, removes it, and measures what is left. Calibration on 25 Nov 2026 (few clips, owner's verdict not yet applied): panned still 0.9, zoomed still 3.4, real moving beats 5.5-10.8, and Act 1 beats of scenes 2 and 5 about 2.7-3.3 (they warn as near-static). Real parallax from a forward camera move counts as motion, but a slow zoom of a flat image can land in the warn band, so treat warn as "look at it". Tier 3's `composition` criterion is the second opinion.
+
+Shots: `--shots auto` splits the video at ffmpeg scene cuts (`scene_threshold` 0.4, shots shorter than 0.5 s are merged).
 
 ## Tier 3: judge
 

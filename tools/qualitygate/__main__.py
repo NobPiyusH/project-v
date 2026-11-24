@@ -12,7 +12,7 @@ from .gate import render_text, run_gate
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="tools.qualitygate", description="Free quality checks on a finished video (Tier 1 + 2).")
     p.add_argument("video")
-    p.add_argument("--shots", help="shots.json: [{id, start, end}, ...]; default is the whole video as one shot")
+    p.add_argument("--shots", help="shots.json [{id, start, end}, ...], or 'auto' to detect cuts; default is the whole video as one shot")
     p.add_argument("--captions", help="SRT file to sanity-check against the video duration")
     p.add_argument("--judge", choices=["off", "on"], default="off", help="Tier 3 VLM judge. 'on' needs a backend injected from code.")
     p.add_argument("--json-only", action="store_true", help="print only the JSON report")
