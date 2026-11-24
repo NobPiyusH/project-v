@@ -15,7 +15,8 @@ from google.genai import types
 from pydantic import BaseModel
 from temporalio import activity
 
-from workers.common import beat as _beat, download, gemini, log, run_ffmpeg, usage_dict, with_models, workdir
+from workers.common import beat as _beat
+from workers.common import download, gemini, log, run_ffmpeg, usage_dict, with_models, workdir
 
 MAX_IMAGES_PER_CALL = 48  # beyond this, the review runs per paragraph (act) so every image keeps enough attention
 IMAGE_SIDE = 512          # long side in pixels: enough to judge content and continuity, small enough to be cheap

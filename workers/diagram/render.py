@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import random
 import subprocess
 import sys
@@ -21,8 +22,6 @@ import zlib
 from pathlib import Path
 
 from workers.diagram.spec import PALETTE, color_hex, enrich_motion, fallback_spec, validate_spec
-
-import os
 
 FONT = os.environ.get("DIAGRAM_FONT", "Segoe UI")  # Pango falls back to its default sans when the font is missing
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -68,11 +67,27 @@ def render_or_fallback(spec, out_path: str | Path, title: str = "", lines: list[
 
 def _build_scene_class():
     """Imports Manim lazily (heavy; only the renderer process needs it)."""
-    from manim import (
-        DOWN, LEFT, RIGHT, UP, Arrow, Circle, DashedLine, Dot, Intersection, Line, Mobject, Polygon, RoundedRectangle,
-        Scene, Text, VGroup, rate_functions as rf,
-    )
     import numpy as np
+    from manim import (
+        DOWN,
+        LEFT,
+        RIGHT,
+        UP,
+        Circle,
+        DashedLine,
+        Dot,
+        Intersection,
+        Line,
+        Mobject,
+        Polygon,
+        RoundedRectangle,
+        Scene,
+        Text,
+        VGroup,
+    )
+    from manim import (
+        rate_functions as rf,
+    )
     from manim.utils.color import ManimColor, interpolate_color
 
     EASE = {"linear": rf.linear, "smooth": rf.smooth, "ease_in": rf.ease_in_cubic, "ease_out": rf.ease_out_cubic,

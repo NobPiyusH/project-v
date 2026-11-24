@@ -14,7 +14,6 @@ from pathlib import Path
 
 from workers.common import download, ffmpeg_bin, run_ffmpeg
 
-
 SFX_VOLUME = 0.35  # sound effects sit under the music; the whole bed ducks under the voice
 MUSIC_VOLUME = 0.12  # was 0.9: the music sat as loud as the voice (owner heard it, 23 Nov 2026; measured -2 dB gap, now about +9 dB)
 DUCK_THRESHOLD, DUCK_RATIO, DUCK_RELEASE_MS = 0.02, 12, 500  # deeper ducking while a line is spoken

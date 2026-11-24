@@ -229,7 +229,7 @@ def with_models(spec: str | None, call, *, what: str, default: str | None = None
     for i, m in enumerate(models):
         try:
             from workers import gemini_pool
-            return m, gemini_pool.execute(lambda: with_retry(lambda: call(m), what=f"{what} ({m})"), f"{what} ({m})")
+            return m, gemini_pool.execute(lambda m=m: with_retry(lambda: call(m), what=f"{what} ({m})"), f"{what} ({m})")
         except Exception as e:  # noqa: BLE001 - decide below whether the next model should be tried
             if i < len(models) - 1 and _model_problem(e):
                 log.warning("%s: model %s failed (%s), falling back to %s", what, m, str(e)[:160], models[i + 1])

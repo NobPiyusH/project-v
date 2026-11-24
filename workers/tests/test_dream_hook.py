@@ -3,7 +3,6 @@
 import subprocess
 from pathlib import Path
 
-
 from workers.common import ffmpeg_bin, run_ffmpeg
 from workers.dream import finish as dream
 from workers.dream import hook

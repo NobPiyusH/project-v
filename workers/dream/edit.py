@@ -202,6 +202,7 @@ def ambience_graph(first_input: int, windows: list[tuple[float, float]], present
 def striking(path: Path, tmp: Path) -> float:
     """How striking a clip is: colour strength plus contrast (luma spread), from FFmpeg on a small copy."""
     import subprocess
+
     from workers.common import ffmpeg_bin
     f = tmp / f"strike-{path.stem}.txt"
     subprocess.run([ffmpeg_bin(), "-hide_banner", "-y", "-i", str(path), "-an", "-vf",

@@ -10,7 +10,8 @@ import pytest
 
 from workers.activities import clips as C
 from workers.dream import scenes as SC
-from workers.pod import client, server as S
+from workers.pod import client
+from workers.pod import server as S
 
 SCENE = {"image": "eA==", "width": 480, "height": 832, "frames": 81, "fps": 16,
          "beats": [{"prompt": "walk on", "seed": 11}, {"prompt": "turn left", "seed": 12}, {"prompt": "rise", "seed": 13}]}

@@ -23,14 +23,14 @@ For the next Claude (another account or a new session) that continues as Gendu's
 ## Sessions started from the CTO chat (their notes only; check before trusting)
 | Name | Task | State on 23 Nov | Branch (not pushed unless stated) |
 |---|---|---|---|
-| java-to-python | staged Java to Python migration | S0-S4 done (ledger, config/providers, routing/agents, GPU watchdog+broker+4 adapters); 253 tests on fakes; Java still live; paused before S5 (workflow, video, HTTP API) | `claude/python-migration-88b813`, pushed. NOTE its worktree directory is `.claude/worktrees/studio-svi-safety-52e8a5` |
-| quality-gate | quality gate checks 1-7 + stock judge | built, 20+ tests, TV video run cost $0.097; stock "search and judge" (off by default) works, found nothing usable for TV shots 4, 18, 25 (AI picture used instead); two script A/Bs written; item 8 (Java contract tests) not built | `claude/quality-gate-cf71ff`, not pushed |
-| milky-seas-blender | 3 photoreal Blender scenes + chunked cloud render tool + 4K/8K benchmark | running; its first pod was killed by the watchdog (no lease, about $0.11 lost); a second RunPod A40 pod (`sr9e9yhjq4kydg`, about $0.60/h) now holds a lease (keeper started by the CTO chat, 100 min cap) and was still booting at last check; spend approved: about $1 for the benchmark, full renders need his firm-number OK | `claude/milky-seas-blender-0b808a`, not pushed |
+| java-to-python | staged Java to Python migration | S0-S4 done (253 tests on fakes); owner approved S5 (workflow, production, video stages) on 23 Nov late; the session is working on it, Java still live | `claude/python-migration-88b813`, pushed. NOTE its worktree directory is `.claude/worktrees/studio-svi-safety-52e8a5` |
+| quality-gate | quality gate checks 1-7 + stock judge | MERGED into main (`648d829`, pushed); 28 gate tests pass; stock judge ON by default (`STOCK_VISION_JUDGE=0` turns it off); item 8 (Java contract tests) not built | branch merged |
+| milky-seas-blender | 3 photoreal Blender scenes + chunked cloud render tool + 4K/8K benchmark | running. First pod killed by the watchdog (no lease, about $0.11 lost). Second pod (A40 `sr9e9yhjq4kydg`) leased by the CTO chat, rendered chunk 1, then was killed ON PURPOSE to test resume. Replacement L40S (`y4wfaeu5g6nirz`, $1.09/h) had NO lease because the tool's rental code does not lease yet: the CTO chat opened a lease and keeper (100 min cap) and told the session to add the lease step to its rental code. Spend approved: about $1 for the benchmark; full renders need his firm-number OK | `claude/milky-seas-blender-0b808a`, not pushed |
 | earshot-sound-effects-te | Earshot test | done, idle | none |
 
 ## Uncommitted work in `C:\dev\project-v` (main) that matters
 - **OpenAI script writer (live Java), not committed, not active:** `control-plane/.../agents/OpenAiCompatChat.java` (openai: provider, `max_completion_tokens`, price ledger), `Llm.java` (cost recorded in ₹ at list price), `WriterAgent.java` (`projectv.models.script`), `application.properties` (`SCRIPT_MODEL`, default `openai:gpt-5.4-mini`; switch back with `SCRIPT_MODEL=claude:claude-sonnet-5-5` in `.env`). Compiles, agent tests pass, live OpenAI call verified. **The backend must be restarted to activate it; 11 workflows were open (9 Dream Shorts, 2 videos), so it was held until he says OK.** Also copy this to the Python port.
-- Commits since the last push: `607dad4` (lease tool; local, NOT pushed). Pushed on 23 Nov: main up to `66326f4` plus 5 branches. The OpenAI script-writer Java edits are the only code still uncommitted by design.
+- Pushed on 23 Nov: main up to `648d829` (docs, lease tool, OpenAI writer, quality gate merge) plus 5 branches. Nothing important is unpushed except the side-session branches that have not pushed yet (`milky-seas-blender`).
 - `tools/live_status/status_server.py` (live status page, committed and pushed), `docs/shorts/*`, `reports/CTO-report-2026-11-23.md` (committed earlier), media under `reports/` (not for git: several GB).
 - About 100 files show as uncommitted, mostly media. Commit only text and code; never the videos.
 
@@ -40,13 +40,24 @@ For the next Claude (another account or a new session) that continues as Gendu's
 - RunPod: key in `.env`; pods are billed per hour; the project's own watchdog (Java) is the safety net; my scripts also arm independent kill-timers (`tools/bakeoff/killer*.py`). Balance was about $5.0 on 23 Nov; about $2.7 of the owner's $5 test budget spent before the Milky Seas benchmark.
 - Vast API needs a 2FA session key (`tools/bakeoff/vastauth.py`, TOTP seed in `.env`; at most two attempts to avoid locking the account).
 
+## Status update, 23 Nov 2026 late evening ("approved all")
+Done after the owner said "approved all" and "yes push":
+- **OpenAI is the live script writer.** Backend restarted cleanly (8.5 s); all 15 open workflows survived; commit `8597f9a`, pushed. Claude Sonnet 5.5 stays the Director. First real script through it is still the proof.
+- **Quality gate merged into main** (`648d829`, pushed): checks 1-7, OpenAI vision, stock search-and-judge (the session turned it ON by default after the owner's yes; `STOCK_VISION_JUDGE=0` turns it off). 28 gate tests pass. Item 8 (Java contract tests) not built.
+- **Milky Seas director plan approved** (`docs/shorts/milky-seas-director-plan.md` + `milky-seas-plan.json`).
+- **Migration S5 go-ahead sent** to the `java-to-python` session (workflow, production, video stages), with the OpenAI writer, quality gate and watchdog-lease facts to port. It stops after S5 for his next go.
+- **`Downloads.old-move`: nothing to delete.** It holds 5 tiny leftover items (0 GB); `C:\Users\piyus\Downloads` is now a junction to `E:\Downloads` (42,581 files, 147.8 GB). The earlier "frees 150 GB" note was out of date. Warning: his certificates and ID scans now have ONE copy (on E:); suggest he keeps a second copy somewhere private (not GitHub, not any cloud job).
+
 ## Pending for the owner
-1. Rotate the keys listed above (steps already given in chat).
-2. Delete `C:\Users\piyus\Downloads.old-move`? (about 150 GB, irreversible; asked, not answered.)
-3. OK to restart the backend for the OpenAI script writer.
-4. Approve the Milky Seas director plan, then a firm cost for the Blender renders (ElevenLabs paid plan needed before publishing; check licences of real NASA/NOAA images).
-5. Migration: go-ahead for S5+ (suggest after keys are rotated and the quality gate is merged).
-6. Merge `claude/cost-cuts-a99b7a`, queue Blender automation (templates, not AI-written scenes), HyperFrames/upscale/FLUX-vs-Z-Image tests, Director plan format step 1 (done as JSON draft), quality gate merge, review 48 h/7 d analytics of the TV video.
+1. **Rotate the keys** (ElevenLabs, Hugging Face, RunPod, Vast key and TOTP seed, E2E, OpenAI): only he can; then put them in `.env` and have the CTO test them without printing.
+2. **Milky Seas production gates:** a firm Blender render cost from the `milky-seas-blender` session benchmark (his OK before any full render), ~~the paid ElevenLabs plan~~ (DONE: bought by the owner; checked 23 Nov: Starter, active, annual, 601/40,000 characters, resets 23 Dec 2026), and image licences (checked in `docs/shorts/milky-seas-director-plan.md`: NASA Earth Observatory images OK with credit, map not, NOAA unread).
+3. Optional: second private backup of his personal documents (see above).
+4. Later queue: merge `claude/cost-cuts-a99b7a`, Blender templates (automation), HyperFrames / upscale / FLUX-vs-Z-Image tests, Director plan format (draft JSON exists), RunPod Serverless test on one Short, 48 h / 7 d analytics of the TV video, Lake Natron Short (on hold).
+
+## Live state at the time of writing (23 Nov 2026, about 15:15 IST)
+- Status page `http://127.0.0.1:8099`: one pod, L40S `y4wfaeu5g6nirz` about 2 min old, balance about $4.83; the newest frame had just landed. Leases: only `y4wfaeu5g6nirz` open (keeper pid 25060, 100 min cap); the earlier A40 lease released. No watchdog kill since 09:03 UTC.
+- Pods keep dying only when they have NO lease. Always check the leases table (`docker exec projectv-postgres-1 psql -U projectv -d projectv -c "select pod_id,name,heartbeat_at,released_at from gpu_pod_lease order by created_at desc limit 5"`) when a pod is rented by any tool.
+- ElevenLabs: Starter plan active, annual, 601 / 40,000 characters used, resets 23 Dec 2026 (owner bought it; checked read-only).
 
 ## Other notes for the next Claude
 - The owner also ran `/auto-mode-setup` (project scope) on 23 Nov; its proposal only adds a soft-deny for spend-incurring GPU rental commands outside normal start/stop flows. Nothing was applied by the CTO chat. Auto mode blocked one message that would have told a session to evade the watchdog; route such things to the owner.
@@ -59,3 +70,19 @@ For the next Claude (another account or a new session) that continues as Gendu's
 - Never claim unverified things as verified. When he asks "true?", fact-check with sources (Lake Natron: say "coated and preserved", never "calcified"; Milky Seas: do not state an area figure or the Java event year, sources disagree).
 - Licences: Wan 2.2 Apache 2.0; LTX-2.x free under $10M revenue (full text not read); MiniMax H3 bars displaying outputs in US/EU/UK/South Korea, so excluded.
 - Wan makes 720p only; real 4K/8K quality must come from Blender and real images; an upscale stage does not exist yet.
+
+## Status update, 23 Nov 2026 night (CTO chat)
+- **Migration:** S5, S6, S7a, S7b done on `claude/python-migration-88b813` (local, not pushed): last commit `e2ca663`, 577 tests pass. Every Java route ported, all OFF by default (STUDIO_DREAM_ROUTES, STUDIO_VIDEO_ROUTES, STUDIO_JOBS, STUDIO_TEMPORAL_WORKER; dashboard PROJECTV_PY_AREAS unset = all Java). 56 live Java GETs replayed read-only: shapes match. Waiting for the owner's "trial" (only /api/dream to Python, no spend). No cut-over, no S8.
+- **Cathedral Blender set** (`claude/cathedral-set-968621`, local): set + 4K 301-frame route rendered on an A40 for $0.56; look judged poor (flat fog, candy window, pawn crowd). Wan on its anchors ($0.38, Vast) did not fix it. Files under `E:\project-data\blender\library\cathedral\` and `E:\project-data\outputs\cathedral-wan\`.
+- **20 s game-cinematic** (`claude/game-cinematic-20s-847cab`, local): FLUX.2 klein keyframes -> Wan 2.2 fp8 640x1136 16 fps -> Real-ESRGAN 4K, $0.47 on a RunPod 3090. Owner: looks fake at 16 fps. RIFE 32 fps version made free on the laptop (`E:\tools\rife`): `E:\project-data\outputs\game-cinematic\game_cinematic_20s_4k_32fps_rife.mp4`. LTX 2.5 attempt stopped (RunPod no stock, Vast needs a top-up); no LTX clips.
+- **Proposed, awaiting owner yes:** blind A/B of Seedance 1.5 Pro, Veo 3.1 Fast, Kling vs Wan 720p+RIFE on two original POV prompts, cap Rs 500. Reason: the owner's reference videos are commercial-model tier.
+- **Running:** side sessions `zoom-2d` (Manim, free, local) and `zoom-3d` (Blender, local preview + firm render cost, no pod) for a 30 s no-cut Moon-Earth-Sun-Milky Way zoom.
+- **Unreal:** Epic launcher installed and signed in, but the Install Engine dialog never opens (EpicWebHelper startup timeout, "ue is not defined"); web cache moved to `webcache_4430.bak-claude`. Owner to try Run as administrator or reinstall the launcher.
+- **Spend today (RunPod):** balance $4.66 -> $3.31. Vast also used (about $0.4). No pods running at 23:52 IST. One stale lease row (Salad, 19 Nov, heartbeat stopped) is unreleased; Salad shows 0 container groups, so nothing bills.
+
+## Status update, 24 Nov 2026 (CTO chat, owner away; branch `claude/film4k-pipeline`)
+- **3-minute 4K game film, Act 1 (scenes 1-8):** generated and upscaled on 3 pods (about $3.15 incl. keyframes, cap approved $4.00); laptop assembly running (`E:\project-data\outputs\game-4k\`, output `act1_4k_48fps.mp4`). Camera barely moves with SVI: a post camera move was added. **Act 2 (scenes 9-15, 7 keyframes made, $0.19) NOT started: the auto-mode check blocked the pod launch because the owner approved $4 only. Needs his yes and a total cap of about $6.00.**
+- **Code on `claude/film4k-pipeline` (not on main, not merged):** `tools/podkit/` (ledger cap, rent fallback, boot script fixed, fail-closed guards), `tools/film4k/` (storyboard of 15 scenes, run_shard, assemble, camera), `tools/gpu_lease/lease.py` (fails loudly), `tools/ops/` Wi-Fi keep-alive (profiles auto-detected, no SSIDs in git), `docs/film4k.md`. 24 tests pass. run_shard.py has not run on a real pod.
+- **Docker was off** when pods ran (lease helper failed silently): fixed in code; Docker restarted by hand. The Java backend is still down (not started).
+- **Money picture:** RunPod balance about $6-7 after Act 1; Google/Gemini returns 403 "outstanding balance" (owner must pay); OpenAI/Claude unaffected.
+- **Open:** the hosted-model A/B (Seedance/Veo/Wan hosted) showed the same photographic start image makes hosted and own-pod Wan close; our pod route is far cheaper.

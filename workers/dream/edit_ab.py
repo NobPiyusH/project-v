@@ -12,7 +12,8 @@ import sys
 from pathlib import Path
 
 from workers.common import workdir
-from workers.dream import edit, finish as dream, polish
+from workers.dream import edit, polish
+from workers.dream import finish as dream
 
 
 def run(out_dir: Path, name: str, music: Path, clips: list[Path], width: int = 720, height: int = 1280) -> dict:
@@ -52,6 +53,7 @@ def picture_only(out_dir: Path, name: str, music: Path, clips: list[Path], width
     """<name>-picture-after.mp4: picture from the finish with ONLY smartTransitions + hqInterp on, trimmed at the end to
     the before file's running time, with the before file's audio stream copied untouched (bit-identical)."""
     import subprocess
+
     from workers.common import ffmpeg_bin, media_duration, run_ffmpeg
     before = out_dir / f"{name}-before.mp4"
     dream.get_bytes = lambda uri: Path(uri).read_bytes()

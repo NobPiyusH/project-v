@@ -5,7 +5,8 @@ import subprocess
 
 from workers.activities import clips as C
 from workers.common import ffmpeg_bin, run_ffmpeg
-from workers.dream import finish as dream, hook
+from workers.dream import finish as dream
+from workers.dream import hook
 
 
 def _peak(path, at: float) -> float:

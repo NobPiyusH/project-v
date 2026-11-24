@@ -19,7 +19,8 @@ import numpy as np
 from temporalio import activity
 
 from workers.activities.voice import _whisper, judge
-from workers.common import beat as _beat, download, ffmpeg_bin, ffprobe_bin, log, RateLimiter, workdir
+from workers.common import RateLimiter, download, ffmpeg_bin, ffprobe_bin, log, workdir
+from workers.common import beat as _beat
 
 # Groq's free Whisper tier allows 20 requests/minute; the narration stage itself also uses it.
 WHISPER_LIMIT = RateLimiter(per_minute=15)

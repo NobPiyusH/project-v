@@ -1,0 +1,15 @@
+{
+  "_note": "Same-prompt video model test template. Prices are RunPod public-endpoint list prices read 24 Nov 2026; re-check before use (CLAUDE.md rule 7).",
+  "cap_usd": 1.0,
+  "start_image": {
+    "endpoint": "seedream-v4-t2i",
+    "input": {"size": "1088*1920", "seed": 7, "enable_safety_checker": true}
+  },
+  "models": [
+    {"name": "pvideo",      "endpoint": "p-video",               "usd_per_s": 0.02,  "input": {"resolution": "720p", "aspect_ratio": "9:16", "duration": 5}},
+    {"name": "seedance480", "endpoint": "seedance-v1-5-pro-i2v", "usd_per_s": 0.024, "input": {"resolution": "480p", "aspect_ratio": "9:16", "duration": 5, "seed": 7}},
+    {"name": "hailuo02",    "endpoint": "minimax-hailuo-02-std", "usd_per_s": 0.038, "input": {"duration": 6, "enable_prompt_expansion": false}},
+    {"name": "wan22",       "endpoint": "wan-2-2-i2v-720",       "usd_per_s": 0.06,  "input": {"size": "720*1280", "num_inference_steps": 30, "guidance": 5, "duration": 5, "flow_shift": 5, "seed": 7}},
+    {"name": "veo31fast",   "endpoint": "google-veo3-1-fast-i2v","usd_per_s": 0.10,  "input": {"resolution": "720p", "aspect_ratio": "9:16", "duration": 4, "generate_audio": false}}
+  ]
+}

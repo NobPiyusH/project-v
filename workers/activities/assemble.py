@@ -20,7 +20,9 @@ from temporalio import activity
 from workers import groq_whisper
 from workers.activities import sfx
 from workers.activities.mixing import mix_audio
-from workers.common import beat as _beat, download, drawtext_escape as _esc, log, media_duration, put_file, run_ffmpeg, workdir
+from workers.common import beat as _beat
+from workers.common import download, log, media_duration, put_file, run_ffmpeg, workdir
+from workers.common import drawtext_escape as _esc
 
 FPS = 24  # cinematic; part 2a smooths Wan's 16 fps clips to a true 24 fps with RIFE
 SIZES = {"16:9": (1920, 1080), "9:16": (1080, 1920), "1:1": (1080, 1080), "4:5": (1080, 1350)}

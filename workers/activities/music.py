@@ -5,11 +5,21 @@ from __future__ import annotations
 from pathlib import Path
 
 import librosa
-from google.genai import types
 import numpy as np
+from google.genai import types
 from temporalio import activity
 
-from workers.common import MEDIA_TIMEOUT_MS, gemini, media_duration, model_list, put_file, run_ffmpeg, usage_dict, with_models, workdir
+from workers.common import (
+    MEDIA_TIMEOUT_MS,
+    gemini,
+    media_duration,
+    model_list,
+    put_file,
+    run_ffmpeg,
+    usage_dict,
+    with_models,
+    workdir,
+)
 
 
 def _generate(model: str, prompt: str, dest: Path) -> tuple[Path, dict]:

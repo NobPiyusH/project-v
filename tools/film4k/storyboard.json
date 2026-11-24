@@ -1,0 +1,141 @@
+{
+ "style": "Photorealistic cinematic still, vertical, shot on ARRI Alexa 35, natural photographic color grade, muted desaturated palette with warm fire light against cool grey overcast, fine film grain, real concrete rust dust and water textures, ultra detailed, no stylised game art, no painterly look, no text",
+ "creature": "a colossal dark bat-winged dragon creature with leathery wings and a long neck",
+ "scenes": [
+  {
+   "id": 1,
+   "key": "high wide view over a ruined flooded city at dusk, collapsed towers and bent steel overpasses, smoke columns, {c} as a tiny silhouette gliding far away",
+   "beats": [
+    "The camera pushes forward and slowly descends over the ruined skyline, smoke drifts, the distant creature banks through the clouds, realistic physics, natural motion blur",
+    "The camera keeps descending toward the avenue between leaning towers, mist rolls between buildings, embers drift upward, the creature circles in the distance",
+    "The camera glides lower over the flooded street, water ripples, debris floats, the creature turns away behind a tower"
+   ]
+  },
+  {
+   "id": 2,
+   "key": "low handheld view at street level on a flooded ruined avenue, cracked asphalt reflecting a grey sky, fires burning in rubble, leaning concrete towers on both sides, {c} as a distant silhouette",
+   "beats": [
+    "Handheld camera walks steadily forward down the flooded avenue, subtle sway, wet asphalt ripples, embers rise",
+    "The camera keeps moving forward faster, passing burning wreckage, mist rolls across the road, the creature rises in the far distance",
+    "The camera speeds up and tilts slightly up as the creature climbs behind the towers, dust and smoke drift"
+   ]
+  },
+  {
+   "id": 3,
+   "key": "backlit view from a ruined street as {c} rises behind broken towers against a pale burning sun, dust and smoke in the air, silhouettes, wet road in the foreground",
+   "beats": [
+    "The creature rises higher and spreads its wings against the sun, the camera pushes forward and tilts up, dust glows in the light",
+    "The creature beats its wings once and climbs, the camera continues forward past a leaning tower, debris falls from the wind",
+    "The creature banks and heads toward the camera, the camera pulls back quickly, wind whips smoke and dust"
+   ]
+  },
+  {
+   "id": 4,
+   "key": "looking steeply up from a ruined street as {c} passes low overhead, tower edges framing the grey sky, dust and embers in the air",
+   "beats": [
+    "The creature sweeps overhead, its shadow races across the wet road, the camera tilts up to follow it",
+    "The camera whips around as the creature passes and the wing beat blows dust and embers across the street",
+    "The camera tracks the creature as it banks away over the towers, debris rains down and splashes in the water"
+   ]
+  },
+  {
+   "id": 5,
+   "key": "handheld view under a collapsed rusted concrete overpass on a flooded road, steam vents, hanging cables, fires glowing in the rubble, grey light from the end of the tunnel, {c} as a distant dark shape",
+   "beats": [
+    "The camera moves forward under the overpass, steam hisses from vents, cables sway, water ripples around the debris",
+    "The camera keeps moving through the wreckage faster, sparks and embers drift past, rubble shifts and falls",
+    "The camera emerges from the overpass into grey open light, mist swirls, the creature crosses the sky ahead"
+   ]
+  },
+  {
+   "id": 6,
+   "key": "high crane view over a vast field of wreckage in a ruined city, twisted steel, flooded streets, smoke columns, grey overcast sky, {c} resting on a distant tower",
+   "beats": [
+    "The camera cranes up fast over the wreckage, the wider ruined city opens below, smoke columns drift",
+    "The camera continues rising and pushes forward, the creature on the tower turns its head, birds scatter",
+    "The camera sweeps over the flooded streets toward the tower, mist moves, light breaks through clouds"
+   ]
+  },
+  {
+   "id": 7,
+   "key": "low view of {c} landing heavily on a broken concrete tower, dust clouds, falling debris, wet street and fires in the foreground, overcast sky",
+   "beats": [
+    "The creature lands on the tower, concrete cracks and debris falls into the flooded street, dust rolls outward, the camera holds with a handheld shake",
+    "The creature folds its wings and lowers its head, the camera pushes in quickly, dust settles, embers drift",
+    "The camera circles to the side as the creature scans the city, wind moves its wings, smoke streams past"
+   ]
+  },
+  {
+   "id": 8,
+   "key": "very low close view of flooded rubble in a ruined street with embers floating and fires reflecting in the water, a huge wing shadow on the wall behind, shallow depth of field",
+   "beats": [
+    "The camera slides forward at water level, ripples spread, embers float past, a large shadow crosses the wall",
+    "The camera keeps sliding and rises slightly, rubble and rebar pass, water splashes as debris falls",
+    "The camera rises to reveal the street ahead and the creature's silhouette passing over the grey sky"
+   ]
+  },
+  {
+   "id": 9,
+   "key": "high rooftop vantage over a ruined flooded city at overcast dawn, tattered banners and cables whipping in the wind, wet concrete, {c} circling far above the towers",
+   "beats": [
+    "The camera pushes forward along the rooftop edge, banners snap in the wind, the creature circles above the towers, clouds move",
+    "The camera tilts up and keeps pushing as the creature banks overhead, wind whips dust and rain across the roof",
+    "The camera swings toward the city as the creature dives away between the towers, mist rises from the streets"
+   ]
+  },
+  {
+   "id": 10,
+   "key": "wide view of a collapsed bridge over a wide flooded canal in a ruined city at grey dawn, mist on the water, wrecked boats, fires reflecting in the water, {c} perched far away on the broken bridge",
+   "beats": [
+    "The camera glides forward low over the canal toward the collapsed bridge, mist drifts, water ripples around wreckage",
+    "The camera keeps gliding and rises slightly, boats rock, embers drift, the creature turns its head on the bridge",
+    "The camera passes under the broken span, water drips, dust falls, light grows at the far end"
+   ]
+  },
+  {
+   "id": 11,
+   "key": "interior of a ruined glass atrium in a destroyed building, shafts of grey daylight through broken glass, dust in the air, fallen beams and flooded floor, no creature",
+   "beats": [
+    "The camera walks forward through the atrium, dust drifts through the light shafts, water ripples across the floor",
+    "The camera keeps moving and tilts up toward the broken glass roof, debris sways, light flickers",
+    "The camera pushes toward a wall of light at the far end, dust swirls, a distant roar shakes loose glass"
+   ]
+  },
+  {
+   "id": 12,
+   "key": "close low view of the head and long neck of {c} lowering through smoke between two ruined towers, wet leathery skin, dust and sparks, overcast sky behind, shallow depth of field",
+   "beats": [
+    "The camera pushes slowly toward the creature as its head lowers through the smoke, breath steams, sparks drift",
+    "The camera keeps pushing and tilts up as the head turns toward the camera, dust blows past",
+    "The camera pulls back quickly as the creature rears and spreads its wings, debris falls"
+   ]
+  },
+  {
+   "id": 13,
+   "key": "wide low view across a flooded street as {c} launches from a tower, shockwave of dust and water spreading across the street, debris flying, grey sky",
+   "beats": [
+    "The creature launches from the tower, a shockwave of dust and water races toward the camera, the camera shakes",
+    "The shockwave passes the camera and lifts debris, the camera tilts up to follow the creature into the sky",
+    "Water settles, dust hangs in the air, the creature shrinks into the clouds, the camera holds with a slight shake"
+   ]
+  },
+  {
+   "id": 14,
+   "key": "low view looking up at storm clouds breaking over a ruined skyline, shafts of pale light through the clouds, {c} climbing as a dark silhouette, wet rooftops in the foreground",
+   "beats": [
+    "The camera rises through the storm light, clouds churn, rain streaks past, the creature climbs",
+    "The camera keeps rising faster, lightning flickers inside the clouds, the creature banks through a gap of light",
+    "The camera breaks through the cloud layer into brighter sky, mist streams past, the creature becomes a small silhouette"
+   ]
+  },
+  {
+   "id": 15,
+   "key": "very wide view over the whole ruined city at sunrise above the clouds, warm light on towers and wet streets, smoke columns catching the light, {c} as a tiny silhouette gliding far away",
+   "beats": [
+    "The camera cranes up slowly over the city as sunrise light spreads across the towers, smoke columns drift",
+    "The camera keeps rising and pulls back, light glints on the flooded streets, the creature glides across the sun",
+    "The camera holds on the wide city as the light brightens and the creature fades into the distance, a final slow drift"
+   ]
+  }
+ ]
+}
