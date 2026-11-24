@@ -9,7 +9,13 @@ Writes start.png, <model>.mp4, log.jsonl, a blind side-by-side (blind.mp4) and K
 Stops before cap_usd (models.json). Reads RUNPOD_API_KEY from .env; never prints it.
 Spends money: run only with the owner's yes and a cap.
 """
-import argparse, json, os, random, subprocess, time, urllib.request
+
+import argparse
+import json
+import random
+import subprocess
+import time
+import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -36,7 +42,11 @@ def call(ep, inp, timeout_s=900):
     while time.time() - t0 < timeout_s:
         time.sleep(8)
         try:
-            s = json.load(urllib.request.urlopen(urllib.request.Request(f"https://api.runpod.ai/v2/{ep}/status/{jid}", headers=H), timeout=60))
+            s = json.load(
+                urllib.request.urlopen(
+                    urllib.request.Request(f"https://api.runpod.ai/v2/{ep}/status/{jid}", headers=H), timeout=60
+                )
+            )
         except Exception:
             continue
         if s.get("status") in ("COMPLETED", "FAILED", "CANCELLED", "TIMED_OUT"):
@@ -58,7 +68,8 @@ def main():
     ap.add_argument("--motion", required=True)
     ap.add_argument("--only", default="")
     a = ap.parse_args()
-    out = Path(a.out); out.mkdir(parents=True, exist_ok=True)
+    out = Path(a.out)
+    out.mkdir(parents=True, exist_ok=True)
     log = (out / "log.jsonl").open("a", encoding="utf-8")
     spent, cap = 0.0, float(CFG["cap_usd"])
     img = a.image_url
@@ -66,7 +77,8 @@ def main():
         r = call(CFG["start_image"]["endpoint"], {"prompt": a.image_prompt, **CFG["start_image"]["input"]})
         spent += float((r.get("output") or {}).get("cost") or 0)
         log.write(json.dumps({"tag": "start", **r}) + "\n")
-        img = r["output"]["result"]; save(img, out / "start.png")
+        img = r["output"]["result"]
+        save(img, out / "start.png")
     only = set(filter(None, a.only.split(",")))
     done = []
     for m in CFG["models"]:
@@ -74,24 +86,62 @@ def main():
             continue
         est = m["usd_per_s"] * m["input"].get("duration", 5)
         if spent + est > cap:
-            print(m["name"], "skipped: cap"); continue
+            print(m["name"], "skipped: cap")
+            continue
         r = call(m["endpoint"], {"prompt": a.motion, "image": img, **m["input"]})
         o = r.get("output") if isinstance(r.get("output"), dict) else {}
         spent += float(o.get("cost") or 0)
-        log.write(json.dumps({"tag": m["name"], "status": r.get("status"), "output": o, "error": r.get("error"), "secs": r.get("_secs"), "spent": round(spent, 4)}) + "\n"); log.flush()
+        log.write(
+            json.dumps(
+                {
+                    "tag": m["name"],
+                    "status": r.get("status"),
+                    "output": o,
+                    "error": r.get("error"),
+                    "secs": r.get("_secs"),
+                    "spent": round(spent, 4),
+                }
+            )
+            + "\n"
+        )
+        log.flush()
         print(m["name"], r.get("status"), o.get("cost"), (r.get("error") or "")[:200], "total", round(spent, 3), flush=True)
         if o.get("result"):
-            save(o["result"], out / f"{m['name']}.mp4"); done.append(m["name"])
+            save(o["result"], out / f"{m['name']}.mp4")
+            done.append(m["name"])
     random.shuffle(done)
     if done:
         font = "fontfile='C\\:/Windows/Fonts/arialbd.ttf'"
         ins, fl = [], []
         for i, n in enumerate(done):
             ins += ["-i", str(out / f"{n}.mp4")]
-            fl.append(f"[{i}]fps=24,scale=288:512,setsar=1,trim=0:4,setpts=PTS-STARTPTS,drawtext={font}:text='{i+1}':x=10:y=10:fontsize=34:fontcolor=white:box=1:boxcolor=black@0.6[v{i}]")
+            fl.append(
+                f"[{i}]fps=24,scale=288:512,setsar=1,trim=0:4,setpts=PTS-STARTPTS,drawtext={font}:text='{i + 1}':x=10:y=10:fontsize=34:fontcolor=white:box=1:boxcolor=black@0.6[v{i}]"
+            )
         stack = "".join(f"[v{i}]" for i in range(len(done))) + (f"hstack={len(done)}" if len(done) > 1 else "null")
-        subprocess.run(["ffmpeg", "-v", "error", *ins, "-filter_complex", ";".join(fl) + ";" + stack, "-an", "-c:v", "libx264", "-crf", "20", "-pix_fmt", "yuv420p", str(out / "blind.mp4"), "-y"], check=False)
-        (out / "KEY.txt").write_text("\n".join(f"{i+1}={n}" for i, n in enumerate(done)) + f"\ntotal_usd={round(spent, 4)}\n", encoding="utf-8")
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-v",
+                "error",
+                *ins,
+                "-filter_complex",
+                ";".join(fl) + ";" + stack,
+                "-an",
+                "-c:v",
+                "libx264",
+                "-crf",
+                "20",
+                "-pix_fmt",
+                "yuv420p",
+                str(out / "blind.mp4"),
+                "-y",
+            ],
+            check=False,
+        )
+        (out / "KEY.txt").write_text(
+            "\n".join(f"{i + 1}={n}" for i, n in enumerate(done)) + f"\ntotal_usd={round(spent, 4)}\n", encoding="utf-8"
+        )
     print("DONE total", round(spent, 3))
 
 

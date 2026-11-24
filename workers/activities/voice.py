@@ -27,8 +27,7 @@ from google.genai import types
 from temporalio import activity
 
 from workers import groq_whisper
-from workers.common import (RateLimiter, gemini, log, model_list, pcm_to_wav, put_bytes, run_ffmpeg, usage_dict,
-                            with_models)
+from workers.common import RateLimiter, gemini, log, model_list, pcm_to_wav, put_bytes, run_ffmpeg, usage_dict, with_models
 
 # Gemini TTS allows 10 requests/minute per model on the owner's tier; stay just under it.
 TTS_LIMIT = RateLimiter(per_minute=9)
@@ -40,9 +39,7 @@ def _wav_seconds(wav: bytes) -> float:
         return w.getnframes() / float(w.getframerate())
 
 
-NUMBER_WORDS = set("""zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen
-sixteen seventeen eighteen nineteen twenty thirty forty fifty sixty seventy eighty ninety hundred thousand million
-billion trillion point percent and a""".split())
+NUMBER_WORDS = set(["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety", "hundred", "thousand", "million", "billion", "trillion", "point", "percent", "and", "a"])
 
 
 def _words(text: str) -> list[str]:

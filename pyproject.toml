@@ -35,12 +35,17 @@ lint = ["ruff>=0.17.5", "vulture>=2.16"]
 [tool.ruff]
 line-length = 130
 target-version = "py311"
-extend-exclude = ["tools", "infra"]
+# Legacy one-off scripts stay out of the lint gate; the maintained tools (podkit, film4k, gpu_lease, model_ab) are linted.
+extend-exclude = ["tools/bakeoff", "tools/blender", "tools/chatterbox", "tools/live_status", "tools/ops", "infra", "reports", "research_notes"]
 
 [tool.ruff.lint]
 # Errors, unused imports/variables, import order, bugbear (likely bugs), simplifications.
 select = ["E", "F", "W", "I", "B", "SIM"]
-ignore = ["E501"]  # long f-strings for ffmpeg filter graphs are clearer on one line
+ignore = [
+    "E501",   # long f-strings for ffmpeg filter graphs are clearer on one line
+    # Style baseline (24 Nov 2026): present in old code, harmless, fixed when a file is touched anyway.
+    "B905", "SIM105", "SIM108", "E741", "E402",
+]
 
 [tool.vulture]
 paths = ["workers"]
@@ -57,3 +62,7 @@ torch = { index = "pytorch-cu128" }
 name = "pytorch-cu128"
 url = "https://download.pytorch.org/whl/cu128"
 explicit = true
+
+[tool.pytest.ini_options]
+# tools/blender scripts need Blender's own Python (bpy): never collect them.
+testpaths = ["workers/tests", "tools/podkit", "tools/film4k", "tools/gpu_lease"]

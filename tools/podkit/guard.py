@@ -4,6 +4,7 @@ On 24 Nov 2026 Docker was off, the lease helper died on its first psql call with
 (which needs the same database) was off too: only the kill-timer protected the pods. A pod must never run on that footing
 silently: start_guards() confirms the lease row really exists and returns False if it does not; the caller then terminates the pod.
 """
+
 from __future__ import annotations
 
 import subprocess
@@ -16,9 +17,13 @@ NEW_GROUP = 0x00000200
 
 
 def psql(sql: str, timeout: int = 30) -> str:
-    r = subprocess.run(["docker", "exec", "projectv-postgres-1", "psql", "-U", "projectv", "-d", "projectv", "-tA", "-c", sql],
-                       capture_output=True, text=True, timeout=timeout,
-                       creationflags=CREATE_NO_WINDOW if sys.platform == "win32" else 0)
+    r = subprocess.run(
+        ["docker", "exec", "projectv-postgres-1", "psql", "-U", "projectv", "-d", "projectv", "-tA", "-c", sql],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        creationflags=CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+    )
     if r.returncode:
         raise RuntimeError("psql failed: " + r.stderr.strip()[:200])
     return r.stdout.strip()
@@ -39,16 +44,48 @@ def lease_open(pod_id: str, query=psql) -> bool:
         return False
 
 
-def start_guards(pod_id: str, name: str, purpose: str, state_path: str, deadline_min: int, lease_py: str, killer_py: str,
-                 provider: str = "runpod", popen=subprocess.Popen, query=psql, confirm_s: float = 90.0,
-                 sleep=time.sleep, clock=time.time) -> bool:
+def start_guards(
+    pod_id: str,
+    name: str,
+    purpose: str,
+    state_path: str,
+    deadline_min: int,
+    lease_py: str,
+    killer_py: str,
+    provider: str = "runpod",
+    popen=subprocess.Popen,
+    query=psql,
+    confirm_s: float = 90.0,
+    sleep=time.sleep,
+    clock=time.time,
+) -> bool:
     """Start the lease keeper and the kill-timer. Returns True only when the lease row is confirmed open."""
-    popen([sys.executable, lease_py, "keep", provider, pod_id, name, purpose, "--state", state_path,
-           "--max-minutes", str(deadline_min + 5)], creationflags=CREATE_NO_WINDOW | DETACHED if sys.platform == "win32" else 0,
-          close_fds=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    popen([sys.executable, killer_py, pod_id, str(deadline_min * 60), state_path],
-          creationflags=DETACHED | NEW_GROUP if sys.platform == "win32" else 0, close_fds=True,
-          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    popen(
+        [
+            sys.executable,
+            lease_py,
+            "keep",
+            provider,
+            pod_id,
+            name,
+            purpose,
+            "--state",
+            state_path,
+            "--max-minutes",
+            str(deadline_min + 5),
+        ],
+        creationflags=CREATE_NO_WINDOW | DETACHED if sys.platform == "win32" else 0,
+        close_fds=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    popen(
+        [sys.executable, killer_py, pod_id, str(deadline_min * 60), state_path],
+        creationflags=DETACHED | NEW_GROUP if sys.platform == "win32" else 0,
+        close_fds=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
     end = clock() + confirm_s
     while clock() < end:
         if lease_open(pod_id, query):

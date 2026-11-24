@@ -7,6 +7,7 @@ storyboard in tools/film4k/storyboard.json. SPENDS MONEY: run only with the owne
 STATUS: rebuilt on podkit on 24 Nov 2026 from the working script (E:\\project-data\\outputs\\game-4k\\film.py). Unit-tested pieces only;
 NOT yet run on a real pod: the first real run is a smoke test (one scene) before a full shard.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -24,6 +25,7 @@ sys.path[:0] = [str(ROOT), str(ROOT / "tools"), str(Path(__file__).parent)]
 from film4k.comfy import Comfy, beat_video_nodes, esrgan_graph  # noqa: E402
 from podkit import boot, guard, rent  # noqa: E402
 from podkit.ledger import CapExceeded, Ledger  # noqa: E402
+
 from workers.pod import server as ps  # noqa: E402
 
 W, H = 720, 1280
@@ -46,13 +48,17 @@ def load_env() -> dict:
 
 def make_gql(key: str):
     def gql(q, v=None):
-        req = urllib.request.Request("https://api.runpod.io/graphql?api_key=" + key, method="POST",
-                                     data=json.dumps({"query": q, "variables": v or {}}).encode(),
-                                     headers={"Content-Type": "application/json", **UA})
+        req = urllib.request.Request(
+            "https://api.runpod.io/graphql?api_key=" + key,
+            method="POST",
+            data=json.dumps({"query": q, "variables": v or {}}).encode(),
+            headers={"Content-Type": "application/json", **UA},
+        )
         try:
             return json.loads(urllib.request.urlopen(req, timeout=90).read())
         except Exception as e:  # noqa: BLE001
             return {"errors": [{"message": f"{type(e).__name__} {str(e)[:200]}"}]}
+
     return gql
 
 
@@ -63,7 +69,12 @@ def wait_ready(pod_id: str, limit_s: int = 25 * 60) -> bool:
     while time.time() - t0 < limit_s:
         time.sleep(20)
         try:
-            lines = urllib.request.urlopen(urllib.request.Request(b8189 + "/logs/boot.log", headers=UA), timeout=15).read().decode(errors="replace").splitlines()
+            lines = (
+                urllib.request.urlopen(urllib.request.Request(b8189 + "/logs/boot.log", headers=UA), timeout=15)
+                .read()
+                .decode(errors="replace")
+                .splitlines()
+            )
         except Exception:  # noqa: BLE001
             continue
         seen = len(lines)
@@ -74,7 +85,13 @@ def wait_ready(pod_id: str, limit_s: int = 25 * 60) -> bool:
         if any(m in text for m in boot.READY_MARKERS):
             for _ in range(16):  # ComfyUI needs a moment after the log says complete: the SVI node must be loaded
                 try:
-                    info = urllib.request.urlopen(urllib.request.Request(b8188 + "/object_info/WanImageToVideoSVIPro", headers=UA), timeout=20).read().decode()
+                    info = (
+                        urllib.request.urlopen(
+                            urllib.request.Request(b8188 + "/object_info/WanImageToVideoSVIPro", headers=UA), timeout=20
+                        )
+                        .read()
+                        .decode()
+                    )
                     if "WanImageToVideoSVIPro" in info:
                         return True
                 except Exception:  # noqa: BLE001
@@ -110,10 +127,20 @@ def main() -> None:
     files = {n: list(v) for n, v in {**ps.FILES, **ps.SVI_FILES}.items()}
 
     def make_input(cloud: str, gpu: str) -> dict:
-        return {"cloudType": cloud, "gpuCount": 1, "gpuTypeId": gpu, "name": f"projectv-film4k-{a.name}",
-                "imageName": "runpod/pytorch:2.8.0-py3.11-cuda12.8.1-cudnn-devel-ubuntu22.04", "containerDiskInGb": 130,
-                "volumeInGb": 0, "minVcpuCount": 4, "minMemoryInGb": 48, "ports": "8188/http,8189/http",
-                "dockerArgs": boot.docker_args(), "env": boot.pod_env(env["HF_TOKEN"], ps.KJ_TARBALL, files)}
+        return {
+            "cloudType": cloud,
+            "gpuCount": 1,
+            "gpuTypeId": gpu,
+            "name": f"projectv-film4k-{a.name}",
+            "imageName": "runpod/pytorch:2.8.0-py3.11-cuda12.8.1-cudnn-devel-ubuntu22.04",
+            "containerDiskInGb": 130,
+            "volumeInGb": 0,
+            "minVcpuCount": 4,
+            "minMemoryInGb": 48,
+            "ports": "8188/http,8189/http",
+            "dockerArgs": boot.docker_args(),
+            "env": boot.pod_env(env["HF_TOKEN"], ps.KJ_TARBALL, files),
+        }
 
     pod = rent.rent_pod(gql, make_input, say=say)
     if pod is None:
@@ -129,8 +156,15 @@ def main() -> None:
         say(f"cap: {e}")
         rent.terminate(gql, pod.id)
         sys.exit(3)
-    ok_lease = guard.start_guards(pod.id, f"projectv-film4k-{a.name}", "film 4k", str(state), minutes,
-                                  str(ROOT / "tools" / "gpu_lease" / "lease.py"), str(ROOT / "tools" / "bakeoff" / "killer.py"))
+    ok_lease = guard.start_guards(
+        pod.id,
+        f"projectv-film4k-{a.name}",
+        "film 4k",
+        str(state),
+        minutes,
+        str(ROOT / "tools" / "gpu_lease" / "lease.py"),
+        str(ROOT / "tools" / "bakeoff" / "killer.py"),
+    )
     say(f"guards started (lease {'confirmed' if ok_lease else 'NOT CONFIRMED'}), deadline {minutes} min")
     try:
         if not ok_lease:
@@ -160,8 +194,13 @@ def run_scene(comfy: Comfy, sb: dict, sid: int, out: Path) -> None:
     anchor = out / "work" / f"anchor{sid:02d}.png"
     subprocess.run(["ffmpeg", "-v", "error", "-i", str(kf), "-vf", f"scale={W}:{H}:flags=lanczos", str(anchor), "-y"], check=True)
     comfy.upload(str(anchor), anchor.name)
-    c = {"width": W, "height": H, "frames": 81, "negative": NEG,
-         "beats": [{"prompt": p + ", photoreal, cinematic", "seed": 1000 * sid + i} for i, p in enumerate(sc["beats"])]}
+    c = {
+        "width": W,
+        "height": H,
+        "frames": 81,
+        "negative": NEG,
+        "beats": [{"prompt": p + ", photoreal, cinematic", "seed": 1000 * sid + i} for i, p in enumerate(sc["beats"])],
+    }
     g = beat_video_nodes(ps.scene_graph(c, anchor.name, f"film_s{sid:02d}"), 3)
     for k in (1, 2, 3):
         g[f"w{k}"]["inputs"]["filename_prefix"] = f"video/film_s{sid:02d}_b{k}"

@@ -54,7 +54,7 @@ def fetch(segs: list[dict], tmp: Path) -> tuple[list[dict], list[str]]:
     if not key or not segs:
         return [], []
     entries, credits, cache = [], [], {}
-    for i, seg in enumerate(segs):
+    for _i, seg in enumerate(segs):
         dur = seg["endSec"] - seg["startSec"]
         try:
             if seg["query"] not in cache:

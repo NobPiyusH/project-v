@@ -30,7 +30,6 @@ from __future__ import annotations
 import argparse
 import base64
 import hmac
-import zipfile
 import io
 import json
 import os
@@ -44,8 +43,10 @@ import threading
 import time
 import urllib.request
 import uuid
+import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+
 
 def hub_env(environ=os.environ, has_hf_transfer=None) -> None:
     """Weight downloads skip Hugging Face xet from the first try (21 Nov 2026: xet failed every FLUX download on two
@@ -604,8 +605,8 @@ def fetch_comfy() -> Path:
             src = next(p for p in Path(tmp).iterdir() if p.is_dir())
             shutil.move(str(src), comfy)
         req = comfy / "requirements.txt"
-        lines = [ln for ln in req.read_text().splitlines() if ln.strip() and not ln.split("=")[0].split(">")[0].split("<")[0]
-                 .strip().lower() in ("torch", "torchvision", "torchaudio")]  # keep the image's CUDA torch
+        lines = [ln for ln in req.read_text().splitlines() if ln.strip() and ln.split("=")[0].split(">")[0].split("<")[0]
+                 .strip().lower() not in ("torch", "torchvision", "torchaudio")]  # keep the image's CUDA torch
         (ROOT / "comfy-req.txt").write_text("\n".join(lines))
         subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-r", str(ROOT / "comfy-req.txt")], check=True)
     return comfy

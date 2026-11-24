@@ -3,14 +3,17 @@
 `gql` is injected (a function taking a query string and variables and returning the parsed JSON), so this logic is tested with a
 fake. Never prints keys.
 """
+
 from __future__ import annotations
 
 import time
 from dataclasses import dataclass
 
 TERMINATE = "mutation($input: PodTerminateInput!){ podTerminate(input:$input) }"
-CREATE = ("mutation($input: PodFindAndDeployOnDemandInput){ podFindAndDeployOnDemand(input:$input)"
-          "{ id costPerHr desiredStatus machineId } }")
+CREATE = (
+    "mutation($input: PodFindAndDeployOnDemandInput){ podFindAndDeployOnDemand(input:$input)"
+    "{ id costPerHr desiredStatus machineId } }"
+)
 
 DEFAULT_GPUS = ("NVIDIA GeForce RTX 4090", "NVIDIA RTX A6000", "NVIDIA L40S", "NVIDIA A40")
 # Wan 2.2 14B fp8 + SVI peaks near 24 GB: a 4090 (24 GB) is enough, a 3090 works at lower resolution, 16 GB does not fit.
@@ -33,8 +36,15 @@ def terminate(gql, pod_id: str, tries: int = 5, sleep=time.sleep) -> bool:
     return False
 
 
-def rent_pod(gql, make_input, gpus=DEFAULT_GPUS, tiers=(("COMMUNITY", 0.55), ("SECURE", 0.89)),
-             say=print, clock=time.time, sleep=time.sleep) -> Pod | None:
+def rent_pod(
+    gql,
+    make_input,
+    gpus=DEFAULT_GPUS,
+    tiers=(("COMMUNITY", 0.55), ("SECURE", 0.89)),
+    say=print,
+    clock=time.time,
+    sleep=time.sleep,
+) -> Pod | None:
     """Try every (tier, gpu) pair in order. make_input(cloud, gpu) builds the RunPod input. Returns the first pod whose
     price is under that tier's ceiling, or None (stock gap: the caller waits and retries)."""
     for cloud, ceiling in tiers:

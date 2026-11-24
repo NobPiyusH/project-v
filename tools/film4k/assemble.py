@@ -4,6 +4,7 @@ Usage: python tools/film4k/assemble.py --dir E:/project-data/outputs/game-4k --n
 Reads beats4k/sNN_bK.mp4 (falls back to beats720 for a beat that has no 4K file), writes scenes/sceneNN.mp4 (kept, so a rerun resumes),
 <name>_4k_48fps.mp4 and <name>_720p_preview.mp4. Runs on the laptop GPU (RIFE ncnn/Vulkan, about 8 min per scene at 4K).
 """
+
 from __future__ import annotations
 
 import argparse
@@ -29,8 +30,24 @@ def beat_path(base: Path, sid: int, k: int) -> Path:
 
 
 def frame_count(path: Path) -> int:
-    out = subprocess.run(["ffprobe", "-v", "error", "-count_frames", "-select_streams", "v:0", "-show_entries",
-                          "stream=nb_read_frames", "-of", "csv=p=0", str(path)], capture_output=True, text=True, check=True).stdout
+    out = subprocess.run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-count_frames",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=nb_read_frames",
+            "-of",
+            "csv=p=0",
+            str(path),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
     return int(out.strip())
 
 
@@ -43,15 +60,47 @@ def build_scene(base: Path, sid: int, rife: str) -> Path:
     (tmp / "in").mkdir(parents=True)
     (tmp / "out").mkdir()
     ins = [a for k in (1, 2, 3) for a in ("-i", str(beat_path(base, sid, k)))]
-    ff(*ins, "-filter_complex", join_filter() + "," + camera_filter(sid), "-r", "16", "-c:v", "libx264", "-crf", "12",
-       "-preset", "veryfast", str(tmp / "scene16.mp4"), "-y")
+    ff(
+        *ins,
+        "-filter_complex",
+        join_filter() + "," + camera_filter(sid),
+        "-r",
+        "16",
+        "-c:v",
+        "libx264",
+        "-crf",
+        "12",
+        "-preset",
+        "veryfast",
+        str(tmp / "scene16.mp4"),
+        "-y",
+    )
     n = frame_count(tmp / "scene16.mp4")
     ff("-i", str(tmp / "scene16.mp4"), str(tmp / "in" / "%06d.png"), "-y")
-    subprocess.run([rife, "-i", str(tmp / "in"), "-o", str(tmp / "out"), "-m", "rife-v4.6", "-n", str(rife_target(n)), "-j", "1:1:1"],
-                   check=True, capture_output=True)
+    subprocess.run(
+        [rife, "-i", str(tmp / "in"), "-o", str(tmp / "out"), "-m", "rife-v4.6", "-n", str(rife_target(n)), "-j", "1:1:1"],
+        check=True,
+        capture_output=True,
+    )
     out.parent.mkdir(exist_ok=True)
-    ff("-framerate", "48", "-i", str(tmp / "out" / "%08d.png"), "-vf", GRADE, "-c:v", "libx265", "-crf", "17", "-preset", "fast",
-       "-tag:v", "hvc1", str(out), "-y")
+    ff(
+        "-framerate",
+        "48",
+        "-i",
+        str(tmp / "out" / "%08d.png"),
+        "-vf",
+        GRADE,
+        "-c:v",
+        "libx265",
+        "-crf",
+        "17",
+        "-preset",
+        "fast",
+        "-tag:v",
+        "hvc1",
+        str(out),
+        "-y",
+    )
     shutil.rmtree(tmp, ignore_errors=True)
     print(f"scene {sid:02d} done ({n} -> {rife_target(n)} frames)", flush=True)
     return out
@@ -70,7 +119,20 @@ def main() -> None:
     lst.write_text("".join(f"file '{p.as_posix()}'\n" for p in parts), encoding="utf-8")
     final = base / f"{a.name}_4k_48fps.mp4"
     ff("-f", "concat", "-safe", "0", "-i", str(lst), "-c", "copy", str(final), "-y")
-    ff("-i", str(final), "-vf", "scale=720:-2", "-c:v", "libx264", "-crf", "24", "-pix_fmt", "yuv420p", str(base / f"{a.name}_720p_preview.mp4"), "-y")
+    ff(
+        "-i",
+        str(final),
+        "-vf",
+        "scale=720:-2",
+        "-c:v",
+        "libx264",
+        "-crf",
+        "24",
+        "-pix_fmt",
+        "yuv420p",
+        str(base / f"{a.name}_720p_preview.mp4"),
+        "-y",
+    )
     print("ASSEMBLE DONE", a.name, flush=True)
 
 

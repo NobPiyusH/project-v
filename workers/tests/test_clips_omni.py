@@ -1,6 +1,7 @@
 """Gemini Omni clip path: request shape, audio dropped, tokens reported, failures contained (mocked, no spend)."""
 
 import base64
+from pathlib import Path
 from types import SimpleNamespace
 
 from workers.activities import clips as C
@@ -12,7 +13,7 @@ JOB = {"shotId": "s1-aaaaaaaa", "shotNumber": 2, "take": 1, "kind": "draft", "im
 def _patch(monkeypatch, create):
     monkeypatch.setattr(C, "get_bytes", lambda uri: b"png")
     monkeypatch.setattr(C, "gemini", lambda: SimpleNamespace(interactions=SimpleNamespace(create=create)))
-    monkeypatch.setattr(C, "run_ffmpeg", lambda args: open(args[-1], "wb").write(b"silent"))
+    monkeypatch.setattr(C, "run_ffmpeg", lambda args: Path(args[-1]).write_bytes(b"silent"))
     saved = {}
     monkeypatch.setattr(C, "put_file", lambda key, path, ct: saved.setdefault("uri", f"s3://b/{key}"))
     return saved

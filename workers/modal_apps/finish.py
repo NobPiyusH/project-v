@@ -11,7 +11,6 @@ come from the official GitHub repo at a pinned commit. Upscaling (SeedVR2) is pa
 GPU: one L4 for a whole batch (RIFE is light); the container scales down after 2 idle minutes (rule 8).
 """
 
-import io
 import time
 
 import modal

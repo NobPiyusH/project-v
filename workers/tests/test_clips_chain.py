@@ -135,7 +135,7 @@ def test_chain_groups_of_two_chain_1_to_2_and_3_to_4_but_cut_between(monkeypatch
 
 
 def test_a_failed_group_start_does_not_break_the_next_group(monkeypatch):
-    sent = _pod_setup(monkeypatch, fail_shot=1)
+    _pod_setup(monkeypatch, fail_shot=1)
     jobs = [_job(n) for n in (1, 2, 3, 4)]
     clips, _ = C._pod({"gpuUrl": "https://g.example/", "chain": True, "chainGroup": 2, "jobs": jobs}, "http://x", "v")
     assert clips[0]["uri"] is None and clips[1]["uri"] is None and "shot 1 has no clip" in clips[1]["error"]
