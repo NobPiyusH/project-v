@@ -51,17 +51,43 @@ def sample_times(shot: Shot, n: int) -> list[float]:
     return [round(shot.start + step * (i + 0.5), 3) for i in range(n)]
 
 
-def build_prompt(shot: Shot, frames: list[FrameRef], intent: str = "", rubric: dict[str, tuple[float, str]] = RUBRIC) -> JudgePrompt:
+def plan_times(shot: Shot, n: int, focus: tuple[float, ...] = (), min_gap: float = 0.12, extra: int = 3) -> list[float]:
+    """Frame times: n points spread from just after the first to just before the last frame (so the first and last frame give a
+    before/after pair for drift), plus `focus` moments the free checks flagged. Close duplicates are dropped; at most n + extra frames."""
+    pad = min(0.1, shot.duration / 4)
+    lo, hi = shot.start + pad, shot.end - pad
+    base = [lo + (hi - lo) * i / max(n - 1, 1) for i in range(n)]
+    times = list(base)
+    for t in focus:
+        if lo <= t <= hi and all(abs(t - x) >= min_gap for x in times) and len(times) < n + extra:
+            times.append(t)
+    return [round(t, 3) for t in sorted(times)]
+
+
+def build_prompt(shot: Shot, frames: list[FrameRef], intent: str = "", rubric: dict[str, tuple[float, str]] = RUBRIC,
+                 hints: tuple[str, ...] = ()) -> JudgePrompt:
     crit = "\n".join(f"- {k} (weight {w:.2f}): {desc}" for k, (w, desc) in rubric.items())
-    listing = "\n".join(f"Frame {i + 1}: t={f.t - shot.start:.2f}s into the shot" for i, f in enumerate(frames))
+    listing = "\n".join(f"Frame {i + 1}: t={f.t - shot.start:.2f}s" for i, f in enumerate(frames))
     keys = ", ".join(f'"{k}": <0-10>' for k in rubric)
+    flagged = ("Automatic checks flagged these moments, look closely there (they may be false alarms): " + "; ".join(hints) + "\n") if hints else ""
     text = (
-        f"You are a strict video QA reviewer. The {len(frames)} attached frames are evenly sampled, in order, from ONE shot "
-        f"({shot.duration:.1f}s) of an AI-generated film.\n"
+        f"You are a strict video QA reviewer. The {len(frames)} attached frames come, in time order, from ONE {shot.duration:.1f}s shot of an "
+        "AI-generated film. Frame 1 and the last frame are the start and end of the shot.\n"
         + (f"Intended content: {intent}\n" if intent else "")
-        + f"{listing}\n\nScore each criterion from 0 (unusable) to 10 (flawless):\n{crit}\n\n"
-        "List concrete defects. For each, give times in seconds relative to the shot start, a box (x, y, w, h as 0..1 fractions of the frame) "
-        "when the defect is local, and severity \"minor\" or \"major\".\n"
+        + f"{listing}\n\n"
+        "Do these checks in order, comparing frames with each other (not judging each frame alone):\n"
+        "1. COLOUR OF PARTS: for each main subject (for example a creature's wings, body, tail), note its colour in every frame. "
+        "A part whose hue changes in some frames and returns later (for example a dark wing turning blue) is a MAJOR defect: give the time span "
+        "and a box around that part.\n"
+        "2. SHAPE: do limbs, wings, faces keep the same shape and count? Melting, extra or missing parts are MAJOR.\n"
+        "3. REAL MOTION: compare the first and last frame. Moving characters or a camera move with parallax is real motion. If only the whole image "
+        "slides or zooms, or nothing changes except tiny shifts, report a MAJOR defect 'near-static' with box null.\n"
+        "4. Do NOT report normal film grain, soft focus, or small natural wobble as defects. Only list defects you can see in at least two frames "
+        "or that are large.\n"
+        + flagged
+        + f"\nThen score each criterion from 0 (unusable) to 10 (flawless):\n{crit}\n\n"
+        "For each defect give times in seconds relative to the shot start, a box (x, y, w, h as 0..1 fractions of the frame) "
+        'when the defect is local, and severity "minor" or "major".\n'
         "Reply with ONLY this JSON, nothing else:\n"
         f'{{"scores": {{{keys}}}, "defects": [{{"kind": "...", "severity": "major", "t0": 0.0, "t1": 1.0, '
         '"box": [x, y, w, h] or null, "note": "..."}]}'
@@ -207,15 +233,16 @@ class ShotJudgement:
 
 
 def judge_shot(video: str, shot: Shot, judge: Judge, repairs_done: int = 0, intent: str = "", cfg: dict[str, float] = THRESHOLDS,
+               focus: tuple[float, ...] = (), hints: tuple[str, ...] = (),
                extract: FrameExtractor = _ffmpeg_extract, workdir: str | None = None) -> ShotJudgement:  # fmt: skip
     """Sample frames, ask the injected judge, parse, decide. An unusable reply fails the shot (owner decides); it never auto-accepts."""
     work = Path(workdir or tempfile.mkdtemp(prefix="qgate_"))
     refs = []
-    for i, t in enumerate(sample_times(shot, int(cfg["frames_per_shot"]))):
+    for i, t in enumerate(plan_times(shot, int(cfg["frames_per_shot"]), focus)):
         path = str(work / f"{shot.id}_{i:02d}.jpg")
         extract(video, t, path)
         refs.append(FrameRef(t, path))
-    prompt = build_prompt(shot, refs, intent)
+    prompt = build_prompt(shot, refs, intent, hints=hints)
     try:
         verdict = parse_verdict(judge(prompt))
     except JudgeReplyError as e:

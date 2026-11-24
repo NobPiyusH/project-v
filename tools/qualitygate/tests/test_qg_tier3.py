@@ -111,3 +111,18 @@ def test_judge_shot_with_fake_judge_and_extractor(tmp_path):
 def test_unparseable_reply_fails_never_accepts(tmp_path):
     out = tier3.judge_shot("v.mp4", SHOT, lambda p: "I cannot help", extract=lambda *a: None, workdir=str(tmp_path))
     assert out.decision.action == "fail" and out.verdict is None
+
+
+def test_plan_times_spans_shot_and_adds_focus_moments():
+    t = tier3.plan_times(SHOT, 4)
+    assert len(t) == 4 and t[0] == pytest.approx(10.1) and t[-1] == pytest.approx(13.9)  # first/last frame = before/after pair
+    with_focus = tier3.plan_times(SHOT, 4, focus=(11.0, 10.15, 99.0))
+    assert 11.0 in with_focus and 99.0 not in with_focus and 10.15 not in with_focus  # outside the shot / too close to a sample
+    assert len(tier3.plan_times(SHOT, 4, focus=(10.7, 11.3, 11.9, 12.5, 13.2))) <= 4 + 3
+
+
+def test_prompt_includes_hints_and_comparison_checks():
+    refs = [tier3.FrameRef(10.5, "a.jpg"), tier3.FrameRef(12.0, "b.jpg")]
+    p = tier3.build_prompt(SHOT, refs, hints=("colour change near 11.2s",))
+    assert "colour change near 11.2s" in p.text and "COLOUR OF PARTS" in p.text and "near-static" in p.text
+    assert "colour change" not in tier3.build_prompt(SHOT, refs).text

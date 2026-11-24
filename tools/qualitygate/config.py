@@ -42,7 +42,7 @@ THRESHOLDS: dict[str, float] = {
     "chroma_warn_above": 0.9,
     "analysis_width": 640,  # frames are scaled to this width before sharpness is measured
     # --- Tier 3 (VLM judge) ---
-    "frames_per_shot": 6,
+    "frames_per_shot": 8,  # spread over the shot incl. first/last (before/after); up to 3 more at moments the free checks flagged
     "accept_score": 7.0,  # weighted score 0..10 at or above this (and no major defect) accepts
     "reroll_below": 4.0,  # weighted score below this is not worth a patch: reroll the whole shot
     "max_repairs_per_shot": 2,

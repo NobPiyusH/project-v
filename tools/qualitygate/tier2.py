@@ -113,3 +113,22 @@ def score_shot(motion_frames: list[FrameStat], sharp_frames: list[FrameStat], sh
         _grade("flicker", flicker, shot, None, None, cfg["flicker_fail_above"], cfg["flicker_warn_above"],
                f"luma jitter {flicker:.2f} (flicker above {cfg['flicker_warn_above']})"),
     ]  # fmt: skip
+
+
+def chroma_excursion_moment(frames: list[FrameStat], shot: Shot, half: int = 8) -> tuple[float, float] | None:
+    """(deviation, time) of the largest U/V chroma excursion in the shot, to point the judge at it. None without chroma data."""
+    fs = [f for f in _in_shot(frames, shot) if "UAVG" in f.stats and "VAVG" in f.stats]
+    best: tuple[float, float] | None = None
+    for key in ("UAVG", "VAVG"):
+        vals = [f.stats[key] for f in fs]
+        for i, v in enumerate(vals):
+            w = vals[max(0, i - half) : i + half + 1]
+            dev = abs(v - sum(w) / len(w))
+            if best is None or dev > best[0]:
+                best = (dev, fs[i].t)
+    return best
+
+
+def chroma_args(cfg: dict[str, float] = THRESHOLDS) -> list[str]:
+    """Colour pass (the gray passes above carry no chroma): per-frame UAVG/VAVG for `chroma_excursion_moment` and the colour_drift check."""
+    return ["-an", "-vf", f"scale={int(cfg['analysis_width'])}:-2,signalstats,metadata=print"]

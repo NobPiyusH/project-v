@@ -59,3 +59,7 @@ Separation: the plain `motion` score does not separate stills from real shots (p
 ## OpenAI judge backend (built, never run live)
 
 `tools/qualitygate/openai_judge.py`. CLI: `--judge openai --max-usd X` prints the worst-case estimate and exits 3; add `--confirm-spend` to make paid calls. The cap is mandatory, checked before every call against the worst case, and recorded per call in the shared gate ledger (tokens and USD are logged). The key comes from .env lazily and is never logged. Tested with fakes only; no live call has been made.
+
+### Judge tuning trial (25 Nov 2026, 7 calls, about $0.039 / Rs 3.5)
+
+Prompt v2 (ordered checks: colour of parts, shape, real motion with first/last frame comparison, no grain/soft-focus reports; 8 frames spread first-to-last plus a frame at a flagged moment). Results on Act 1 beats: the judge did NOT flag the blue wing in s01_b2 or s01_b3 (accepted at 8.7-9.0, even with a hint frame; the hint pointed at 0.25 s because the chroma peak sits at the shot start, while the wing turns blue around 0.8-1.2 s). It called s03_b1, s02_b1 and s06_b1 "near-static" (major), but s03 and s06 have real camera/subject motion by `independent_motion` (7.0 and 10.5), so its static call is unreliable. Policy suggestion: trust `independent_motion` for static, use the judge for shape/colour, and do not rely on it for the blue wing until frames are placed by a better colour-change detector (per-region, not whole-frame mean). Not wired into `gate.run_gate`: the chroma pass (`tier2.chroma_args`) is used only by the trial script.
