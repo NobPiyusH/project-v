@@ -1,0 +1,35 @@
+{
+  "ref": "HEAD",
+  "files": {
+    "markdown": 45,
+    "json": 16,
+    "yaml": 8,
+    "typescript": 53,
+    "sql": 43,
+    "shell": 2,
+    "powershell": 8,
+    "python": 318
+  },
+  "lines": {
+    "markdown": 3050,
+    "json": 3077,
+    "yaml": 693,
+    "typescript": 4386,
+    "sql": 818,
+    "shell": 53,
+    "powershell": 346,
+    "python": 38293
+  },
+  "tests": {
+    "python_files": 91,
+    "python_tests": 899,
+    "java_files": 0,
+    "java_tests": 0
+  },
+  "todo_notes": 6,
+  "has_ci_workflow": true,
+  "ruff": {
+    "total": 0,
+    "by_rule": {}
+  }
+}
