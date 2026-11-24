@@ -239,7 +239,7 @@ def test_offer_taken_and_nothing_cheap_enough_fails(v):
     p = provider(v)
     q = p.quote(SPEC)
     v.taken_asks.append("8")
-    with pytest.raises(Exception):
+    with pytest.raises(Exception):  # noqa: B017 - the exact error type is the provider client's own, any failure counts
         p.create(request(q))
     assert not v.created_asks
 
@@ -337,7 +337,7 @@ def test_terminate_destroys_and_treats_already_gone_as_done(v):
     v.destroy_status = 404
     p.terminate("778")  # already gone: fine
     v.destroy_status = 500
-    with pytest.raises(Exception):
+    with pytest.raises(Exception):  # noqa: B017 - the exact error type is the provider client's own, any failure counts
         p.terminate("779")
 
 

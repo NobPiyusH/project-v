@@ -1,5 +1,10 @@
 # Java to Python migration plan (staged, never big-bang)
 
+## Status, 24 Nov 2026 (S7 part 3: write replay, main merged)
+
+- Merged main (ruff config, pytest testpaths, CI); ruff is clean on `studio`, suite green (577 + 3).
+- Write replay: `python -m studio.contract.writes` (refuses the live database) fires 11 Python write routes (Dream create/hook/paths/review, autopilot idea/settings, video create, review minutes, producer settings/rule, Modal billing) at a throwaway copy of the live database with fakes, then compares every written row, by form, with rows Java wrote: **0 differences**. The copy was dropped afterwards. Not covered: responses of POSTs against Java (a second Java instance would touch live Temporal), so that stays open.
+
 ## Status, 23 Nov 2026 (S7 part 2: video routes, one worker, live read-only replay; branch claude/python-migration-88b813)
 
 **Every route of the Java API is now ported (ApiController, ProducerController, Dream, DreamGpu, Autopilot, Routing, Gpu*). Java stays live and stays the default; nothing is cut over.**
