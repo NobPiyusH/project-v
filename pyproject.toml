@@ -67,4 +67,4 @@ explicit = true
 
 [tool.pytest.ini_options]
 # tools/blender scripts need Blender's own Python (bpy): never collect them.
-testpaths = ["studio", "workers/tests", "tools/podkit", "tools/film4k", "tools/gpu_lease", "tools/vetting"]
+testpaths = ["studio", "workers/tests", "tools/podkit", "tools/film4k", "tools/gpu_lease", "tools/vetting", "tools/qualitygate"]
