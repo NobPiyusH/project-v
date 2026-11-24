@@ -1,0 +1,48 @@
+{
+  "ref": "725d198",
+  "files": {
+    "markdown": 37,
+    "gradle": 2,
+    "json": 11,
+    "yaml": 7,
+    "java": 192,
+    "sql": 43,
+    "typescript": 53,
+    "shell": 2,
+    "powershell": 5,
+    "python": 138
+  },
+  "lines": {
+    "markdown": 2759,
+    "gradle": 70,
+    "json": 2058,
+    "yaml": 655,
+    "java": 27654,
+    "sql": 818,
+    "typescript": 4386,
+    "shell": 53,
+    "powershell": 229,
+    "python": 13996
+  },
+  "tests": {
+    "python_files": 37,
+    "python_tests": 284,
+    "java_files": 54,
+    "java_tests": 395
+  },
+  "todo_notes": 1,
+  "has_ci_workflow": false,
+  "ruff": {
+    "total": 53,
+    "by_rule": {
+      "I001": 25,
+      "E702": 11,
+      "F401": 4,
+      "B007": 3,
+      "E401": 2,
+      "SIM115": 2,
+      "SIM905": 2,
+      "B023": 2
+    }
+  }
+}
