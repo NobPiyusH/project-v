@@ -65,6 +65,7 @@ class Settings:
     video_routes: bool = False  # serve the video pipeline routes: /api/videos, /api/shots, /api/producer, /api/budget... (STUDIO_VIDEO_ROUTES)
     jobs: bool = False  # run the periodic jobs: pod release checks every 30 s, autopilot tick every minute (STUDIO_JOBS)
     temporal_address: str = "127.0.0.1:7233"
+    temporal_namespace: str = "default"  # TEMPORAL_NAMESPACE: a rehearsal runs in its own namespace so the live workers never pick up its tasks
     dream_gpu_provider: str = "modal"  # modal (default, no pod) or broker (rented pods): projectv.dream.gpu-provider
     youtube_token_file: str = ".secrets/youtube-token.json"
     autopilot_zone: str = "Asia/Kolkata"
@@ -125,6 +126,7 @@ class Settings:
             video_routes=e.get("STUDIO_VIDEO_ROUTES", "true").lower() == "true",
             jobs=e.get("STUDIO_JOBS", "true").lower() == "true",
             temporal_address=e.get("TEMPORAL_ADDRESS", "127.0.0.1:7233"),
+            temporal_namespace=e.get("TEMPORAL_NAMESPACE", "default"),
             dream_gpu_provider=e.get("DREAM_GPU_PROVIDER", "modal"),
             youtube_token_file=e.get("YOUTUBE_TOKEN_FILE", ".secrets/youtube-token.json"),
             autopilot_zone=e.get("AUTOPILOT_ZONE", "Asia/Kolkata"),

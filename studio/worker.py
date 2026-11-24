@@ -39,7 +39,7 @@ def build(client, ctx, vctx=None):
 async def run(settings: Settings) -> None:
     from temporalio.client import Client
 
-    client = await Client.connect(settings.temporal_address)
+    client = await Client.connect(settings.temporal_address, namespace=settings.temporal_namespace)
     db = ThreadLocalPgDb(settings.dsn)
     ctx = build_dream_context(db, settings, gateway=TemporalGateway(client, asyncio.get_running_loop()))
     vctx = build_video_context(db, settings, dream_ctx=ctx)

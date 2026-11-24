@@ -57,3 +57,14 @@ def test_the_one_worker_for_video_dream_and_post_registers_every_python_workflow
             await env.shutdown()
 
     assert asyncio.run(main()) == queues.CONTROL
+
+
+def test_temporal_namespace_defaults_to_default_and_follows_the_environment(monkeypatch):
+    """A rehearsal sets TEMPORAL_NAMESPACE so the live workers (queue names are fixed) never pick up its tasks."""
+    from studio.api.wiring import LazyGateway
+
+    monkeypatch.delenv("TEMPORAL_NAMESPACE", raising=False)
+    assert Settings.from_env().temporal_namespace == "default"
+    monkeypatch.setenv("TEMPORAL_NAMESPACE", "rehearsal")
+    assert Settings.from_env().temporal_namespace == "rehearsal"
+    assert LazyGateway("x:1").namespace == "default" and LazyGateway("x:1", "rehearsal").namespace == "rehearsal"

@@ -84,7 +84,7 @@ def build_video_context(db: Db, s: Settings, *, llm: Any = None, gateway: Any = 
     presets = StylePresets(s.config_dir)
     assets = assets or AssetStore(db)
     llm = llm or (dream_ctx.dreams.llm if dream_ctx is not None else build_llm(s, ledger, pricing, budget, router))
-    gateway = gateway or (dream_ctx.gateway if dream_ctx is not None else LazyGateway(s.temporal_address))
+    gateway = gateway or (dream_ctx.gateway if dream_ctx is not None else LazyGateway(s.temporal_address, s.temporal_namespace))
     clip_progress = clip_progress or (dream_ctx.clip_progress if dream_ctx is not None else ClipProgress())
     diagram_lane, stock_lane = _flag("VIDEO_DIAGRAM_LANE"), _flag("VIDEO_STOCK_LANE")
     shot_bank = _flag("VIDEO_SHOT_BANK", "true")  # character/location bank in new shot plans; old stored plans load either way

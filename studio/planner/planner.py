@@ -17,7 +17,7 @@ from studio.workflow.stage import Stage
 log = logging.getLogger(__name__)
 
 VISUAL_TYPES = ["ai_video", "ai_image_motion", "motion_graphics", "stock_footage", "text_cards", "data_counter"]
-_DURATION = re.compile(r"(\d{1,3})\s*(seconds?|secs?|s|minutes?|mins?|m)\b", re.IGNORECASE)
+_DURATION = re.compile(r"(\d{1,3})[\s-]*(seconds?|secs?|s|minutes?|mins?|m)\b", re.IGNORECASE)
 
 
 @dataclass

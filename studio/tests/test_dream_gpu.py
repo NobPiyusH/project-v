@@ -246,3 +246,15 @@ def test_the_provider_setting_must_be_modal_or_broker(tmp_path):
     with pytest.raises(ValueError):
         DreamGpu(None, None, None, None, "salad")
     assert not DreamGpu(None, None, None, None, "modal").enabled() and uuid.uuid4()
+
+
+def test_pod_image_settings_read_the_documented_pod_names_first(monkeypatch):
+    from studio.api.wiring import _env
+
+    for n in ("POD_WARM_IMAGE", "GPU_WARM_IMAGE"):
+        monkeypatch.delenv(n, raising=False)
+    assert _env("POD_WARM_IMAGE", "GPU_WARM_IMAGE") == ""
+    monkeypatch.setenv("GPU_WARM_IMAGE", "old/name:1")
+    assert _env("POD_WARM_IMAGE", "GPU_WARM_IMAGE") == "old/name:1"
+    monkeypatch.setenv("POD_WARM_IMAGE", " ghcr.io/x/pod:warm ")
+    assert _env("POD_WARM_IMAGE", "GPU_WARM_IMAGE") == "ghcr.io/x/pod:warm"
