@@ -68,6 +68,15 @@ def second_difference_mean(values: list[float]) -> float:
     return _mean([abs(values[i] - (values[i - 1] + values[i + 1]) / 2) for i in range(1, len(values) - 1)])
 
 
+def max_deviation_from_moving_average(values: list[float], half: int = 8) -> float:
+    """Largest |x[i] - mean(x[i-half .. i+half])|: a short excursion from the shot's own recent level."""
+    out = 0.0
+    for i, v in enumerate(values):
+        w = values[max(0, i - half) : i + half + 1]
+        out = max(out, abs(v - sum(w) / len(w)))
+    return out
+
+
 def _grade(name: str, value: float, shot: Shot, fail_below: float | None, warn_below: float | None, fail_above: float | None,
            warn_above: float | None, msg: str) -> CheckResult:  # fmt: skip
     status = Status.PASS
@@ -90,7 +99,13 @@ def score_shot(motion_frames: list[FrameStat], sharp_frames: list[FrameStat], sh
     motion = _mean(ydif)
     sharp = _mean([f.stats["YAVG"] for f in b if "YAVG" in f.stats])
     flicker = second_difference_mean([f.stats["YAVG"] for f in a if "YAVG" in f.stats])
+    chroma = max(
+        max_deviation_from_moving_average([f.stats[k] for f in a if k in f.stats]) for k in ("UAVG", "VAVG")
+    )
+    drift = CheckResult("colour_drift", Status.WARN if chroma > cfg["chroma_warn_above"] else Status.PASS, round(chroma, 3), "",
+                        ((shot.start, shot.end),), f"chroma excursion {chroma:.2f} (warn above {cfg['chroma_warn_above']})", shot.id)  # fmt: skip
     return [
+        drift,
         _grade("motion", motion, shot, cfg["motion_fail_below"], cfg["motion_warn_below"], None, None,
                f"mean frame difference {motion:.2f} (near-static below {cfg['motion_warn_below']})"),
         _grade("sharpness", sharp, shot, cfg["sharp_fail_below"], cfg["sharp_warn_below"], None, None,

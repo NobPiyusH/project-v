@@ -18,6 +18,7 @@ def test_loudness_pass_and_fail():
     assert (lufs, peak) == (-14.6, -1.2)
     assert tier1.check_loudness(lufs, peak).status is Status.PASS
     assert tier1.check_loudness(-17.5, -3).status is Status.WARN
+    assert tier1.check_loudness(-21.1, -3).status is Status.WARN  # the accepted Act 1 cut
     assert tier1.check_loudness(-27.8, -3).status is Status.FAIL
     assert tier1.check_loudness(-14.0, 1.5).status is Status.FAIL  # clipping
     assert tier1.check_loudness(None, None).status is Status.FAIL

@@ -27,7 +27,7 @@ def test_parse_pairs_keys_with_frames():
 
 def test_moving_sharp_stable_shot_passes():
     r = results([0] + [4.0] * 19, [120 + i * 0.1 for i in range(20)], [3.0] * 20)
-    assert {k: v.status for k, v in r.items()} == {"motion": Status.PASS, "sharpness": Status.PASS, "flicker": Status.PASS}
+    assert all(v.status is Status.PASS for v in r.values()) and set(r) == {"motion", "sharpness", "flicker", "colour_drift"}
 
 
 def test_static_soft_flickery_shot_fails():
@@ -35,6 +35,24 @@ def test_static_soft_flickery_shot_fails():
     assert r["motion"].status is Status.FAIL
     assert r["sharpness"].status is Status.FAIL
     assert r["flicker"].status is Status.FAIL
+
+
+def test_colour_drift_flags_a_chroma_excursion():
+    def log(u):
+        rows = []
+        for i, x in enumerate(u):
+            rows.append(f"[m @ 0x1] frame:{i}    pts:{i}       pts_time:{i / 10}")
+            rows += [f"[m @ 0x1] lavfi.signalstats.{k}={v}" for k, v in (("UAVG", x), ("VAVG", 128), ("YAVG", 100), ("YDIF", 4))]
+        return chr(10).join(rows)
+
+    shot = Shot("s", 0, 3.0)
+    steady = tier2.parse_signalstats(log([128] * 30))
+    bump = tier2.parse_signalstats(log([128] * 10 + [130] * 8 + [128] * 12))
+
+    def drift(fr):
+        return {r.name: r for r in tier2.score_shot(fr, fr, shot)}["colour_drift"]
+
+    assert drift(steady).status is Status.PASS and drift(bump).status is Status.WARN
 
 
 def test_cut_frame_does_not_fake_motion():

@@ -5,8 +5,8 @@ from __future__ import annotations
 THRESHOLDS: dict[str, float] = {
     # --- Tier 1 (ffmpeg, whole video) ---
     "target_lufs": -14.0,  # streaming loudness target for a finished video
-    "lufs_warn_delta": 2.0,  # |measured - target| above this warns
-    "lufs_fail_delta": 6.0,  # ... and above this fails (too quiet or crushed)
+    "lufs_warn_delta": 3.0,  # |measured - target| above this warns (act1_cut_v3, a cut the owner accepted, measures -21.1: warn, not fail)
+    "lufs_fail_delta": 9.0,  # ... and above this fails (-23 EBU R128 style masters stay a pass-with-warning)
     "true_peak_fail_db": 0.0,  # true peak above 0 dBTP clips
     "black_min_s": 0.25,  # shortest black run reported
     "black_edge_ok_s": 1.0,  # black at the very start/end up to this long is a fade, not a defect
@@ -37,6 +37,9 @@ THRESHOLDS: dict[str, float] = {
     "lm_fps": 4.0,  # frames sampled per second for this analysis
     "lm_gap_s": 0.5,  # frame pairs this far apart are compared
     "lm_width": 160,
+    # colour drift = largest deviation of a shot's mean U or V chroma (0..255) from its own 17-frame moving average. Warn only: a sky-blue
+    # wing for ~2 s in scene 1 gives about 1.0-1.1 (beats s01_b2, s01_b3); other Act 1 beats 0.1-0.5; camera_scene_720p 0.8.
+    "chroma_warn_above": 0.9,
     "analysis_width": 640,  # frames are scaled to this width before sharpness is measured
     # --- Tier 3 (VLM judge) ---
     "frames_per_shot": 6,

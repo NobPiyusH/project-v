@@ -10,12 +10,13 @@ Prints a short report, then the JSON. Exit code 1 if any check fails. `shots.jso
 
 | Tier | Check | How | Fails when |
 |---|---|---|---|
-| 1 | Loudness | `ebur128` | more than 6 LU from -14 LUFS (warn at 2 LU), or true peak above 0 dBTP |
+| 1 | Loudness | `ebur128` | more than 9 LU from -14 LUFS (warn at 3 LU), or true peak above 0 dBTP |
 | 1 | Black frames | `blackdetect` | a black run of 1 s or more away from the start/end fades (shorter warns) |
 | 1 | Frozen frames | `freezedetect` | a frozen run of 2 s or more (shorter warns) |
 | 1 | Captions | SRT parse | a cue outside the video, or overlapping; warns on cues under 0.7 s or over 7 s; reading speed over 20 cps warns, over 25 fails |
 | 2 | Motion | mean luma difference between frames, per shot | below 0.25 (warn below 0.6): near-static shot |
 | 2 | Independent motion | motion left after removing one global camera move (pan/zoom/rotate fit); needs numpy, else `skip` | below 1.5 (warn below 4.5): a slid or zoomed still, or a static shot |
+| 2 | Colour drift | largest chroma (U/V mean) excursion from the shot's own 17-frame average | warn above 0.9 (never fails) |
 | 2 | Sharpness | mean edge (Laplacian) response at 640 px wide | below 0.8 (warn below 1.6) |
 | 2 | Flicker | mean absolute second difference of per-frame mean luma | above 4.0 (warn above 1.5) |
 
@@ -38,3 +39,19 @@ Pass `judge=` to `gate.run_gate(...)` to enable it. The CLI's `--judge on` exits
 ## Tests
 
 `uv run --group dev python -m pytest tools/qualitygate`. Parsers and decisions are tested on canned text; one module builds a tiny clip with ffmpeg itself and is skipped if ffmpeg is missing.
+
+## Calibration (25 Nov 2026, Act 1 clips on E:, read-only)
+
+Good = `act1_cut_v3` (22 auto-detected shots), `camera_scene_720p`, real moving beats. Bad = panned/zoomed stills made from a keyframe, near-static scenes, scene 1's blue-wing moment.
+
+| Clip | motion | indep. motion | colour drift | loudness | Verdict |
+|---|---|---|---|---|---|
+| act1_cut_v3 (22 shots) | 3.5-9.3 | 3.1-35.6; three shots 3.1, 4.1, 4.2 warn | not measured on the whole cut | -21.1 LUFS (warn) | pass, 3 shots to look at |
+| camera_scene_720p | 5.4 | 10.2 | 0.8 | silent | pass |
+| s03, s06 beats (real motion) | 4.9-8.9 | 7.0-10.5 | 0.3 | n/a | pass |
+| s02, s05 beats (near-static?) | 0.9-1.3 | 2.7-3.3 | 0.1-0.2 | n/a | independent motion warns |
+| panned still (synthetic) | 4.2 | 0.9 | n/a | n/a | fails |
+| zoomed still (synthetic) | 3.4 | 3.4 | n/a | n/a | warns |
+| s01_b2, s01_b3 (blue wing scene) | 3.2-3.9 | 8.1 | 1.0-1.1 | n/a | colour drift warns |
+
+Separation: the plain `motion` score does not separate stills from real shots (panned still 4.2 vs real near-static 0.9-1.3). Independent motion does for panned stills (0.9 vs at least 2.7) and flags the near-static beats as warnings; a zoomed still (3.4) overlaps the near-static real beats (2.7-3.3), so warn means "look at it". Colour drift separates scene 1's beats from the others only weakly (1.0-1.1 vs 0.1-0.5, camera_scene 0.8): treat it as a hint, the VLM judge is the real colour check. Sample size is small and the exact blue-wing window (0.6-2.7 s) was not isolated per frame.
