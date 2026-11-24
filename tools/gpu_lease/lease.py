@@ -49,8 +49,19 @@ def release(pod_id):
     psql(f"UPDATE gpu_pod_lease SET released_at = now() WHERE pod_id = '{pod_id}' AND released_at IS NULL")
 
 
-def keep(provider, pod_id, name, purpose, state=None, max_minutes=170):
-    open_lease(provider, pod_id, name, purpose)
+def keep(provider, pod_id, name, purpose, state=None, max_minutes=170, tries=6, wait_s=10):
+    """Open the lease (retrying: Docker may still be starting), then heartbeat. If the lease cannot be opened at all, say so
+    LOUDLY and exit 2: a pod with no lease is protected by its kill-timer only (24 Nov 2026: Docker was off and this died silently)."""
+    for attempt in range(1, tries + 1):
+        try:
+            open_lease(provider, pod_id, name, purpose)
+            break
+        except Exception as e:  # noqa: BLE001
+            print(f"lease open failed ({attempt}/{tries}): {e}", file=sys.stderr, flush=True)
+            if attempt == tries:
+                print("NO LEASE: the studio watchdog does not protect this pod; only the kill-timer does", file=sys.stderr, flush=True)
+                sys.exit(2)
+            time.sleep(wait_s)
     end = time.time() + max_minutes * 60
     misses = 0
     while time.time() < end:
@@ -87,6 +98,8 @@ if __name__ == "__main__":
             else:
                 rest.append(a[i]); i += 1
         keep(rest[0], rest[1], rest[2], rest[3] if len(rest) > 3 else "test", opts.get("--state"), int(opts.get("--max-minutes", 170)))
+    elif cmd == "ping":  # is the studio database (Docker) reachable? exit 0 = yes
+        print("database ok" if psql("select 1") == "1" else "database NOT ok")
     elif cmd == "open":
         open_lease(a[1], a[2], a[3], a[4] if len(a) > 4 else "test"); print("lease opened")
     elif cmd == "heartbeat":

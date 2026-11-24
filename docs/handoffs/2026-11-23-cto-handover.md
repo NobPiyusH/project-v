@@ -79,3 +79,10 @@ Done after the owner said "approved all" and "yes push":
 - **Running:** side sessions `zoom-2d` (Manim, free, local) and `zoom-3d` (Blender, local preview + firm render cost, no pod) for a 30 s no-cut Moon-Earth-Sun-Milky Way zoom.
 - **Unreal:** Epic launcher installed and signed in, but the Install Engine dialog never opens (EpicWebHelper startup timeout, "ue is not defined"); web cache moved to `webcache_4430.bak-claude`. Owner to try Run as administrator or reinstall the launcher.
 - **Spend today (RunPod):** balance $4.66 -> $3.31. Vast also used (about $0.4). No pods running at 23:52 IST. One stale lease row (Salad, 19 Nov, heartbeat stopped) is unreleased; Salad shows 0 container groups, so nothing bills.
+
+## Status update, 24 Nov 2026 (CTO chat, owner away; branch `claude/film4k-pipeline`)
+- **3-minute 4K game film, Act 1 (scenes 1-8):** generated and upscaled on 3 pods (about $3.15 incl. keyframes, cap approved $4.00); laptop assembly running (`E:\project-data\outputs\game-4k\`, output `act1_4k_48fps.mp4`). Camera barely moves with SVI: a post camera move was added. **Act 2 (scenes 9-15, 7 keyframes made, $0.19) NOT started: the auto-mode check blocked the pod launch because the owner approved $4 only. Needs his yes and a total cap of about $6.00.**
+- **Code on `claude/film4k-pipeline` (not on main, not merged):** `tools/podkit/` (ledger cap, rent fallback, boot script fixed, fail-closed guards), `tools/film4k/` (storyboard of 15 scenes, run_shard, assemble, camera), `tools/gpu_lease/lease.py` (fails loudly), `tools/ops/` Wi-Fi keep-alive (profiles auto-detected, no SSIDs in git), `docs/film4k.md`. 24 tests pass. run_shard.py has not run on a real pod.
+- **Docker was off** when pods ran (lease helper failed silently): fixed in code; Docker restarted by hand. The Java backend is still down (not started).
+- **Money picture:** RunPod balance about $6-7 after Act 1; Google/Gemini returns 403 "outstanding balance" (owner must pay); OpenAI/Claude unaffected.
+- **Open:** the hosted-model A/B (Seedance/Veo/Wan hosted) showed the same photographic start image makes hosted and own-pod Wan close; our pod route is far cheaper.
