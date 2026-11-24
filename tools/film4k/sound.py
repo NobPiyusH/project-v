@@ -40,3 +40,63 @@ def build_graph(duration: float, cuts: list[float], music_index: int | None = No
         f"afade=t=out:st={max(0.0, duration - 1.5):.2f}:d=1.5[aout]"
     )
     return [], ";".join(parts)
+
+
+# --- final loudness normalisation (two-pass ffmpeg loudnorm, linear mode) -----------------------------------------------------
+# The procedural bed measured -21.1 LUFS on act1_cut_v3; YouTube plays about -14. Last audio step of the render, flag-controlled.
+LOUDNORM_I = -14.0
+LOUDNORM_TP = -1.5
+LOUDNORM_LRA = 11.0
+
+
+def loudnorm_enabled(value: str | None = None) -> bool:
+    """Default ON. FILM_LOUDNORM=0/false/off/no switches it off."""
+    import os
+
+    raw = os.environ.get("FILM_LOUDNORM", "") if value is None else value
+    return raw.strip().lower() not in {"0", "false", "off", "no"}
+
+
+def loudnorm_measure_filter(i: float = LOUDNORM_I, tp: float = LOUDNORM_TP, lra: float = LOUDNORM_LRA) -> str:
+    """Pass 1: analyse only (JSON printed to stderr)."""
+    return f"loudnorm=I={i}:TP={tp}:LRA={lra}:print_format=json"
+
+
+def parse_loudnorm_json(stderr: str) -> dict[str, float]:
+    """The measured_* values from the JSON block loudnorm prints at the end of pass 1."""
+    import json
+
+    start, end = stderr.rfind("{"), stderr.rfind("}")
+    if start < 0 or end < start:
+        raise ValueError("no loudnorm JSON in ffmpeg output")
+    data = json.loads(stderr[start : end + 1])
+    keys = {"input_i": "i", "input_tp": "tp", "input_lra": "lra", "input_thresh": "thresh", "target_offset": "offset"}
+    try:
+        return {short: float(data[k]) for k, short in keys.items()}
+    except KeyError as e:
+        raise ValueError(f"loudnorm JSON lacks {e}") from e
+
+
+def loudnorm_apply_filter(m: dict[str, float], i: float = LOUDNORM_I, tp: float = LOUDNORM_TP, lra: float = LOUDNORM_LRA) -> str:
+    """Pass 2: linear mode with the pass-1 measurements. Output stays at 48 kHz (loudnorm upsamples internally)."""
+    return (
+        f"loudnorm=I={i}:TP={tp}:LRA={lra}:measured_I={m['i']}:measured_TP={m['tp']}:measured_LRA={m['lra']}"
+        f":measured_thresh={m['thresh']}:offset={m['offset']}:linear=true:print_format=summary,aresample=48000"
+    )
+
+
+def linear_feasible(m: dict[str, float], i: float = LOUDNORM_I, tp: float = LOUDNORM_TP) -> bool:
+    """Linear loudnorm needs the peaks to survive the gain. The procedural bed (hits 20 dB over its average) never does:
+    ffmpeg then silently falls back to dynamic mode and clips after AAC, so that case takes the gain + limiter path."""
+    return m["tp"] + (i - m["i"]) <= tp
+
+
+def gain_limit_filter(gain_db: float, tp: float = LOUDNORM_TP) -> str:
+    """Fallback pass 2: plain gain, a pre-limiter that tames the hits, then a 4x-oversampled limiter 0.5 dB under the
+    true-peak target so AAC overshoot stays below it. (Tuned on act1_cut_v3: 12 dB gain gave -14.0 LUFS, -1.5 dBTP after AAC.)"""
+    pre = 10 ** ((tp - 1.5) / 20)  # about -3 dBFS
+    ceiling = 10 ** ((tp - 1.0) / 20)  # about -2.5 dBFS
+    return (
+        f"volume={gain_db:.2f}dB,alimiter=limit={pre:.3f}:attack=5:release=50:level=disabled,"
+        f"aresample=192000,alimiter=limit={ceiling:.3f}:attack=2:release=30:level=disabled,aresample=48000"
+    )

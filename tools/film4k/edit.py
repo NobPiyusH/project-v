@@ -193,6 +193,41 @@ def probe_duration(path: Path) -> float:
     return float(out.strip())
 
 
+def measure_loudness(src: Path) -> dict[str, float]:
+    import sound
+
+    p = subprocess.run(
+        ["ffmpeg", "-hide_banner", "-nostats", "-i", str(src), "-af", sound.loudnorm_measure_filter(), "-f", "null", "-"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return sound.parse_loudnorm_json(p.stderr)
+
+
+def normalise_loudness(src: Path, dst: Path, tolerance: float = 0.3) -> Path:
+    """Two-pass loudness normalisation (about -14 LUFS, -1.5 dBTP, LRA 11) as the last audio step: measure, then apply with the
+    measurements (ffmpeg loudnorm, linear). When linear cannot hold the peak (peaky procedural bed) use gain + limiter, re-measuring
+    the result and correcting the gain up to 3 times."""
+    import sound
+
+    m = measure_loudness(src)
+    print(f"loudnorm pass 1: {m['i']:.1f} LUFS, {m['tp']:.1f} dBTP, LRA {m['lra']:.1f}", flush=True)
+    if sound.linear_feasible(m):
+        ff("-i", str(src), "-af", sound.loudnorm_apply_filter(m), "-c:a", "pcm_s16le", str(dst), "-y")
+        return dst
+    gain = sound.LOUDNORM_I - m["i"]
+    for _ in range(3):
+        ff("-i", str(src), "-af", sound.gain_limit_filter(gain), "-c:a", "pcm_s16le", str(dst), "-y")
+        got = measure_loudness(dst)["i"]
+        print(f"loudnorm pass 2 (gain {gain:+.1f} dB + limiter): {got:.1f} LUFS", flush=True)
+        err = sound.LOUDNORM_I - got
+        if abs(err) <= tolerance:
+            break
+        gain += err
+    return dst
+
+
 def render(base: Path, name: str, scene_ids: list[int], w: int, h: int, seed: int = 0, audio: bool = False) -> Path:
     cut = base / "cut" / name
     cut.mkdir(parents=True, exist_ok=True)
@@ -257,16 +292,19 @@ def render(base: Path, name: str, scene_ids: list[int], w: int, h: int, seed: in
 
         final = base / f"{name}.mp4"
         inputs, graph = sound.build_graph(total, cut_times(all_shots))
+        mix = base / f"{name}_mix.wav"
+        ff("-filter_complex", graph, "-map", "[aout]", "-c:a", "pcm_s16le", str(mix), "-y")
+        if sound.loudnorm_enabled():
+            mix = normalise_loudness(mix, base / f"{name}_mix_norm.wav")
         ff(
             "-i",
             str(silent),
-            *inputs,
-            "-filter_complex",
-            graph,
+            "-i",
+            str(mix),
             "-map",
             "0:v",
             "-map",
-            "[aout]",
+            "1:a",
             "-c:v",
             "copy",
             "-c:a",
