@@ -41,6 +41,10 @@ class JudgeReplyError(ValueError):
     """The model's reply could not be turned into a verdict."""
 
 
+class JudgeUnavailable(RuntimeError):
+    """The backend could not judge (spend cap reached, network or HTTP error). The shot fails to the owner; nothing is auto-accepted."""
+
+
 def sample_times(shot: Shot, n: int) -> list[float]:
     """Midpoints of n equal slices of the shot, so no sample lands on a cut."""
     step = shot.duration / n
@@ -216,4 +220,6 @@ def judge_shot(video: str, shot: Shot, judge: Judge, repairs_done: int = 0, inte
         verdict = parse_verdict(judge(prompt))
     except JudgeReplyError as e:
         return ShotJudgement(shot.id, None, Decision("fail", f"judge reply unusable: {e}"), [r.path for r in refs])
+    except JudgeUnavailable as e:
+        return ShotJudgement(shot.id, None, Decision("fail", f"judge unavailable: {e}"), [r.path for r in refs])
     return ShotJudgement(shot.id, verdict, decide(verdict, shot, repairs_done, cfg), [r.path for r in refs])

@@ -44,5 +44,7 @@ def test_cli_json_and_exit_code(clip, capsys):
     assert json.loads(capsys.readouterr().out)["status"] == "fail"
 
 
-def test_cli_judge_on_needs_backend(clip):
-    assert main([str(clip / "clip.mp4"), "--judge", "on"]) == 2
+def test_cli_openai_judge_needs_cap_and_confirmation(clip, capsys):
+    assert main([str(clip / "clip.mp4"), "--judge", "openai"]) == 2  # no cap
+    assert main([str(clip / "clip.mp4"), "--judge", "openai", "--max-usd", "0.2"]) == 3  # estimate only, nothing sent
+    assert "worst case" in capsys.readouterr().err

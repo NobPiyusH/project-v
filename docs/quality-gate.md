@@ -55,3 +55,7 @@ Good = `act1_cut_v3` (22 auto-detected shots), `camera_scene_720p`, real moving 
 | s01_b2, s01_b3 (blue wing scene) | 3.2-3.9 | 8.1 | 1.0-1.1 | n/a | colour drift warns |
 
 Separation: the plain `motion` score does not separate stills from real shots (panned still 4.2 vs real near-static 0.9-1.3). Independent motion does for panned stills (0.9 vs at least 2.7) and flags the near-static beats as warnings; a zoomed still (3.4) overlaps the near-static real beats (2.7-3.3), so warn means "look at it". Colour drift separates scene 1's beats from the others only weakly (1.0-1.1 vs 0.1-0.5, camera_scene 0.8): treat it as a hint, the VLM judge is the real colour check. Sample size is small and the exact blue-wing window (0.6-2.7 s) was not isolated per frame.
+
+## OpenAI judge backend (built, never run live)
+
+`tools/qualitygate/openai_judge.py`. CLI: `--judge openai --max-usd X` prints the worst-case estimate and exits 3; add `--confirm-spend` to make paid calls. The cap is mandatory, checked before every call against the worst case, and recorded per call in the shared gate ledger (tokens and USD are logged). The key comes from .env lazily and is never logged. Tested with fakes only; no live call has been made.
