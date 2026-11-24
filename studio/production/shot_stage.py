@@ -4,6 +4,7 @@ run right after the shot plan so a shot with no match is back on the AI lane bef
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -22,6 +23,7 @@ from studio.media.types import (
     StockRequest,
     StockResult,
 )
+from studio.planner.bank import BeatPlan, bank_problems, beat_prompt, clean_ids, known_ids, references
 from studio.production import timing as nt
 from studio.production.records import ImagePolicy, StoredScript
 from studio.production.support import ProductionDeps, StageSupport, diagram_shot, round3, stock_shot
@@ -34,6 +36,7 @@ from studio.workflow.types import StageResult
 NO_WRITING = ". No text, letters, numbers, logos or writing anywhere in the picture"
 GEMINI_IMAGE = "gemini_image"
 ZIMAGE = "modal_zimage"
+log = logging.getLogger(__name__)
 
 
 def _j(v: Any) -> str:
@@ -47,12 +50,13 @@ def _blank(s: str | None) -> bool:
 
 class ShotStage(StageSupport):
     def __init__(self, d: ProductionDeps, router: Any = None, video_gpu: VideoGpu | None = None, diagrams: Any = None,
-                 stock_lane: bool = False):
+                 stock_lane: bool = False, shot_bank: bool = True):
         super().__init__(d)
         self.router = router
         self.video_gpu = video_gpu  # None in tests; FLUX keyframes on the pod only with projectv.video.provider-keyframes=broker
         self.diagrams = diagrams  # None in tests; used only with projectv.video.diagram-lane=true
         self.stock_lane = stock_lane  # projectv.video.stock-lane (default off)
+        self.shot_bank = shot_bank  # VIDEO_SHOT_BANK (default on): bank descriptions pasted into every shot that names them
 
     def release_gpu(self, video_id: uuid.UUID, why: str) -> None:
         """Lets go of the rented GPU pod after a keyframe batch (no-op unless provider-keyframes=broker)."""
@@ -94,6 +98,10 @@ class ShotStage(StageSupport):
             raise RuntimeError("The director returned no shots")
         shots = sp.shots
         is_short = plan.format == "short"
+        bank = sp.bank if self.shot_bank else None
+        dropped = 0
+        for line in bank_problems(bank):  # a bad bank entry is not pasted anywhere; the owner sees it in the summary
+            log.warning("shot plan bank (%s): %s", video_id, line)
 
         # Narration drives the timeline: fixed start per line from the real voice lengths (no drift, nothing cut).
         timing = nt.plan([nt.Line(ln.index, ln.spoken and ln.duration_sec is not None, 0.0 if ln.duration_sec is None else ln.duration_sec)
@@ -143,6 +151,25 @@ class ShotStage(StageSupport):
                 priority = "hero" if i in hero_idx else "standard"
                 heroes += priority == "hero"
                 prompt: dict[str, Any] = {"keyframePrompt": s.keyframePrompt, "motionPrompt": s.motionPrompt, "lineIndex": s.lineIndex}
+                if bank is not None and not bank.empty():
+                    chars, locs = known_ids(bank, s.characterIds, s.locationIds)
+                    dropped += len(clean_ids(s.characterIds)) + len(clean_ids(s.locationIds)) - len(chars) - len(locs)
+                    beat = BeatPlan(prompt=s.keyframePrompt, characterIds=chars, locationIds=locs, continuity=s.continuity)
+                    if not _blank(s.keyframePrompt):  # a diagram or stock shot may have none: nothing to pin down
+                        prompt["keyframePrompt"] = beat_prompt(bank, beat, "image")
+                    if not _blank(s.motionPrompt):
+                        beat.prompt = s.motionPrompt
+                        prompt["motionPrompt"] = beat_prompt(bank, beat, "video")
+                    if chars or locs:
+                        prompt["characterIds"], prompt["locationIds"] = chars, locs
+                        refs = references(bank, chars, locs)
+                        if refs:
+                            prompt["bankReferences"] = refs
+                if s.continuity and s.continuity.strip():
+                    prompt["continuity"] = s.continuity.strip()
+                claims = [c.strip() for c in s.claims or [] if c is not None and c.strip()]
+                if claims:
+                    prompt["claims"] = claims  # for a later verifier; nothing reads them yet
                 if not _blank(s.sfxQuery):
                     prompt["sfxQuery"] = s.sfxQuery.strip()
                 if not _blank(s.referenceQuery):
@@ -165,6 +192,10 @@ class ShotStage(StageSupport):
                      "desc": s.description, "prompt": json.dumps(prompt, separators=(",", ":")), "prio": priority,
                      "overlay": None if _blank(s.overlayText) else s.overlayText})
         warning = "" if timing.warning is None else " " + timing.warning
+        if bank is not None and not bank.empty():
+            warning += f" Bank: {len(bank.characters or [])} characters, {len(bank.locations or [])} locations pasted word for word."
+            if dropped:
+                warning += f" {dropped} unknown bank id(s) were ignored."
         return StageResult.of(f"{len(shots)} shots in {scene_ord} scenes over {fixed(total, 0)}s ({heroes} hero); every narration line starts "
                               f"on its own shot, other cuts on the {fixed(bpm, 0)} BPM beat grid.{warning}",
                               json.dumps(sp.model_dump(), separators=(",", ":")))

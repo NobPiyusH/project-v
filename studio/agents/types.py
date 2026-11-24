@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
+from studio.planner.bank import Bank
+
 
 class Act(BaseModel):
     title: str | None = None
@@ -59,6 +61,12 @@ class PlannedShot(BaseModel):
     referenceQuery: str | None = None  # noqa: N815
     sfxQuery: str | None = None  # noqa: N815
     lane: str | None = None
+    # Bank (studio/planner/bank.py), all optional: bank ids this shot uses, what must stay as in the previous shot, and the factual
+    # claims its line makes (kept for a later verifier).
+    characterIds: list[str] | None = None  # noqa: N815
+    locationIds: list[str] | None = None  # noqa: N815
+    continuity: str | None = None
+    claims: list[str] | None = None
 
     def stock(self) -> bool:
         return (self.lane or "").lower() == "stock"
@@ -69,6 +77,7 @@ class PlannedShot(BaseModel):
 
 class ShotPlan(BaseModel):
     shots: list[PlannedShot] | None = None
+    bank: Bank | None = None  # characters and locations described once; shots name them by id
 
 
 # ---- Creative Director: story-level review at three levels (shot, paragraph/act, whole video). Scores 1-5.

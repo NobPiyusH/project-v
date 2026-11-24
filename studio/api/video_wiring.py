@@ -87,8 +87,9 @@ def build_video_context(db: Db, s: Settings, *, llm: Any = None, gateway: Any = 
     gateway = gateway or (dream_ctx.gateway if dream_ctx is not None else LazyGateway(s.temporal_address))
     clip_progress = clip_progress or (dream_ctx.clip_progress if dream_ctx is not None else ClipProgress())
     diagram_lane, stock_lane = _flag("VIDEO_DIAGRAM_LANE"), _flag("VIDEO_STOCK_LANE")
+    shot_bank = _flag("VIDEO_SHOT_BANK", "true")  # character/location bank in new shot plans; old stored plans load either way
     writer = WriterAgent(llm, presets, s.story_model, s.script_model)
-    director = DirectorAgent(llm, presets, s.story_model, diagram_lane, stock_lane)
+    director = DirectorAgent(llm, presets, s.story_model, diagram_lane, stock_lane, shot_bank)
     deps = ProductionDeps(db, writer, director, assets, ledger, pricing, budget, presets, text_model=s.text_model,
                           tts_model=env("GEMINI_TTS_MODEL", "gemini-3.8-flash-tts,gemini-3.1-flash-tts-preview"),
                           image_model=env("GEMINI_IMAGE_MODEL", "gemini-nano-banana-2.1,gemini-3.1-flash-image"),
@@ -104,7 +105,7 @@ def build_video_context(db: Db, s: Settings, *, llm: Any = None, gateway: Any = 
     inspector = Inspector(deps)
     creative = CreativeDirector(deps, CreativeDirectorAgent(llm), env("GEMINI_VISION_MODEL", "gemini-3.6-flash,gemini-3.5-flash,gemini-3.5-flash-lite"))
     research, story, music, voice, animatic = ResearchStage(deps), StoryStage(deps), MusicStage(deps), VoiceStage(deps), AnimaticStage(deps)
-    shots = ShotStage(deps, router, video_gpu, None, stock_lane)
+    shots = ShotStage(deps, router, video_gpu, None, stock_lane, shot_bank)
     stock = StockStage(deps, stock_lane, _flag("VIDEO_STOCK_PEXELS"), _flag("VIDEO_STOCK_PIXABAY"), _flag("VIDEO_STOCK_COMMONS"), _flag("VIDEO_STOCK_ARCHIVE"))
     video = VideoStage(deps, env("PROJECTV_VIDEO_MODAL_APP", "projectv-wan"), env("PROJECTV_VIDEO_MODAL_CLASS", "Wan"), public_url, approve,
                        draft_provider=env("VIDEO_PROVIDER_DRAFT", "wan"), final_provider=env("VIDEO_PROVIDER_FINAL", "omni"),

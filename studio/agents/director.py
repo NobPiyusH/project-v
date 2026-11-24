@@ -26,6 +26,18 @@ DIAGRAM_RULE = """- lane: "ai_video" (default) or "diagram". Use "diagram" for a
 """
 
 
+BANK_RULE = """- bank: when the same character, creature, object or place appears in more than one shot, describe it ONCE in the top-level
+  "bank" ({"characters": [{"id", "description"}], "locations": [{"id", "description"}]}) with a fixed, concrete visual description
+  (shape, colour, material, size, markings). The studio pastes that description word for word into every shot that uses it, so never
+  re-describe it inside a shot; instead list its id in the shot's characterIds / locationIds. Ids are short lowercase words. Use only
+  ids you defined. Leave both lists empty for shots that show none of them.
+- continuity: one short sentence on what must stay the same as in the previous shot (the creature's colours, the light, the
+  direction of travel); empty for the first shot or a deliberate change of place.
+- claims: the plain factual claims the shot's narration line makes (dates, numbers, names, cause and effect), one short sentence
+  each, so they can be checked later; empty when the line states no fact.
+"""
+
+
 @dataclass
 class TimedLine:
     """A script line with its real narration length, as measured from the generated voice."""
@@ -37,9 +49,11 @@ class TimedLine:
 
 
 class DirectorAgent:
-    def __init__(self, llm, presets: StylePresets, story_model: str = "", diagram_lane: bool = False, stock_lane: bool = False):
+    def __init__(self, llm, presets: StylePresets, story_model: str = "", diagram_lane: bool = False, stock_lane: bool = False,
+                 shot_bank: bool = True):
         self._llm, self._presets, self._story_model = llm, presets, story_model
         self._diagram_lane, self._stock_lane = diagram_lane, stock_lane  # VIDEO_DIAGRAM_LANE / VIDEO_STOCK_LANE (default off)
+        self._shot_bank = shot_bank  # VIDEO_SHOT_BANK (default on): the character/location bank rules in the prompt
 
     def plan(self, video_id, plan: VideoPlan, concept: Concept, lines: list[TimedLine], bpm: float, total_sec: float,
              owner_notes: str | None) -> ShotPlan:
@@ -47,7 +61,8 @@ class DirectorAgent:
         is_short = plan.format == "short"
         pacing = "fast cuts: shots of 1.5-3 seconds" if is_short else "cinematic pacing: shots of 4-9 seconds, longer for awe moments"
         beat = fixed(60.0 / bpm if bpm > 0 else 0.5, 2)
-        extra = (DIAGRAM_RULE if self._diagram_lane and plan.aspectRatio == "16:9" else "") + (STOCK_RULE if self._stock_lane else "")
+        extra = (DIAGRAM_RULE if self._diagram_lane and plan.aspectRatio == "16:9" else "") + (STOCK_RULE if self._stock_lane else "") + (
+            BANK_RULE if self._shot_bank else "")
         system = f"""You are the director of a premium documentary studio. Style preset: {preset.name} ({preset.description}).
 Break the video into an ordered list of shots covering exactly {fixed(total_sec, 0)} seconds in total, with {pacing}.
 Every script line must be covered: set lineIndex on the shot(s) during which that line is heard, in order;
