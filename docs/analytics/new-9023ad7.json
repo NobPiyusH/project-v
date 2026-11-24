@@ -1,0 +1,39 @@
+{
+  "ref": "HEAD",
+  "files": {
+    "markdown": 43,
+    "gradle": 2,
+    "json": 16,
+    "yaml": 8,
+    "java": 192,
+    "sql": 43,
+    "typescript": 53,
+    "shell": 2,
+    "powershell": 8,
+    "python": 313
+  },
+  "lines": {
+    "markdown": 3019,
+    "gradle": 70,
+    "json": 3122,
+    "yaml": 684,
+    "java": 27654,
+    "sql": 818,
+    "typescript": 4402,
+    "shell": 53,
+    "powershell": 338,
+    "python": 38073
+  },
+  "tests": {
+    "python_files": 89,
+    "python_tests": 890,
+    "java_files": 54,
+    "java_tests": 395
+  },
+  "todo_notes": 7,
+  "has_ci_workflow": true,
+  "ruff": {
+    "total": 0,
+    "by_rule": {}
+  }
+}
