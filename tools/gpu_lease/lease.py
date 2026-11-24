@@ -1,6 +1,6 @@
 """Watchdog lease for test pods (owner approved 23 Nov 2026).
 
-The studio's GPU watchdog (control-plane `com.projectv.gpu.PodWatchdog`) terminates any pod/instance named `projectv-*` that has
+The studio's GPU watchdog (control plane, `studio/gpu/watchdog.py`) terminates any pod/instance named `projectv-*` that has
 no lease (after 10 min), a released lease, a heartbeat older than 15 min, or a runtime over 180 min. Test pods started by these
 tools must therefore hold a lease, exactly like studio pods do. This keeps ALL watchdog protection on:
   - open: inserts the lease row in the studio database (table gpu_pod_lease)

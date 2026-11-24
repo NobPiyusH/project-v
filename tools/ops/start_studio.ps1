@@ -1,7 +1,7 @@
-# Start the local studio after a reboot or a crash: Docker, the compose services, the Java control plane, the Python worker.
+# Start the local studio after a reboot or a crash: Docker, the compose services, the Python control plane, its Temporal worker, the Python media worker.
 # Usage:  powershell -ExecutionPolicy Bypass -File tools\ops\start_studio.ps1 [-NoBackend] [-NoWorker]
 # Safe to run twice: every step checks first. Does NOT start autopilot or any Short (autopilot has its own switch in the dashboard).
-# STATUS: written 24 Nov 2026 from CLAUDE.md's commands; NOT yet run end to end.
+# STATUS: Java removed 24 Nov 2026 (docs/java-removal.md); the control plane is `python -m studio`, run end to end only on the first start after the cut-over.
 param([switch]$NoBackend, [switch]$NoWorker)
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
@@ -33,28 +33,34 @@ do {
 Say "postgres: $h"
 if ($h -ne 'healthy') { throw 'Postgres is not healthy: the GPU watchdog lease and the studio need it' }
 
-# 3. Java control plane (port 8080)
+# 3. Python control plane (port 8080): applies db/migration at start; also starts the GPU watchdog and the periodic jobs (one process only: a lock
+#    in Postgres stops a second copy from running them). It rents no pod and starts no Short by itself.
 if (-not $NoBackend) {
     if (PortOpen 8080) { Say 'backend already listening on 8080' }
     else {
-        Say 'starting the Java control plane (takes about 10 seconds to answer)'
-        $env:JAVA_HOME = 'C:\Program Files\Eclipse Adoptium\jdk-21.0.13.9-hotspot'
-        $env:GRADLE_OPTS = '-Djava.net.preferIPv4Stack=true'
-        Start-Process -WindowStyle Hidden -FilePath "$repo\gradlew.bat" -ArgumentList ':control-plane:bootRun' -WorkingDirectory $repo `
-            -RedirectStandardOutput "$repo\backend.log" -RedirectStandardError "$repo\backend.err.log"
-        $end = (Get-Date).AddMinutes(4)
-        while (-not (PortOpen 8080)) { if ((Get-Date) -gt $end) { throw 'backend did not open port 8080 in 4 minutes (see backend.err.log)' }; Start-Sleep -Seconds 5 }
+        Say 'starting the Python control plane'
+        Start-Process -WindowStyle Hidden -FilePath 'uv' -ArgumentList 'run', '--group', 'studio', 'python', '-m', 'studio' -WorkingDirectory $repo `
+            -RedirectStandardOutput "$repoackend.log" -RedirectStandardError "$repoackend.err.log"
+        $end = (Get-Date).AddMinutes(2)
+        while (-not (PortOpen 8080)) { if ((Get-Date) -gt $end) { throw 'backend did not open port 8080 in 2 minutes (see backend.err.log)' }; Start-Sleep -Seconds 3 }
         Say 'backend is listening on 8080'
+    }
+    $tw = Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'studio\.worker' }
+    if ($tw) { Say 'control-plane Temporal worker already running' }
+    else {
+        Say 'starting the control-plane Temporal worker (queue projectv-control-py)'
+        Start-Process -WindowStyle Hidden -FilePath 'uv' -ArgumentList 'run', '--group', 'studio', 'python', '-m', 'studio.worker' -WorkingDirectory $repo `
+            -RedirectStandardOutput "$repo\studio-worker.log" -RedirectStandardError "$repo\studio-worker.err.log"
     }
 }
 
-# 4. Python worker
+# 4. Python media worker
 if (-not $NoWorker) {
     $running = Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'workers\.main' }
     if ($running) { Say 'python worker already running' }
     else {
-        Say 'starting the Python worker'
+        Say 'starting the Python media worker'
         Start-Process -WindowStyle Hidden -FilePath 'uv' -ArgumentList 'run', 'python', '-m', 'workers.main' -WorkingDirectory $repo
     }
 }
-Say 'done. Check http://localhost:8080/actuator/health and the dashboard.'
+Say 'done. Check http://localhost:8080/api/system and the dashboard.'

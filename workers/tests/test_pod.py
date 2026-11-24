@@ -362,9 +362,9 @@ def test_worker_touches_heartbeat_on_requests_and_boot(tmp_path, monkeypatch, li
     assert not t.is_alive()
 
 
-def test_heartbeat_path_matches_java_guard():
-    java = (__import__("pathlib").Path(__file__).parents[2] / "control-plane/src/main/java/com/projectv/gpu/PodSelfStop.java").read_text()
-    assert f'HEARTBEAT = "{S.HEARTBEAT}"' in java
+def test_heartbeat_path_matches_the_control_plane_self_stop_guard():
+    guard = (__import__("pathlib").Path(__file__).parents[2] / "studio" / "gpu" / "self_stop.py").read_text(encoding="utf-8")
+    assert f'HEARTBEAT = "{S.HEARTBEAT}"' in guard
 
 
 def test_unfiltered_finish_look_adds_no_grading_haze_or_grain():

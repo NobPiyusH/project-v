@@ -13,6 +13,11 @@ function Stop-Port($port, $name) {
 }
 
 Stop-Port 8080 'control plane'
+# The control plane's own Temporal worker (this folder's .venv only).
+$tws = Get-CimInstance Win32_Process -Filter "Name='python.exe'" | Where-Object { $_.CommandLine -like '*studio.worker*' }
+$tmine = @($tws | Where-Object { $_.ExecutablePath -like "$root\.venv\*" })
+foreach ($w in ($tws | Where-Object { $tmine.ProcessId -contains $_.ProcessId -or $tmine.ProcessId -contains $_.ParentProcessId })) { Stop-Process -Id $w.ProcessId -Force -Confirm:$false -ErrorAction SilentlyContinue }
+if ($tmine) { Write-Host '  stopped control-plane worker' } else { Write-Host '  control-plane worker was not running' }
 # Only this folder's worker (its .venv): a second copy of the studio (e.g. the dream-shorts test) keeps running.
 $pyWorkers = Get-CimInstance Win32_Process -Filter "Name='python.exe'" | Where-Object { $_.CommandLine -like '*workers.main*' }
 $mine = @($pyWorkers | Where-Object { $_.ExecutablePath -like "$root\.venv\*" })          # the .venv launcher
@@ -21,8 +26,6 @@ foreach ($w in $workers) { Stop-Process -Id $w.ProcessId -Force -Confirm:$false 
 if ($workers) { Write-Host '  stopped media worker' } else { Write-Host '  media worker was not running' }
 if (-not $Backend) { Stop-Port 5173 'dashboard' }
 
-# No 'gradlew --stop': it stops every Gradle daemon on the PC, including another copy's control plane.
-# Idle daemons exit by themselves after 3 hours.
 Remove-Item "$root\.run\*.pid" -ErrorAction SilentlyContinue
 
 if ($All) {

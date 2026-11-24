@@ -3,12 +3,8 @@
 .secrets/
 *.env.local
 
-# Gradle / Java
-.gradle/
+# Build output (the Java control plane was removed 24 Nov 2026, docs/java-removal.md)
 build/
-!gradle/wrapper/gradle-wrapper.jar
-*.class
-HELP.md
 
 # IDEs
 .idea/

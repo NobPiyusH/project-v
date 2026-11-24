@@ -21,34 +21,39 @@ One-time setup:
 - copy `.env.example` to `.env` (already done) and put your Gemini key in `GEMINI_API_KEY` (billing enabled);
 - link Modal (`uv run modal token new`) and deploy the keyframe model: `uv run modal deploy workers/modal_apps/zimage.py`.
 
-Open four terminals:
+Open five terminals (or run `scripts\start.ps1`, which starts them all):
 
 ```powershell
 # 1. Local services: Postgres (5433), Temporal (7233, UI on http://localhost:8233), SeaweedFS S3 (8333)
 docker compose -f infra/docker-compose.yml up -d
 
-# 2. Control plane (API on http://localhost:8080)
-$env:JAVA_HOME = "C:\Program Files\Eclipse Adoptium\jdk-21.0.13.9-hotspot"
-.\gradlew.bat :control-plane:bootRun
+# 2. Control plane (Python API on http://localhost:8080; applies db/migration first)
+uv run --group studio python -m studio
 
-# 3. Python media worker
+# 3. The control plane's Temporal worker (queue projectv-control-py)
+uv run --group studio python -m studio.worker
+
+# 4. Python media worker
 uv run python -m workers.main
 
-# 4. Dashboard (http://127.0.0.1:5173)
+# 5. Dashboard (http://127.0.0.1:5173)
 npm --prefix dashboard run dev
 ```
 
-Tests: `.\gradlew.bat :control-plane:test`
+Tests: `uv run --group dev --group studio python -m pytest` (studio, workers, tools). Lint: `uvx ruff@0.17.5 check .`
 
 ## Layout
 
 | Path | What |
 |---|---|
-| `control-plane/` | Java 21, Spring Boot 4.1, Temporal workflows, planner, REST API, Flyway schema |
+| `studio/` | Python control plane (FastAPI, Temporal workflows, planner, GPU broker and watchdog, REST API) |
+| `db/migration/` | SQL schema, applied at start by `studio/migrate.py` (Flyway-compatible history) |
 | `workers/` | Python Temporal worker for media/ML activities |
 | `dashboard/` | React + TypeScript (Vite) studio UI |
 | `config/` | `providers.yaml`, `style-presets.yaml` |
 | `infra/` | docker compose for local services |
 | `docs/` | handover book, ADRs |
+
+The Java control plane was removed on 24 Nov 2026: see [docs/java-removal.md](docs/java-removal.md).
 
 Stack changes from the handover book are recorded in [docs/adr/0001-m1-stack-updates.md](docs/adr/0001-m1-stack-updates.md).

@@ -1,10 +1,8 @@
 # One line-ending rule for the repo: LF in git, so Windows edits stop producing whole-file "changes".
 * text=auto eol=lf
-/gradlew text eol=lf
 *.bat text eol=crlf
 *.cmd text eol=crlf
 *.ps1 text eol=crlf
-*.jar binary
 *.png binary
 *.jpg binary
 *.mp4 binary

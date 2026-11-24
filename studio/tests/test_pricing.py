@@ -9,7 +9,7 @@ import pytest
 from studio.config import REPO_ROOT
 from studio.ledger import Pricing, Usage
 
-TEST_CONFIG = REPO_ROOT / "control-plane" / "src" / "test" / "resources" / "config"
+TEST_CONFIG = REPO_ROOT / "studio" / "tests" / "fixtures" / "config"
 
 
 def at(day: str) -> Pricing:

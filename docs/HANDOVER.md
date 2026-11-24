@@ -1,5 +1,7 @@
 # CINESTACK — Handover Book for Claude Code
 
+> **Update, 24 Nov 2026:** the control plane is now Python (`studio/`, FastAPI + Temporal Python SDK). The Java/Spring Boot control plane described in this book was removed; it stays restorable from the git tag `java-final` (see `docs/java-removal.md`). Wherever this book says Java, Spring, Gradle or Flyway-in-Java, read `studio/`, `python -m studio`, `uv` and `studio/migrate.py`.
+
 > **Working name:** `cinestack` (rename freely)
 > **Owner / decision-maker:** Gendu (Java backend developer)
 > **Prepared:** 16 Nov 2026, from a long research conversation with Claude
