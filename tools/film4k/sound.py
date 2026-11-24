@@ -32,5 +32,6 @@ def build_graph(duration: float, cuts: list[float], music_index: int | None = No
             ms = int(round(t * 1000))
             parts.append(f"[h{i}]adelay={ms}|{ms},apad=whole_dur={d}[hd{i}]")
             mix.append(f"[hd{i}]")
-    parts.append("".join(mix) + f"amix=inputs={len(mix)}:normalize=0,alimiter=limit=0.9,atrim=0:{d}[aout]")
+    parts.append("".join(mix) + f"amix=inputs={len(mix)}:normalize=0,alimiter=limit=0.9,atrim=0:{d},"
+                 f"afade=t=out:st={max(0.0, duration - 1.5):.2f}:d=1.5[aout]")
     return [], ";".join(parts)

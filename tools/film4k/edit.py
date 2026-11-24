@@ -26,6 +26,12 @@ FPS = 48
 SPEED = 1.25            # the playback speed baked in by the assembler (RIFE pass)
 MIN_SHOT_S = 1.3
 KINDS = ("wide", "push", "close", "whip")
+# Time windows (scene-file seconds) never to cut from: generation glitches found by eye on 24 Nov 2026.
+# scene 1, 0.6-2.7 s: the dragon wing turns sky-blue for about 2 s.
+AVOID: dict[int, list[tuple[float, float]]] = {1: [(0.6, 2.7)]}
+# Keep only the first N seconds of a scene: scene 8 (low wall and fire) has almost no action after about 4 s.
+LIMIT: dict[int, float] = {8: 4.2}
+END_FADE_S = 1.2
 
 
 @dataclass(frozen=True)
@@ -53,16 +59,18 @@ def seam_gaps(speed: float = SPEED) -> list[tuple[float, float]]:
     return gaps
 
 
-def segments(duration: float, speed: float = SPEED, pad: float = 0.03) -> list[tuple[float, float]]:
-    """The playable parts of a scene: everything outside the cross-fade windows."""
+def segments(duration: float, speed: float = SPEED, pad: float = 0.03, scene: int = 0) -> list[tuple[float, float]]:
+    """The playable parts of a scene: everything outside the cross-fade windows, the AVOID windows and past LIMIT."""
+    end = min(duration, LIMIT.get(scene, duration))
+    blocked = sorted([(a - pad, b + pad) for a, b in seam_gaps(speed)] + [(a, b) for a, b in AVOID.get(scene, [])])
     segs, cur = [], 0.0
-    for a, b in seam_gaps(speed):
-        if a - pad > cur:
-            segs.append((cur, a - pad))
-        cur = b + pad
-    if duration > cur:
-        segs.append((cur, duration))
-    return segs
+    for a, b in blocked:
+        if a > cur:
+            segs.append((cur, min(a, end)))
+        cur = max(cur, b)
+    if end > cur:
+        segs.append((cur, end))
+    return [(a, b) for a, b in segs if b - a >= MIN_SHOT_S]
 
 
 def _lengths(total: float, target: float, rng: random.Random) -> list[float]:
@@ -89,9 +97,9 @@ def _framing(kind: str, rng: random.Random) -> dict:
     if kind == "wide":
         return dict(z0=1.04, z1=1.14, fx0=-0.3 * side, fx1=0.3 * side, fy0=0.0, fy1=0.0)
     if kind == "push":
-        return dict(z0=1.45, z1=1.65, fx0=0.2 * side, fx1=0.0, fy0=rng.uniform(-0.3, 0.3), fy1=0.0)
+        return dict(z0=1.4, z1=1.55, fx0=0.2 * side, fx1=0.0, fy0=rng.uniform(-0.3, 0.3), fy1=0.0)
     if kind == "close":
-        return dict(z0=2.05, z1=2.25, fx0=rng.uniform(-0.6, 0.6), fx1=rng.uniform(-0.6, 0.6), fy0=rng.uniform(-0.6, 0.6),
+        return dict(z0=1.75, z1=1.9, fx0=rng.uniform(-0.6, 0.6), fx1=rng.uniform(-0.6, 0.6), fy0=rng.uniform(-0.6, 0.6),
                     fy1=rng.uniform(-0.6, 0.6))
     return dict(z0=1.4, z1=1.5, fx0=0.8 * side, fx1=-0.1 * side, fy0=0.0, fy1=0.0)   # whip
 
@@ -112,7 +120,7 @@ def plan_shots(scene_id: int, duration: float, act_pos: float, prev: Shot | None
     target = 3.6 - 1.6 * min(max(act_pos, 0.0), 1.0)
     shots: list[Shot] = []
     last = prev
-    for a, b in segments(duration):
+    for a, b in segments(duration, scene=scene_id):
         t = a
         for L in _lengths(b - a, target, rng):
             options = [k for k in KINDS if not (last and last.kind == k)]
@@ -194,9 +202,13 @@ def render(base: Path, name: str, scene_ids: list[int], w: int, h: int, seed: in
     silent = base / f"{name}_silent.mp4"
     ff("-f", "concat", "-safe", "0", "-i", str(lst), "-c", "copy", str(silent), "-y")
     final = silent
+    total = sum(s.dur for s in all_shots)
+    faded = base / f"{name}_faded.mp4"
+    ff("-i", str(silent), "-vf", f"fade=t=out:st={total - END_FADE_S:.3f}:d={END_FADE_S}", "-c:v", "libx264", "-crf", "14",
+       "-preset", "veryfast", "-an", str(faded), "-y")
+    silent = final = faded
     if audio:
         import sound
-        total = sum(s.dur for s in all_shots)
         final = base / f"{name}.mp4"
         inputs, graph = sound.build_graph(total, cut_times(all_shots))
         ff("-i", str(silent), *inputs, "-filter_complex", graph, "-map", "0:v", "-map", "[aout]", "-c:v", "copy", "-c:a", "aac",
