@@ -7,7 +7,10 @@ order), dropped afterwards. Tests that change data use this, never the live `pro
 from __future__ import annotations
 
 import re
+import shutil
+import subprocess
 import uuid
+from pathlib import Path
 
 import pytest
 
@@ -52,3 +55,20 @@ def scratch_db(scratch_dsn):
     conn.execute("DELETE FROM cost_entry")
     yield PgDb("", conn=conn)
     conn.close()
+
+
+@pytest.fixture(scope="session")
+def bash():
+    """A bash that really runs. On Windows `bash` on PATH may be C:\\Windows\\System32\bash.exe, the WSL launcher, which fails when no
+    Linux distro is installed (24 Nov 2026: two tests failed in PowerShell, passed in Git Bash). Skip when it cannot run a command."""
+    candidates = [shutil.which("bash"), r"C:\Program Files\Git\bin\bash.exe"]
+    for exe in candidates:
+        if not exe or not Path(exe).exists():
+            continue
+        try:
+            r = subprocess.run([exe, "-c", "echo ok"], capture_output=True, text=True, timeout=20)
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        if r.returncode == 0 and r.stdout.strip() == "ok":
+            return exe
+    pytest.skip("no usable bash (the WSL launcher without a distro does not count)")

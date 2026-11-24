@@ -259,13 +259,9 @@ def test_rejects_bad_input():
         GpuPodLimits("", 1, 1, 1, 1, 1, True)
 
 
-def test_the_guard_scripts_are_valid_shell():
-    import shutil
+def test_the_guard_scripts_are_valid_shell(bash):
     import subprocess
 
-    bash = shutil.which("bash")
-    if bash is None:
-        pytest.skip("no bash")
     for argv in (self_stop.wrap(["true"], 5, 5, CREATED), self_stop.wrap_exit(["true"], 5, 5, CREATED)):
         r = subprocess.run([bash, "-n", "-c", argv[2]], capture_output=True, text=True)
         assert r.returncode == 0, r.stderr

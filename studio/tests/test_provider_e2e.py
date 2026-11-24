@@ -105,14 +105,10 @@ def test_every_start_script_entry_stays_under_the_e2e_limit_of_2048_chars():
     assert "sha256sum -c" in last and sha256(decoded_run_script(scripts).encode()) in last
 
 
-def test_the_node_side_script_actually_verifies_and_rebuilds_the_payload(tmp_path):
+def test_the_node_side_script_actually_verifies_and_rebuilds_the_payload(tmp_path, bash):
     """Run the entries in order the way cloud-init would, with /opt/projectv redirected to a temp dir, and check the files."""
-    import shutil
     import subprocess
 
-    bash = shutil.which("bash")
-    if bash is None:
-        pytest.skip("no bash")
     p = Fake().provider()
     scripts = p.start_scripts(req(p.quote(SPEC)))
     work = tmp_path / "opt"
