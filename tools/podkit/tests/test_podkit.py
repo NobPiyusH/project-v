@@ -1,4 +1,5 @@
 """podkit: spend ledger, rent logic, boot script, fail-closed guards. No network, no Docker, no pods."""
+
 import base64
 import sys
 from pathlib import Path
@@ -25,11 +26,11 @@ def test_ledger_reserves_the_worst_case_and_refuses_what_does_not_fit(tmp_path):
 def test_ledger_books_the_actual_cost_and_frees_the_rest(tmp_path):
     now = [1000.0]
     led = Ledger(tmp_path / "l.json", 4.0, clock=lambda: now[0])
-    led.reserve("a", 0.60, 60)                      # ceiling 0.60
-    now[0] += 30 * 60                               # ran 30 minutes
+    led.reserve("a", 0.60, 60)  # ceiling 0.60
+    now[0] += 30 * 60  # ran 30 minutes
     assert led.close("a") == pytest.approx(0.30)
     assert led.committed() == pytest.approx(0.30)
-    led.reserve("b", 0.60, 60)                      # fits again because "a" ended early
+    led.reserve("b", 0.60, 60)  # fits again because "a" ended early
 
 
 def test_ledger_never_books_more_than_one_and_a_half_times_the_ceiling(tmp_path):
@@ -42,7 +43,7 @@ def test_ledger_never_books_more_than_one_and_a_half_times_the_ceiling(tmp_path)
 
 def test_ledger_max_minutes_fits_the_remaining_budget(tmp_path):
     led = Ledger(tmp_path / "l.json", 1.0)
-    assert led.max_minutes(0.89, 75) == 67      # 1.00 / 0.89 h
+    assert led.max_minutes(0.89, 75) == 67  # 1.00 / 0.89 h
     led.add_fixed("x", 1.0)
     assert led.max_minutes(0.89, 75) == 0
 
@@ -80,7 +81,9 @@ def test_rent_falls_back_from_community_to_secure():
 
 def test_rent_terminates_a_pod_above_the_tier_ceiling_and_keeps_looking():
     g = FakeGql([_ok("dear", 0.95), {"data": {}}, _ok("ok", 0.40)])
-    pod = rent.rent_pod(g, lambda c, gpu: {}, gpus=("A", "B"), tiers=(("COMMUNITY", 0.55),), say=lambda m: None, sleep=lambda s: None)
+    pod = rent.rent_pod(
+        g, lambda c, gpu: {}, gpus=("A", "B"), tiers=(("COMMUNITY", 0.55),), say=lambda m: None, sleep=lambda s: None
+    )
     assert pod.id == "ok"
     assert any("podTerminate" in q for q, _ in g.calls)
 
@@ -118,8 +121,19 @@ def test_pod_env_carries_files_and_token():
 # --- guard ------------------------------------------------------------------
 def test_guards_confirm_the_lease_row():
     started = []
-    ok = guard.start_guards("pod1", "projectv-x", "t", "s.json", 60, "lease.py", "killer.py",
-                            popen=lambda *a, **k: started.append(a[0][1]), query=lambda sql: "1", confirm_s=5, sleep=lambda s: None)
+    ok = guard.start_guards(
+        "pod1",
+        "projectv-x",
+        "t",
+        "s.json",
+        60,
+        "lease.py",
+        "killer.py",
+        popen=lambda *a, **k: started.append(a[0][1]),
+        query=lambda sql: "1",
+        confirm_s=5,
+        sleep=lambda s: None,
+    )
     assert ok and started == ["lease.py", "killer.py"]
 
 
@@ -132,8 +146,20 @@ def test_guards_fail_closed_when_the_database_is_down():
     def sleep(s):
         t[0] += s
 
-    ok = guard.start_guards("pod1", "projectv-x", "t", "s.json", 60, "l.py", "k.py", popen=lambda *a, **k: None,
-                            query=down, confirm_s=20, sleep=sleep, clock=lambda: t[0])
+    ok = guard.start_guards(
+        "pod1",
+        "projectv-x",
+        "t",
+        "s.json",
+        60,
+        "l.py",
+        "k.py",
+        popen=lambda *a, **k: None,
+        query=down,
+        confirm_s=20,
+        sleep=sleep,
+        clock=lambda: t[0],
+    )
     assert ok is False  # the caller must terminate the pod
 
 

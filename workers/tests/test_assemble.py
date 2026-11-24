@@ -38,7 +38,7 @@ def test_captions_use_script_words_with_whisper_timing_and_fall_back_evenly():
     assert A.line_words("Light travels", heard, 2.0)[1] == {"word": "travels", "start": 0.5, "end": 0.9}
     even = A.line_words("13.8 billion years", None, 3.0)
     assert even[0]["word"] == "13.8" and even[-1]["end"] == pytest.approx(3.0)
-    chunks = A.caption_chunks([{"word": w, "start": i, "end": i + 0.5} for i, w in enumerate("one two three four. five".split())], 3)
+    chunks = A.caption_chunks([{"word": w, "start": i, "end": i + 0.5} for i, w in enumerate(["one", "two", "three", "four.", "five"])], 3)
     assert [c["text"] for c in chunks] == ["one two", "three four.", "five"]  # a long sentence is split evenly, no one-word leftover
 
 

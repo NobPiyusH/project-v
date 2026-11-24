@@ -1,4 +1,5 @@
 """edit.py and sound.py: pure planning and filter-string tests (no ffmpeg, no pods)."""
+
 import sys
 from pathlib import Path
 
@@ -42,10 +43,10 @@ def test_scene_has_several_shots_and_pace_gets_faster():
 def test_framing_changes_on_every_cut_and_first_shot_is_wide():
     shots = film()
     assert shots[0].kind == "wide"
-    for a, b in zip(shots, shots[1:]):
+    for a, b in zip(shots, shots[1:], strict=False):
         assert a.kind != b.kind
     # within one scene the framing change is clearly visible (zoom ratio or sideways shift)
-    for a, b in zip(shots, shots[1:]):
+    for a, b in zip(shots, shots[1:], strict=False):
         if a.scene == b.scene:
             assert edit._differs(a, b)
 

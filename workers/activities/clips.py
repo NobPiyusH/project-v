@@ -12,15 +12,15 @@ remaining work is cancelled so no GPU keeps running (CLAUDE.md rule 8).
 
 from __future__ import annotations
 
+import base64
+import io
 import json
 import queue
 import threading
 import time
 import urllib.request
 import uuid
-import base64
 import zipfile
-import io
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -28,7 +28,8 @@ import modal
 from temporalio import activity
 
 from workers import gemini_pool
-from workers.common import BUCKET, beat as _beat, exists, gemini, get_bytes, log, put_bytes, put_file, run_ffmpeg, workdir
+from workers.common import BUCKET, exists, gemini, get_bytes, log, put_bytes, put_file, run_ffmpeg, workdir
+from workers.common import beat as _beat
 
 POLL_SECONDS = 5
 
@@ -178,7 +179,7 @@ def _parallel(wan, progress, base: str, video_id: str, jobs: list) -> tuple[list
                         log.warning("cancel %s failed: %s", key, e)
                     clips.append(_stopped(j))
                 return clips, True
-            for pkey, (j, key, call) in list(pending.items()):
+            for pkey, (j, _key, call) in list(pending.items()):
                 try:
                     r = call.get(timeout=0)
                 except Exception as e:  # noqa: BLE001
@@ -258,7 +259,7 @@ def _chained(wan, progress, base: str, video_id: str, jobs: list, chain_flag: bo
     clips: list[dict] = []
     made: dict[int, bytes] = {}
     failed: set[int] = set()
-    for i, (j, key, payload) in enumerate(jobs):
+    for i, (j, _key, payload) in enumerate(jobs):
         if _stop_requested(base, video_id):
             clips += [_stopped(x) for x, _, _ in jobs[i:]]
             return clips, True

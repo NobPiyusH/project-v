@@ -9,28 +9,28 @@ from dotenv import load_dotenv
 from temporalio.client import Client
 from temporalio.worker import Worker
 
+from workers import modal_billing
 from workers.activities.animatic import render_animatic
 from workers.activities.assemble import assemble_video
 from workers.activities.clips import generate_clips
 from workers.activities.finish import smooth_clips, upscale_clips
 from workers.activities.footage import fetch_footage, search_footage
-from workers.activities.stock import stock_fetch
 from workers.activities.inspect import inspect_media
 from workers.activities.keyframes import generate_keyframes
 from workers.activities.media import tool_versions
 from workers.activities.music import generate_music
+from workers.activities.producer import producer_review
 from workers.activities.research import research_topic
 from workers.activities.review import review_images
-from workers.activities.producer import producer_review
 from workers.activities.sources import check_sources
+from workers.activities.stock import stock_fetch
 from workers.activities.voice import synthesize_narration
+from workers.common import ensure_bucket
+from workers.dream.check import dream_check
 from workers.dream.finish import dream_finish
 from workers.dream.music_bed import dream_music_bed
 from workers.dream.scout import dream_scout
 from workers.youtube.upload import youtube_upload
-from workers.dream.check import dream_check
-from workers import modal_billing
-from workers.common import ensure_bucket
 
 # Must match com.projectv.workflow.TaskQueues.MEDIA
 MEDIA_TASK_QUEUE = "projectv-media"

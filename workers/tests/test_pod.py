@@ -1,4 +1,5 @@
 import os
+
 """Pod worker + client: no GPU, no network beyond localhost."""
 
 import json
@@ -9,8 +10,9 @@ import urllib.request
 import pytest
 
 from workers.activities import clips as C
-from workers.pod import client, server as S
 from workers.activities import keyframes as K
+from workers.pod import client
+from workers.pod import server as S
 
 
 @pytest.fixture(autouse=True)

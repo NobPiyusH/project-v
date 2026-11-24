@@ -159,7 +159,6 @@ class Wan:
             writer.close()
 
     def _render(self, job: dict, cfg: dict, steps: int):
-        import torch
         from PIL import Image
 
         img = Image.open(io.BytesIO(job["image"])).convert("RGB")

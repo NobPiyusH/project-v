@@ -1,4 +1,5 @@
 """lease.keep must fail LOUDLY when the lease cannot be opened (24 Nov 2026: Docker was off and it died without a word)."""
+
 import importlib.util
 from pathlib import Path
 

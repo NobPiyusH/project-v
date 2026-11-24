@@ -6,6 +6,7 @@ Lessons baked in (24 Nov 2026, measured):
   * readiness = BOOT COMPLETE in the log AND ComfyUI answering /object_info for the SVI node (the orchestrator checks both).
   * the boot takes about 7 minutes (weights 41 GB at ~100 MB/s); a pod without CUDA is a bad host: terminate and rent again.
 """
+
 from __future__ import annotations
 
 import base64
@@ -15,16 +16,16 @@ ESRGAN_URL = "https://huggingface.co/lllyasviel/Annotators/resolve/main/RealESRG
 READY_MARKERS = ("BOOT COMPLETE",)
 BAD_MARKERS = ("CUDA False", "FAILED")
 
-SRV = '''
+SRV = """
 import http.server, os
 os.makedirs("/workspace/pub", exist_ok=True); os.chdir("/workspace/pub")
 if not os.path.exists("logs"): os.symlink("/workspace/logs", "logs")
 class Q(http.server.SimpleHTTPRequestHandler):
     def log_message(self, *a): pass
 http.server.ThreadingHTTPServer(("0.0.0.0", 8189), Q).serve_forever()
-'''
+"""
 
-DL = '''
+DL = """
 import json, os, shutil, time, threading
 from huggingface_hub import hf_hub_download
 files = json.load(open("/workspace/files.json")); root = "/workspace/ComfyUI-master/models"
@@ -41,13 +42,19 @@ def one(name, v):
 ths = [threading.Thread(target=one, args=(n, v)) for n, v in files.items()]
 [t.start() for t in ths]; [t.join() for t in ths]
 print("ALL DOWNLOADS DONE", flush=True)
-'''
+"""
 
 
 def boot_script(esrgan: bool = True) -> str:
-    esr = (f'mkdir -p models/upscale_models && wget -q -O models/upscale_models/RealESRGAN_x4plus.pth {ESRGAN_URL} '
-           '&& echo "ESRGAN DONE"\n') if esrgan else ""
-    return f'''#!/bin/bash
+    esr = (
+        (
+            f"mkdir -p models/upscale_models && wget -q -O models/upscale_models/RealESRGAN_x4plus.pth {ESRGAN_URL} "
+            '&& echo "ESRGAN DONE"\n'
+        )
+        if esrgan
+        else ""
+    )
+    return f"""#!/bin/bash
 mkdir -p /workspace/logs && echo "$SRV_B64" | base64 -d > /workspace/srv.py && (nohup python3 /workspace/srv.py >/dev/null 2>&1 &)
 exec > >(tee -a /workspace/logs/boot.log) 2>&1
 date; nvidia-smi --query-gpu=name,memory.total --format=csv,noheader; python3 -c "import torch;print('CUDA',torch.cuda.is_available())"
@@ -69,7 +76,7 @@ nohup python main.py --listen 0.0.0.0 --port 8188 --disable-auto-launch --disabl
 wait $DLPID
 echo "BOOT COMPLETE $(( $(date +%s)-T0 ))s"
 sleep infinity
-'''
+"""
 
 
 def b64(text: str) -> str:
@@ -78,9 +85,13 @@ def b64(text: str) -> str:
 
 def pod_env(hf_token: str, kj_url: str, files: dict) -> list[dict]:
     """The env entries the boot script reads. `files` maps name -> [repo, path, subfolder, size]."""
-    return [{"key": "HF_TOKEN", "value": hf_token}, {"key": "KJ_URL", "value": kj_url},
-            {"key": "SRV_B64", "value": b64(SRV)}, {"key": "FILES_B64", "value": b64(json.dumps(files))},
-            {"key": "DL_B64", "value": b64(DL)}]
+    return [
+        {"key": "HF_TOKEN", "value": hf_token},
+        {"key": "KJ_URL", "value": kj_url},
+        {"key": "SRV_B64", "value": b64(SRV)},
+        {"key": "FILES_B64", "value": b64(json.dumps(files))},
+        {"key": "DL_B64", "value": b64(DL)},
+    ]
 
 
 def docker_args(esrgan: bool = True) -> str:

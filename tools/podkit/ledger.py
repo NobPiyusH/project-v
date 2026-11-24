@@ -5,6 +5,7 @@ total over the cap raises CapExceeded and nothing is rented. When a pod ends, cl
 cost (rate x minutes it ran). Process-safe: several shards share one JSON file, guarded by a lock file.
 All figures are estimates from rate x minutes, not provider bills.
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -40,7 +41,7 @@ class Ledger:
                         lock.unlink()
                         continue
                 if self.clock() > end:
-                    raise TimeoutError("ledger lock busy")
+                    raise TimeoutError("ledger lock busy") from None
                 time.sleep(0.05)
         try:
             yield
@@ -90,9 +91,16 @@ class Ledger:
             data = self._load()
             if self._committed(data) + ceiling > self.cap + 1e-9:
                 raise CapExceeded(
-                    f"reserving ${ceiling:.2f} for {pod_id} would pass the ${self.cap:.2f} cap (committed ${self._committed(data):.2f})")
-            data["pods"][pod_id] = {"rate": rate_per_h, "deadline_min": deadline_min, "ceiling": ceiling,
-                                    "started": self.clock(), "actual": None, "label": label}
+                    f"reserving ${ceiling:.2f} for {pod_id} would pass the ${self.cap:.2f} cap (committed ${self._committed(data):.2f})"
+                )
+            data["pods"][pod_id] = {
+                "rate": rate_per_h,
+                "deadline_min": deadline_min,
+                "ceiling": ceiling,
+                "started": self.clock(),
+                "actual": None,
+                "label": label,
+            }
             self._save(data)
         return ceiling
 

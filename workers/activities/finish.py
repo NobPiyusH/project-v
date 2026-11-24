@@ -23,7 +23,8 @@ import modal
 from temporalio import activity
 
 from workers.activities.clips import POLL_SECONDS, _post, _stop_requested
-from workers.common import beat as _beat, BUCKET, exists, ffprobe_bin, get_bytes, log, put_bytes, put_file, workdir
+from workers.common import BUCKET, exists, ffprobe_bin, get_bytes, log, put_bytes, put_file, workdir
+from workers.common import beat as _beat
 
 HEARTBEAT_SECONDS = 15
 

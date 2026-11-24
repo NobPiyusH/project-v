@@ -3,6 +3,7 @@
 It is a PLACEHOLDER bed (24 Nov 2026: Lyria was blocked by a Google billing 403): good enough to judge the edit by ear. Pass a real
 music file with `music=` and it is mixed under the effects instead of the drone.
 """
+
 from __future__ import annotations
 
 DRONE_HZ = (55.0, 82.41, 110.0)
@@ -21,7 +22,9 @@ def build_graph(duration: float, cuts: list[float], music_index: int | None = No
             parts.append(f"sine=f={hz}:d={d}:r=48000,tremolo=f={0.1 + 0.05 * i:.2f}:d=0.4,volume=0.10[dr{i}]")
             mix.append(f"[dr{i}]")
     else:
-        parts.append(f"[{music_index}:a]atrim=0:{d},afade=t=in:d=2,afade=t=out:st={max(0.0, duration - 3):.2f}:d=3,volume=0.55[mus]")
+        parts.append(
+            f"[{music_index}:a]atrim=0:{d},afade=t=in:d=2,afade=t=out:st={max(0.0, duration - 3):.2f}:d=3,volume=0.55[mus]"
+        )
         mix.append("[mus]")
     n = len(cuts)
     if n:
@@ -32,6 +35,8 @@ def build_graph(duration: float, cuts: list[float], music_index: int | None = No
             ms = int(round(t * 1000))
             parts.append(f"[h{i}]adelay={ms}|{ms},apad=whole_dur={d}[hd{i}]")
             mix.append(f"[hd{i}]")
-    parts.append("".join(mix) + f"amix=inputs={len(mix)}:normalize=0,alimiter=limit=0.9,atrim=0:{d},"
-                 f"afade=t=out:st={max(0.0, duration - 1.5):.2f}:d=1.5[aout]")
+    parts.append(
+        "".join(mix) + f"amix=inputs={len(mix)}:normalize=0,alimiter=limit=0.9,atrim=0:{d},"
+        f"afade=t=out:st={max(0.0, duration - 1.5):.2f}:d=1.5[aout]"
+    )
     return [], ";".join(parts)

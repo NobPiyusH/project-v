@@ -8,7 +8,8 @@ from pathlib import Path
 from temporalio import activity
 
 from workers.activities.mixing import mix_audio
-from workers.common import download, drawtext_escape as _esc, media_duration, put_file, run_ffmpeg, workdir
+from workers.common import download, media_duration, put_file, run_ffmpeg, workdir
+from workers.common import drawtext_escape as _esc
 
 FPS = 30
 SIZES = {"16:9": (1920, 1080), "9:16": (1080, 1920), "1:1": (1080, 1080), "4:5": (1080, 1350)}

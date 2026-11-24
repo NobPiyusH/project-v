@@ -23,8 +23,20 @@ from google.genai import types
 from pydantic import BaseModel
 from temporalio import activity
 
-from workers.common import (MEDIA_TIMEOUT_MS, download, ffmpeg_bin, gemini, get_bytes, log, media_duration, put_file,
-                            run_ffmpeg, usage_dict, with_models, workdir)
+from workers.common import (
+    MEDIA_TIMEOUT_MS,
+    download,
+    ffmpeg_bin,
+    gemini,
+    get_bytes,
+    log,
+    media_duration,
+    put_file,
+    run_ffmpeg,
+    usage_dict,
+    with_models,
+    workdir,
+)
 
 QUIET_DB = -35.0  # a piece whose average loudness is below this is skipped (silence, a fade, a very soft passage)
 EDGE_SEC = 5.0  # stay this far from the track's start and end
