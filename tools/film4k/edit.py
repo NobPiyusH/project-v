@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # repo root, for tools.qualitygate
 from camera import BEAT_S, FADE_S  # noqa: E402
 
 FPS = 48
@@ -280,6 +281,21 @@ def render(base: Path, name: str, scene_ids: list[int], w: int, h: int, seed: in
     return final
 
 
+def gate(final: Path, enabled: bool = True) -> int:
+    """Free quality gate (tiers 1-2, judge off) on the finished edit; report JSON lands next to it. Exit 3 = failed, hold for the owner
+    (he decides: redo the edit or continue without it). Warnings print but never block; a gate crash never blocks."""
+    from tools.qualitygate import hook
+
+    if not (enabled and hook.enabled()):
+        return 0
+    out = hook.run_hook(final)
+    print(out.summary, flush=True)
+    if out.failed:
+        print(f"HOLD: the quality gate failed {final.name}. Owner: redo the edit, or continue without it. Output kept.", flush=True)
+        return 3
+    return 0
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--dir", required=True)
@@ -289,8 +305,10 @@ def main() -> None:
     ap.add_argument("--h", type=int, default=3840)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--audio", action="store_true")
+    ap.add_argument("--no-gate", action="store_true", help="skip the free quality gate (also QUALITY_GATE_ENABLED=0)")
     a = ap.parse_args()
-    render(Path(a.dir), a.name, a.scenes, a.w, a.h, a.seed, a.audio)
+    final = render(Path(a.dir), a.name, a.scenes, a.w, a.h, a.seed, a.audio)
+    sys.exit(gate(final, enabled=not a.no_gate))
 
 
 if __name__ == "__main__":

@@ -147,8 +147,9 @@ class AssemblyStage(StageSupport):
     and a Premiere package. Runs on the local worker (free). Every shot must have real moving video (owner-picked footage, else its final, else
     its draft): a shot without one stops the stage before anything is rendered, because a panned still is never acceptable output (rule 10)."""
 
-    def __init__(self, d: ProductionDeps, output_height: int = 0):
+    def __init__(self, d: ProductionDeps, output_height: int = 0, quality_gate: bool = True):
         super().__init__(d)
+        self.quality_gate = quality_gate  # tiers 1-2 of tools/qualitygate after the edit (judge stays off); QUALITY_GATE_ENABLED=0 turns it off
         self.output_height = output_height  # projectv.video.output-height: 0 = 1080p master (default); 1440 = 2560x1440 (16:9)
 
     def assembly_request(self, video_id: uuid.UUID) -> AssemblyRequest:
@@ -212,7 +213,7 @@ class AssemblyStage(StageSupport):
             end = needed
         music = self.db.rows("SELECT a.uri_hot FROM music_cue m JOIN asset a ON a.id = m.asset_id WHERE m.video_id = %(v)s", {"v": video_id})
         return AssemblyRequest(str(video_id), plan.title, plan.aspectRatio, plan.language, plan.narration != "none", shots, narration,
-                               music[0]["uri_hot"] if music else None, round3(end), self.output_height, self.stock_credits(video_id))
+                               music[0]["uri_hot"] if music else None, round3(end), self.output_height, self.stock_credits(video_id), self.quality_gate)
 
     def save_master(self, video_id: uuid.UUID, r: AssemblyResult) -> StageResult:
         # Sound-effect credits (Freesound CC BY needs the author) travel with the master for the video description.

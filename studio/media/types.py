@@ -511,6 +511,7 @@ class AssemblyRequest:
     total_sec: float
     output_height: int = 0  # 0 = default 1080p master; 1440; 2160
     credits: list[str] | None = None
+    quality_gate: bool = False  # run the free quality gate (tiers 1-2) on the master after the edit
 
 
 @dataclass

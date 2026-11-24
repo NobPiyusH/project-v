@@ -63,3 +63,10 @@ Separation: the plain `motion` score does not separate stills from real shots (p
 ### Judge tuning trial (25 Nov 2026, 7 calls, about $0.039 / Rs 3.5)
 
 Prompt v2 (ordered checks: colour of parts, shape, real motion with first/last frame comparison, no grain/soft-focus reports; 8 frames spread first-to-last plus a frame at a flagged moment). Results on Act 1 beats: the judge did NOT flag the blue wing in s01_b2 or s01_b3 (accepted at 8.7-9.0, even with a hint frame; the hint pointed at 0.25 s because the chroma peak sits at the shot start, while the wing turns blue around 0.8-1.2 s). It called s03_b1, s02_b1 and s06_b1 "near-static" (major), but s03 and s06 have real camera/subject motion by `independent_motion` (7.0 and 10.5), so its static call is unreliable. Policy suggestion: trust `independent_motion` for static, use the judge for shape/colour, and do not rely on it for the blue wing until frames are placed by a better colour-change detector (per-region, not whole-frame mean). Not wired into `gate.run_gate`: the chroma pass (`tier2.chroma_args`) is used only by the trial script.
+
+## Pipeline hook (26 Nov 2026)
+
+Tiers 1-2 (judge OFF, free) now run automatically after the edit. Flag: `QUALITY_GATE_ENABLED` in `.env` (default on; `0`/`false`/`off`/`no` disables). The paid judge is never started by the hook.
+
+- **Studio ASSEMBLY stage**: after `save_master`, the media worker's `quality_gate_check` activity (`workers/activities/gate_check.py`) downloads the master, runs `tools/qualitygate/hook.py`, and stores `videos/<id>/master/quality-gate.json` next to `master.mp4` (tiers, judge off, thresholds used, per-check results). A **fail** raises a non-retryable error, so the stage waits for the owner like any failed stage (rule 2b): Reject = redo the edit, Approve = continue without it. **Warns** are added to the stage summary and never block. A crash of the checker itself (ffmpeg missing) returns status `error`, logs, and does not block.
+- **Film CLI** `tools/film4k/edit.py`: after the render it writes `<name>.quality-gate.json` next to the output, prints the summary, and exits **3** on a fail ("HOLD", output kept). `--no-gate` skips it.

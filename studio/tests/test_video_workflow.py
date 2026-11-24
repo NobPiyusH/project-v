@@ -49,6 +49,7 @@ class FakeControl:
         self.weak_image_reviews = 0
         self.fail_creative = False
         self.keyframe_inspection_fails = 0
+        self.quality_gate = False
         self.lock = threading.Lock()
 
     def ev(self, e):
@@ -180,7 +181,7 @@ class FakeControl:
         return ok("sharpened")
 
     def assembly_request(self, video_id):
-        return {"videoId": video_id}
+        return {"videoId": video_id, "qualityGate": self.quality_gate}
 
     def save_master(self, video_id, result):
         self.ev(f"MASTER:{result['masterUri']}")
@@ -242,6 +243,8 @@ class FakeMedia:
         self.fail_voice = False
         self.fail_inspector = False
         self.fail_stock = False
+        self.gate_fails = 0  # the next N gate checks fail
+        self.gate_calls = 0
 
     def defs(self):
         m = self
@@ -270,6 +273,13 @@ class FakeMedia:
                 raise ApplicationError("TTS quota", type="Test", non_retryable=True)
             return {"lines": [], "model": "m", "voiceName": "v"}
 
+        def gate(req):
+            m.gate_calls += 1
+            if m.gate_fails > 0:
+                m.gate_fails -= 1
+                raise ApplicationError("Quality gate: FAIL, 1 failed: freeze: frozen 3.0 s", type="QualityGateFailed", non_retryable=True)
+            return {"status": "warn", "summary": "Quality gate: WARN, 1 warning: motion/s2 low.", "reportUri": "s3://b/qg.json", "warnings": ["x"]}
+
         def inspect(req):
             if m.fail_inspector:
                 raise ApplicationError("ffmpeg missing", type="Test", non_retryable=True)
@@ -285,6 +295,7 @@ class FakeMedia:
             mk("generate_clips", lambda r: {"clips": [], "containers": 1, "stopped": False}),
             mk("smooth_clips", lambda r: {"clips": [], "containers": 1, "stopped": False}),
             mk("upscale_clips", lambda r: {"clips": [], "containers": 1, "stopped": False}),
+            mk("quality_gate_check", gate),
             mk("assemble_video", lambda r: {"masterUri": "s3://b/master.mp4"}),
             mk("search_footage", lambda r: {"results": [{"shotId": q["shotId"], "query": q["query"]} for q in r["queries"]]}),
             mk("fetch_footage", lambda r: {"uri": "s3://b/f.mp4"}),
@@ -367,6 +378,40 @@ def test_auto_runs_every_planned_stage_and_skips_the_rest():
         assert "STOCK" not in " ".join(e), "lanes off: no stock activity at all"
 
     run_case(case)
+
+
+def test_quality_gate_fail_after_the_edit_waits_for_the_owner_and_warns_do_not_block():
+    async def case(h):
+        h.c.quality_gate, h.m.gate_fails = True, 1
+        w = await h.start("gate-fail")
+        await h.await_waiting(w, "ASSEMBLY")  # the free gate failed the master: held, even though the stage is AUTO
+        assert "ASSEMBLY:1:FAILED" in h.c.events and h.m.gate_calls == 1, "a fail is not retried by Temporal"
+        await w.signal("reject", args=["ASSEMBLY", "redo the edit"])  # retry: edit again, gate passes with a warning
+        await w.result()
+        assert "ASSEMBLY:2:AUTO_PASSED" in h.c.events and h.m.gate_calls == 2 and h.c.events[-1] == "VIDEO:COMPLETED"
+
+    run_case(case)
+
+
+def test_quality_gate_fail_can_be_continued_without_and_off_means_no_check():
+    async def case(h):
+        h.c.quality_gate, h.m.gate_fails = True, 5
+        w = await h.start("gate-skip")
+        await h.await_waiting(w, "ASSEMBLY")
+        await w.signal("approve", args=["ASSEMBLY", None])  # continue without it
+        await w.result()
+        assert "ASSEMBLY:1:SKIPPED" in h.c.events and "MASTER:s3://b/master.mp4" in h.c.events and h.c.events[-1] == "VIDEO:COMPLETED"
+
+    run_case(case)
+    calls = []
+
+    async def off(h):
+        w = await h.start("gate-off")
+        await w.result()
+        calls.append(h.m.gate_calls)
+
+    run_case(off)
+    assert calls == [0]
 
 
 def test_manual_stage_waits_and_reject_reruns_with_notes():

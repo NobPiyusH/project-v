@@ -33,6 +33,11 @@ from studio.video.service import VideoService
 from studio.workflow.activities import ControlActivities, ProducerActivities
 
 
+def _quality_gate_on(value: str) -> bool:
+    """QUALITY_GATE_ENABLED: free quality gate after the edit, on unless set to 0/false/off/no."""
+    return value.strip().lower() not in ("0", "false", "off", "no")
+
+
 def _flag(name: str, default: str = "false") -> bool:
     return os.environ.get(name, default).lower() == "true"
 
@@ -106,7 +111,7 @@ def build_video_context(db: Db, s: Settings, *, llm: Any = None, gateway: Any = 
                        omni_model=env("OMNI_MODEL", "gemini-omni-1.2-flash"), router=router, video_gpu=video_gpu,
                        diagram_width=int(env("VIDEO_DIAGRAM_WIDTH", "1920")), diagram_height=int(env("VIDEO_DIAGRAM_HEIGHT", "1080")))
     footage = FootageStage(deps)
-    assembly = AssemblyStage(deps, int(env("VIDEO_OUTPUT_HEIGHT", "0")))
+    assembly = AssemblyStage(deps, int(env("VIDEO_OUTPUT_HEIGHT", "0")), _quality_gate_on(env("QUALITY_GATE_ENABLED", "1")))
     finish = FinishStage(deps, public_url, approve)
     sharpen = SharpenStage(deps, finish, public_url, approve)
     planner = Planner(presets, llm, s.gemini_api_key, s.text_model, s.story_model)

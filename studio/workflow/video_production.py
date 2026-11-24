@@ -55,6 +55,9 @@ PRODUCER_MEDIA = dict(task_queue=queues.MEDIA, start_to_close_timeout=timedelta(
                       retry_policy=_retry(20, None, 2))  # a paid review: one retry at most
 INSPECTOR_MEDIA = dict(task_queue=queues.MEDIA, start_to_close_timeout=timedelta(minutes=30), heartbeat_timeout=timedelta(minutes=5),
                        schedule_to_close_timeout=timedelta(hours=2), retry_policy=_retry(15, None, 2))
+# Quality gate after the edit: free ffmpeg checks; a fail is not retried (it would only fail again), the owner decides.
+GATE_MEDIA = dict(task_queue=queues.MEDIA, start_to_close_timeout=timedelta(minutes=20), schedule_to_close_timeout=timedelta(hours=24),
+                  retry_policy=_retry(15, None, 2, ["QualityGateFailed"]))
 # Wan clips: a batch can take an hour. Never retried by Temporal: a retry would pay for every clip again, so a failure waits for the owner.
 CLIP_MEDIA = dict(task_queue=queues.MEDIA, start_to_close_timeout=timedelta(hours=4), heartbeat_timeout=timedelta(minutes=3),
                   schedule_to_close_timeout=timedelta(hours=24), retry_policy=_retry(None, None, 1))
@@ -412,7 +415,15 @@ class VideoProductionWorkflow:
         if stage == "UPSCALE":
             return await self._run_smooth(video_id, stage, attempt, notes)
         if stage == "ASSEMBLY":
-            return await _ctl("save_master", video_id, await _media("assemble_video", await _ctl("assembly_request", video_id)))
+            request = await _ctl("assembly_request", video_id)
+            made = await _media("assemble_video", request)
+            saved = await _ctl("save_master", video_id, made)
+            if not request.get("qualityGate"):
+                return saved
+            # Free checks on the master (tiers 1-2, judge off). A fail raises: the stage then waits for the owner like any failed stage
+            # (Reject = redo the edit, Approve = continue without it). Warnings only join the summary.
+            gate = await _media("quality_gate_check", {"videoId": video_id, "masterUri": made["masterUri"], "srtUri": made.get("srtUri")}, GATE_MEDIA)
+            return {**saved, "summary": f"{saved['summary']} {gate['summary']}"}
         return await _ctl("run_stage", video_id, stage, notes, attempt)
 
     async def _run_clips(self, video_id: str, stage: str, attempt: int, notes: str | None) -> dict[str, Any]:
