@@ -1,7 +1,7 @@
 """The periodic jobs Java ran with @Scheduled: the shared pod's "nobody waits" check (every 30 s), the Manual-hold idle release (every 30 s) and
 the autopilot tick (every minute). Each job runs on its own daemon thread; one bad round never stops the schedule (Java caught and logged too).
 
-Started only when STUDIO_JOBS=true (default off): with Java still live, two control planes must never both release pods or start autopilot runs."""
+Started unless STUDIO_JOBS=false, and only in the one process that holds the jobs lock (studio.singleton): two must never both release pods or start autopilot runs."""
 
 from __future__ import annotations
 

@@ -58,8 +58,9 @@ class Settings:
     gpu_lease_grace_minutes: int = 10
     gpu_max_pods: int = 1
     gpu_max_hourly_usd: float = 2.0
-    gpu_watchdog_python: bool = False  # run the Python watchdog loop inside this app (off: the Java one stays in charge)
-    # S7: everything that would make this app act like the live control plane is OFF by default; Java stays in charge.
+    gpu_watchdog_python: bool = False  # the Python watchdog loop inside this app (the only watchdog since Java was removed)
+    # The plain dataclass keeps these OFF so unit tests build a quiet app; from_env() turns them ON (Python is the live control plane since the
+    # Java removal, docs/java-removal.md): set STUDIO_DREAM_ROUTES, STUDIO_VIDEO_ROUTES, STUDIO_JOBS, STUDIO_GPU_WATCHDOG to "false" to switch one off.
     dream_routes: bool = False  # serve /api/dream, /api/autopilot and the Dream GPU routes (STUDIO_DREAM_ROUTES)
     video_routes: bool = False  # serve the video pipeline routes: /api/videos, /api/shots, /api/producer, /api/budget... (STUDIO_VIDEO_ROUTES)
     jobs: bool = False  # run the periodic jobs: pod release checks every 30 s, autopilot tick every minute (STUDIO_JOBS)
@@ -67,6 +68,8 @@ class Settings:
     dream_gpu_provider: str = "modal"  # modal (default, no pod) or broker (rented pods): projectv.dream.gpu-provider
     youtube_token_file: str = ".secrets/youtube-token.json"
     autopilot_zone: str = "Asia/Kolkata"
+    port: int = 8080  # the dashboard and tools/ already talk to :8080
+    migrate_on_start: bool = False  # apply db/migration/V*.sql at start (Flyway-compatible); from_env() turns it on
 
     @property
     def dsn(self) -> str:
@@ -117,12 +120,14 @@ class Settings:
             gpu_lease_grace_minutes=int(e.get("GPU_LEASE_GRACE_MINUTES", "10")),
             gpu_max_pods=int(e.get("GPU_MAX_PODS", "1")),
             gpu_max_hourly_usd=float(e.get("GPU_MAX_HOURLY_USD", "2.0")),
-            gpu_watchdog_python=e.get("STUDIO_GPU_WATCHDOG", "false").lower() == "true",
-            dream_routes=e.get("STUDIO_DREAM_ROUTES", "false").lower() == "true",
-            video_routes=e.get("STUDIO_VIDEO_ROUTES", "false").lower() == "true",
-            jobs=e.get("STUDIO_JOBS", "false").lower() == "true",
+            gpu_watchdog_python=e.get("STUDIO_GPU_WATCHDOG", "true").lower() == "true",
+            dream_routes=e.get("STUDIO_DREAM_ROUTES", "true").lower() == "true",
+            video_routes=e.get("STUDIO_VIDEO_ROUTES", "true").lower() == "true",
+            jobs=e.get("STUDIO_JOBS", "true").lower() == "true",
             temporal_address=e.get("TEMPORAL_ADDRESS", "127.0.0.1:7233"),
             dream_gpu_provider=e.get("DREAM_GPU_PROVIDER", "modal"),
             youtube_token_file=e.get("YOUTUBE_TOKEN_FILE", ".secrets/youtube-token.json"),
             autopilot_zone=e.get("AUTOPILOT_ZONE", "Asia/Kolkata"),
+            port=int(e.get("PORT", e.get("STUDIO_PORT", "8080"))),
+            migrate_on_start=e.get("STUDIO_MIGRATE", "true").lower() == "true",
         )

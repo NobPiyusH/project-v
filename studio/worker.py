@@ -1,10 +1,10 @@
 """Start-up of the Python Temporal worker for Dream Shorts, the Dream GPU controls' workflows and the autopilot's post workflow:
 
-    STUDIO_TEMPORAL_WORKER=true uv run python -m studio.worker
+    uv run python -m studio.worker
 
-It listens on its OWN task queue (projectv-control-py), so the Java worker on projectv-control keeps every running workflow. It refuses to start
-unless STUDIO_TEMPORAL_WORKER=true, and it never rents or pays for anything by itself: it only runs workflows someone started on its queue.
-With this worker running, the Python control plane serves video, Dream and post workflows on that queue; run it only after the owner's go."""
+It listens on the task queue projectv-control-py (the Python workflow types, suffix "Py"). It starts unless STUDIO_TEMPORAL_WORKER=false, and it never
+rents or pays for anything by itself: it only runs workflows someone started on its queue. Workflows started by the old Java worker (queue
+projectv-control, removed 24 Nov 2026) are not served by it: see docs/java-removal.md."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ log = logging.getLogger("studio.worker")
 
 
 def enabled(env: dict[str, str]) -> bool:
-    return env.get("STUDIO_TEMPORAL_WORKER", "false").lower() == "true"
+    return env.get("STUDIO_TEMPORAL_WORKER", "true").lower() == "true"
 
 
 def build(client, ctx, vctx=None):
@@ -52,7 +52,7 @@ def main(env: dict[str, str] | None = None) -> int:
 
     env = dict(os.environ) if env is None else env
     if not enabled(env):
-        print("Not starting: set STUDIO_TEMPORAL_WORKER=true to run the Python worker (the Java worker stays in charge until then).")
+        print("Not starting: STUDIO_TEMPORAL_WORKER=false.")
         return 2
     logging.basicConfig(level=logging.INFO)
     asyncio.run(run(Settings.from_env()))

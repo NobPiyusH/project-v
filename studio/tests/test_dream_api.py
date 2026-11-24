@@ -287,13 +287,13 @@ def test_the_job_set_follows_the_java_schedules_and_the_broker_setting(app_):
     assert [(j.name, j.every, j.initial) for j in jobs] == [("gpu-nobody-waits", 30, 60), ("gpu-idle-manual", 30, 60), ("autopilot-tick", 60, 30)]
 
 
-def test_jobs_start_only_when_asked(scratch_db):
+def test_jobs_start_only_when_asked(scratch_db, scratch_dsn):
     s = Settings(dream_routes=True)
     ctx = build_dream_context(scratch_db, s, llm=FakeLlm(), gateway=FakeGateway(), producer_service=SimpleNamespace(deciding=lambda: False))
     with TestClient(create_app(db=scratch_db, settings=s, dream_ctx=ctx)) as c:  # lifespan runs
         assert c.get("/api/dream/looks").status_code == 200
     on = Settings(dream_routes=True, jobs=True)
-    with TestClient(create_app(db=scratch_db, settings=on, dream_ctx=ctx)) as c:
+    with TestClient(create_app(db=scratch_db, settings=on, dream_ctx=ctx, lock_dsn=scratch_dsn)) as c:
         assert c.get("/api/autopilot").status_code == 200
 
 

@@ -6,7 +6,6 @@ order), dropped afterwards. Tests that change data use this, never the live `pro
 
 from __future__ import annotations
 
-import re
 import shutil
 import subprocess
 import uuid
@@ -16,11 +15,7 @@ import pytest
 
 from studio.config import REPO_ROOT, Settings
 
-MIGRATIONS = REPO_ROOT / "control-plane" / "src" / "main" / "resources" / "db" / "migration"
-
-
-def _version(p) -> int:
-    return int(re.match(r"V(\d+)__", p.name).group(1))
+MIGRATIONS = REPO_ROOT / "db" / "migration"
 
 
 @pytest.fixture(scope="session")
@@ -35,9 +30,12 @@ def scratch_dsn():
         pytest.skip(f"no local Postgres: {e}")
     admin.execute(f'CREATE DATABASE "{name}"')
     dsn = s.dsn.replace(f"dbname={s.postgres_db}", f"dbname={name}")
-    with psycopg.connect(dsn, autocommit=True) as conn:
-        for f in sorted(MIGRATIONS.glob("V*.sql"), key=_version):
-            conn.execute(f.read_text(encoding="utf-8"))
+    from studio.db import PgDb
+    from studio.migrate import migrate
+
+    runner = PgDb(dsn)
+    migrate(runner, MIGRATIONS, user="tests")  # the same runner the app uses at start
+    runner.close()
     yield dsn
     admin.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
     admin.close()

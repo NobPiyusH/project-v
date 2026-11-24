@@ -14,7 +14,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import Response
 
 from studio.config import Settings
-from studio.db import Db, ThreadLocalPgDb
+from studio.db import Db, PgDb, ThreadLocalPgDb
 from studio.gpu.events import PgPodEvents
 from studio.gpu.leases import PgPodLeases
 from studio.gpu.logs import PodLogs
@@ -25,6 +25,7 @@ from studio.media.wire import to_json
 from studio.planner.presets import StylePresets
 from studio.provider.registry import ProviderRegistry
 from studio.routing import Router
+from studio.singleton import JOBS, WATCHDOG, Singleton
 
 
 def _default(o: Any) -> Any:
@@ -50,7 +51,7 @@ class JavaJson(Response):
 
 
 
-def create_app(db: Db | None = None, settings: Settings | None = None, dream_ctx: Any = None, video_ctx: Any = None) -> FastAPI:
+def create_app(db: Db | None = None, settings: Settings | None = None, dream_ctx: Any = None, video_ctx: Any = None, lock_dsn: str | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
     db = db or ThreadLocalPgDb(settings.dsn)  # one connection per thread: requests and background jobs run on many
     ledger = CostLedger(db)
@@ -58,7 +59,7 @@ def create_app(db: Db | None = None, settings: Settings | None = None, dream_ctx
     pricing = Pricing(settings.config_dir)
     router = Router(db, BudgetGuard(db, pricing), pricing)
     presets = StylePresets(settings.config_dir)
-    # ---- GPU pods (S4a): the watchdog loop runs only when STUDIO_GPU_WATCHDOG=true; by default the Java one stays in charge
+    # ---- GPU pods: the watchdog loop (STUDIO_GPU_WATCHDOG, on by default) is the only watchdog; an advisory lock keeps it to one process
     pod_api = RunPodApi(settings.runpod_base_url, settings.runpod_api_key)
     leases = PgPodLeases(db)
     pod_events = PgPodEvents(db, ledger, pricing)
@@ -82,16 +83,27 @@ def create_app(db: Db | None = None, settings: Settings | None = None, dream_ctx
 
         jobs = dream_jobs(ctx)
 
+    dsn = lock_dsn or settings.dsn
+    watchdog_lock = Singleton(dsn, WATCHDOG, "the GPU watchdog")
+    jobs_lock = Singleton(dsn, JOBS, "the periodic jobs")
+
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
-        if settings.gpu_watchdog_python:
+        if settings.migrate_on_start:
+            from studio.migrate import migrate
+
+            migrate(PgDb(dsn))  # an edited or failed migration stops the start (MigrationError)
+        if settings.gpu_watchdog_python and watchdog_lock.try_acquire():
             loop.start()
-        for j in jobs:
-            j.start()
+        if jobs and jobs_lock.try_acquire():
+            for j in jobs:
+                j.start()
         yield
         for j in jobs:
             j.stop()
         loop.stop()
+        watchdog_lock.release()
+        jobs_lock.release()
 
     app = FastAPI(title="Cinestack control plane (Python)", default_response_class=JavaJson, lifespan=lifespan)
 

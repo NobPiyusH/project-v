@@ -15,11 +15,11 @@ from studio.tests.dworld import FakeGateway, FakeLlm, make_world  # noqa: E402
 from studio.workflow import queues  # noqa: E402
 
 
-def test_the_worker_refuses_to_start_unless_the_flag_is_set(capsys):
-    assert worker.enabled({}) is False and worker.enabled({"STUDIO_TEMPORAL_WORKER": "false"}) is False
-    assert worker.enabled({"STUDIO_TEMPORAL_WORKER": "TRUE"}) is True
-    assert worker.main({}) == 2
-    assert "STUDIO_TEMPORAL_WORKER=true" in capsys.readouterr().out
+def test_the_worker_starts_by_default_and_stays_off_when_switched_off(capsys):
+    assert worker.enabled({}) is True and worker.enabled({"STUDIO_TEMPORAL_WORKER": "TRUE"}) is True
+    assert worker.enabled({"STUDIO_TEMPORAL_WORKER": "false"}) is False
+    assert worker.main({"STUDIO_TEMPORAL_WORKER": "false"}) == 2
+    assert "STUDIO_TEMPORAL_WORKER=false" in capsys.readouterr().out
 
 
 def test_the_worker_is_built_on_its_own_queue_with_every_activity_registered(scratch_db):
