@@ -37,7 +37,17 @@ SEEDVR2 = {
     "ema_vae_fp16.safetensors": _f(SV, "ema_vae_fp16.safetensors", "SEEDVR2", 501324814),
     "seedvr2_ema_3b_fp8_e4m3fn.safetensors": _f(SV, "seedvr2_ema_3b_fp8_e4m3fn.safetensors", "SEEDVR2", 3391544696),
 }  # fmt: skip
-GROUPS = {"fun_camera": FUN_CAMERA, "vace": VACE, "seedvr2": SEEDVR2}
+ANIMATE = {  # Wan 2.2 Animate (Apache-2.0): body and face motion from a driving video onto a character image. Sizes from Hugging Face, 25 Nov 2026.
+    "Wan2_2-Animate-14B_fp8_e4m3fn_scaled_KJ.safetensors": _f("Kijai/WanVideo_comfy_fp8_scaled", "Wan22Animate/Wan2_2-Animate-14B_fp8_e4m3fn_scaled_KJ.safetensors", "diffusion_models", 18401760586),
+    "clip_vision_h.safetensors": _f("Comfy-Org/Wan_2.1_ComfyUI_repackaged", "split_files/clip_vision/clip_vision_h.safetensors", "clip_vision", 1264219396),
+    "lightx2v_I2V_14B_480p_cfg_step_distill_rank64_bf16.safetensors": _f("Kijai/WanVideo_comfy", "Lightx2v/lightx2v_I2V_14B_480p_cfg_step_distill_rank64_bf16.safetensors", "loras", 738005744),
+}  # fmt: skip
+GROUPS = {"fun_camera": FUN_CAMERA, "vace": VACE, "seedvr2": SEEDVR2, "animate": ANIMATE}
+NODE_SHAS = {  # custom nodes pinned on 25 Nov 2026
+    "ComfyUI-KJNodes": ("kijai/ComfyUI-KJNodes", "187868f53a7d9df007dbfe85891dab41453f7933"),
+    "comfyui_controlnet_aux": ("Fannovel16/comfyui_controlnet_aux", "c2655d2970d810d8a3d71deed204cdf416b66132"),
+    "ComfyUI-Frame-Interpolation": ("Fannovel16/ComfyUI-Frame-Interpolation", "26545cc2dd95bc3d27f056016300673bdeee78f5"),
+}
 SEEDVR2_NODE_SHA = "4490bd1f482e026674543386bb2a4d176da245b9"  # numz/ComfyUI-SeedVR2_VideoUpscaler, pinned on 24 Nov 2026
 
 

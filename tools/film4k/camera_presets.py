@@ -18,7 +18,10 @@ from dataclasses import dataclass
 FUN_CAMERA_POSES = (
     "Static", "Pan Up", "Pan Down", "Pan Left", "Pan Right", "Zoom In", "Zoom Out", "Anti Clockwise (ACW)", "ClockWise (CW)",
 )  # fmt: skip
-TESTED = {"zoom_in", "pan_left"}  # judged good by eye on 24 Nov 2026 (480p, 2 s); the others are untested
+TESTED = {"zoom_in", "pan_left", "pan_right", "slow_push", "drift_right"}
+# Judged good by eye: zoom_in and pan_left on 24 Nov 2026 (480p, 2 s); pan_right, slow_push, drift_right on 25 Nov 2026 (720x1280, 81 frames, 5 s,
+# docs/film4k.md "Motion block"). Usable but not trusted: zoom_out, pan_up, drift_left. Bad at 5 s: pan_down (black branch-like artefacts), fast_push (tower bends,
+# scene rewrites itself); use fast_push only trimmed to about 2 s.
 
 
 @dataclass(frozen=True)
@@ -44,15 +47,15 @@ PRESETS: dict[str, Preset] = {
     for p in (
         _fun("static", "Static", note="locked-off; subject motion only"),
         _fun("zoom_in", "Zoom In", note="tested: real forward move"),
-        _fun("slow_push", "Zoom In", 0.5, "gentle push-in"),
-        _fun("fast_push", "Zoom In", 1.8, "urgent push-in"),
-        _fun("zoom_out", "Zoom Out", note="untested"),
+        _fun("slow_push", "Zoom In", 0.5, "tested 25 Nov: good gentle push-in"),
+        _fun("fast_push", "Zoom In", 1.8, "tested 25 Nov: bends buildings and rewrites the scene after about 2 s; trim or avoid"),
+        _fun("zoom_out", "Zoom Out", note="tested 25 Nov: usable, modest pull-back"),
         _fun("pan_left", "Pan Left", note="tested: believable sideways move"),
-        _fun("pan_right", "Pan Right", note="untested"),
-        _fun("drift_left", "Pan Left", 0.4, "slow sideways drift"),
-        _fun("drift_right", "Pan Right", 0.4, "slow sideways drift"),
-        _fun("pan_up", "Pan Up", note="untested"),
-        _fun("pan_down", "Pan Down", note="untested"),
+        _fun("pan_right", "Pan Right", note="tested 25 Nov: good, clean sideways move"),
+        _fun("drift_left", "Pan Left", 0.4, "tested 25 Nov: usable, ground texture shifts"),
+        _fun("drift_right", "Pan Right", 0.4, "tested 25 Nov: good slow sideways drift"),
+        _fun("pan_up", "Pan Up", note="tested 25 Nov: usable, weak tilt"),
+        _fun("pan_down", "Pan Down", note="tested 25 Nov: bad, black branch artefacts grow over the ground"),
         _fun("roll_cw", "ClockWise (CW)", note="tested: roll only, last frame warps: use rarely"),
         _fun("roll_acw", "Anti Clockwise (ACW)", note="tested: roll only, last frame warps: use rarely"),
         _vace("push_in", "push_in", "custom path through VACE"),
@@ -65,7 +68,7 @@ PRESETS: dict[str, Preset] = {
     )
 }
 RARE = {"roll_cw", "roll_acw"}
-DEFAULT_CYCLE = ("zoom_in", "pan_left", "slow_push", "drift_right", "fast_push", "pan_right")
+DEFAULT_CYCLE = ("zoom_in", "pan_left", "slow_push", "drift_right", "pan_right")  # fast_push dropped 25 Nov (bends buildings)
 
 
 def preset(name: str) -> Preset:
