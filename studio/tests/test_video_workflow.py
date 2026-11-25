@@ -76,6 +76,7 @@ class FakeControl:
         self.fail_creative = False
         self.keyframe_inspection_fails = 0
         self.quality_gate = False
+        self.interpolate = False  # INTERPOLATE_FPS=local: INTERPOLATE asks for a RIFE run
         self.moon = False  # the plan has a moon block: MOON_LAYER is planned and asks for a composite
         self.lock = threading.Lock()
         self.pod = FakePodState()
@@ -250,6 +251,13 @@ class FakeControl:
         self.ev(f"MOON:{result['videoUri']}")
         return ok("moon saved")
 
+    def interpolate_request(self, video_id):
+        return {"videoId": video_id, "sourceUri": "s3://b/master.mp4", "factor": 2} if self.interpolate else {"skip": "Interpolation is off."}
+
+    def save_interpolated(self, video_id, request, result):
+        self.ev(f"INTERP:{result['videoUri']}")
+        return ok("interpolated")
+
     def footage_search_request(self, video_id, shot_ids, query):
         return {"queries": [{"shotId": f"shot-{i}", "query": "solar flare"} for i in range(self.footage_queries)]}
 
@@ -310,6 +318,9 @@ class FakeMedia:
         self.gate_calls = 0
         self.moon_fails = 0  # the next N Moon composites fail (missing picture)
         self.moon_calls = 0
+        self.interp_fails = 0  # the next N RIFE runs fail
+        self.interp_skip = False  # the worker reports no RIFE program
+        self.interp_calls = 0
 
     def defs(self):
         m = self
@@ -352,6 +363,15 @@ class FakeMedia:
                 raise ApplicationError("The Moon picture was not found", type="MoonLayerInputMissing", non_retryable=True)
             return {"videoUri": "s3://b/moon-layer.mp4", "durationSec": 10.0, "width": 720, "height": 1280, "fps": 16}
 
+        def interp(req):
+            m.interp_calls += 1
+            if m.interp_fails > 0:
+                m.interp_fails -= 1
+                raise ApplicationError("RIFE failed", type="Test", non_retryable=True)
+            if m.interp_skip:
+                return {"skip": "Interpolation skipped: the RIFE program was not found."}
+            return {"videoUri": "s3://b/interpolated.mp4", "durationSec": 10.0, "width": 720, "height": 1280, "fpsIn": 24.0, "fpsOut": 48.0}
+
         def inspect(req):
             if m.fail_inspector:
                 raise ApplicationError("ffmpeg missing", type="Test", non_retryable=True)
@@ -369,6 +389,7 @@ class FakeMedia:
             mk("upscale_clips", lambda r: {"clips": [], "containers": 1, "stopped": False}),
             mk("quality_gate_check", gate),
             mk("moon_layer_composite", moon),
+            mk("interpolate_master", interp),
             mk("assemble_video", lambda r: {"masterUri": "s3://b/master.mp4"}),
             mk("search_footage", lambda r: {"results": [{"shotId": q["shotId"], "query": q["query"]} for q in r["queries"]]}),
             mk("fetch_footage", lambda r: {"uri": "s3://b/f.mp4"}),
@@ -863,5 +884,67 @@ def test_moon_layer_failure_can_be_continued_without_and_manual_mode_holds_a_goo
         await w.signal("approve", args=["MOON_LAYER", None])
         await w.result()
         assert "MOON_LAYER:1:APPROVED" in h.c.events and "MOON:s3://b/moon-layer.mp4" in h.c.events
+
+    run_case(manual)
+
+
+def test_interpolate_is_skipped_without_a_media_call_when_the_flag_is_off():
+    async def case(h):
+        w = await h.start("interp-off")
+        await w.result()
+        assert "INTERPOLATE:1:SKIPPED" in h.c.events and h.m.interp_calls == 0 and h.c.events[-1] == "VIDEO:COMPLETED"
+
+    run_case(case)
+
+
+def test_interpolate_runs_after_the_moon_layer_and_a_missing_rife_program_is_a_clear_skip():
+    async def run(h):
+        h.c.interpolate, h.c.moon = True, True
+        w = await h.start("interp-run")
+        await w.result()
+        ev = h.c.events
+        assert "INTERP:s3://b/interpolated.mp4" in ev and "INTERPOLATE:1:AUTO_PASSED" in ev and ev[-1] == "VIDEO:COMPLETED"
+        assert ev.index("INTERP:s3://b/interpolated.mp4") > ev.index("MOON:s3://b/moon-layer.mp4")
+
+    run_case(run)
+
+    async def missing(h):
+        h.c.interpolate, h.m.interp_skip = True, True
+        w = await h.start("interp-missing")
+        await w.result()
+        assert "INTERPOLATE:1:SKIPPED" in h.c.events and not any(e.startswith("INTERP:") for e in h.c.events) and h.c.events[-1] == "VIDEO:COMPLETED"
+
+    run_case(missing)
+
+
+def test_interpolate_failure_waits_for_the_owner_who_can_retry_or_continue_without_it():
+    async def retry(h):
+        h.c.interpolate, h.m.interp_fails = True, 1
+        w = await h.start("interp-retry")
+        await h.await_waiting(w, "INTERPOLATE")
+        assert "INTERPOLATE:1:FAILED" in h.c.events and h.m.interp_calls == 1, "Temporal does not retry it: the owner decides"
+        await w.signal("reject", args=["INTERPOLATE", "retry"])
+        await w.result()
+        assert "INTERPOLATE:2:AUTO_PASSED" in h.c.events and h.c.events[-1] == "VIDEO:COMPLETED"
+
+    run_case(retry)
+
+    async def without(h):
+        h.c.interpolate, h.m.interp_fails = True, 5
+        w = await h.start("interp-continue")
+        await h.await_waiting(w, "INTERPOLATE")
+        await w.signal("approve", args=["INTERPOLATE", None])
+        await w.result()
+        assert "INTERPOLATE:1:SKIPPED" in h.c.events and h.c.events[-1] == "VIDEO:COMPLETED"
+
+    run_case(without)
+
+    async def manual(h):
+        h.c.interpolate = True
+        w = await h.start("interp-manual", modes={"INTERPOLATE": "MANUAL"})
+        await h.await_waiting(w, "INTERPOLATE")
+        await w.signal("approve", args=[ "INTERPOLATE", None])
+        await w.result()
+        assert "INTERPOLATE:1:APPROVED" in h.c.events and "INTERP:s3://b/interpolated.mp4" in h.c.events
 
     run_case(manual)

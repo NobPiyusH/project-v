@@ -62,6 +62,9 @@ GATE_MEDIA = dict(task_queue=queues.MEDIA, start_to_close_timeout=timedelta(minu
 # Moon layer composite: free local ffmpeg; a missing picture is not retried (it would only fail again), the owner decides.
 MOON_MEDIA = dict(task_queue=queues.MEDIA, start_to_close_timeout=timedelta(minutes=30), schedule_to_close_timeout=timedelta(hours=24),
                   retry_policy=_retry(15, None, 2, ["MoonLayerInputMissing"]))
+# Local RIFE interpolation: free, on the laptop GPU; a failure is not retried by Temporal (it would only take as long again), the owner decides.
+INTERPOLATE_MEDIA = dict(task_queue=queues.MEDIA, start_to_close_timeout=timedelta(hours=3), schedule_to_close_timeout=timedelta(hours=24),
+                         retry_policy=_retry(15, None, 1))
 # Wan clips: a batch can take an hour. Never retried by Temporal: a retry would pay for every clip again, so a failure waits for the owner.
 CLIP_MEDIA = dict(task_queue=queues.MEDIA, start_to_close_timeout=timedelta(hours=4), heartbeat_timeout=timedelta(minutes=3),
                   schedule_to_close_timeout=timedelta(hours=24), retry_policy=_retry(None, None, 1))
@@ -157,6 +160,8 @@ class VideoProductionWorkflow:
 
         if not workflow.patched("moon-layer-v1"):
             self.stages = [s for s in STAGES if s != "MOON_LAYER"]
+        if not workflow.patched("interpolate-v1"):  # histories from before the INTERPOLATE stage existed never run it (replay-safe)
+            self.stages = [s for s in self.stages if s != "INTERPOLATE"]
         only = request.get("onlyStages")
         if only is not None:
             # Re-run: only the requested stages, in production order; everything else keeps its earlier output.
@@ -466,6 +471,18 @@ class VideoProductionWorkflow:
                 self.skip_stage = True
                 return _result(request["skip"])
             return await _ctl("save_moon_layer", video_id, request, await _media("moon_layer_composite", request, MOON_MEDIA))
+        if stage == "INTERPOLATE":
+            # Optional, free, local: RIFE doubles the master's frame rate (INTERPOLATE_FPS=local). Off, or no RIFE program on the worker: skipped.
+            # A real failure raises (waits for the owner: Retry / Continue without it).
+            request = await _ctl("interpolate_request", video_id)
+            if request.get("skip"):
+                self.skip_stage = True
+                return _result(request["skip"])
+            made = await _media("interpolate_master", request, INTERPOLATE_MEDIA)
+            if made.get("skip"):
+                self.skip_stage = True
+                return _result(made["skip"])
+            return await _ctl("save_interpolated", video_id, request, made)
         return await _ctl("run_stage", video_id, stage, notes, attempt)
 
     async def _run_clips(self, video_id: str, stage: str, attempt: int, notes: str | None) -> dict[str, Any]:

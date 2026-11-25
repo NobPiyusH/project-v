@@ -54,6 +54,9 @@ Plan: `docs/plans/camera-control-pipeline.md`. Pod evidence: `docs/pod-tests-24n
 - Bug found by the first real ffmpeg run and fixed: `reverse` on an endless looped still never finishes; the still is now cut to the frame count before the filters.
 - Not proven: 720p and 81-frame quality of Fun Camera, last-frame chaining drift, VACE inpaint quality. Next: one real scene at 720p (about $0.5, needs the owner's yes with a figure).
 
+## Local interpolation, studio stage INTERPOLATE (25 Nov 2026; free, laptop)
+`tools/film4k/interpolate.py` (pure builders + `interpolate()`), `workers/activities/interpolate.py` (activity `interpolate_master`), `studio/production/interpolate_stage.py` (stage, behind `INTERPOLATE_FPS=local`, default off). RIFE ncnn Vulkan `rife-v4.6` doubles a master 24 to 48 fps on the RTX 3050 (4 GB, `-j 1:1:1`): 23 s for 3 s of 1080x1920 (about 7.5 s per second of video), audio stream copied bit for bit, same duration. Local Real-ESRGAN stays out (about 18 s per frame, worse than a plain resize at 4 GB). Runbook: `docs/runbooks/first-live-short.md` section 5c.
+
 ## Motion block (25 Nov 2026; ONE Secure 4090 pod, 99 min, about $1.48 of a $4.5 hard cap)
 Clips, contact sheets and report: `E:\project-data\outputs\motion-block\` (`out/step1_sheet.png`, `out/step2_sheet.png`, `out/step3_sheet.png`, `REPORT.md`). Judged by eye on contact-sheet stills (owner to confirm on the clips).
 - **Step 1, camera presets** (Fun Camera, 720x1280, 81 frames, one keyframe, about 3.5 min per beat, boot 6.2 min): good = pan_right, slow_push, drift_right; usable = zoom_out, pan_up (weak tilt), drift_left (ground texture shifts); bad = pan_down (black branch-like artefacts take over the ground), fast_push (tower bends, scene rewrites itself after about 2 s; trim to 2 s or avoid). `TESTED` in `camera_presets.py` now holds the good ones; `fast_push` left the default cycle.

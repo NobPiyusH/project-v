@@ -21,6 +21,7 @@ from studio.planner.presets import StylePresets
 from studio.production.creative_director import CreativeDirector
 from studio.production.finishing_stages import AssemblyStage, FinishStage, FootageStage, SharpenStage
 from studio.production.inspector import Inspector
+from studio.production.interpolate_stage import InterpolateStage
 from studio.production.moon_stage import MoonLayerStage
 from studio.production.producer import ProducerService
 from studio.production.read_model import ProductionReadModel
@@ -124,11 +125,12 @@ def build_video_context(db: Db, s: Settings, *, llm: Any = None, gateway: Any = 
     sharpen = SharpenStage(deps, finish, public_url, approve)
     moon_on = _flag("MOON_LAYER", "true")  # default ON, but only a plan file with a `moon` block ever gets the stage
     moon = MoonLayerStage(deps, moon_on)
+    interpolate = InterpolateStage(deps, env("INTERPOLATE_FPS", "off"))  # off by default; the stage is always planned and skips itself when off
     planner = ImportedPlanner(Planner(presets, llm, s.gemini_api_key, s.text_model, s.story_model), db, moon_on)
     researcher = researcher or ClaudeResearcher(ClaudeChat(s.anthropic_api_key), ledger, budget, pricing)
     control = ControlActivities(db, planner, researcher=researcher, inspector=inspector, creative=creative, research=research, story=story, music=music,
                                 voice=voice, shots=shots, stock=stock, animatic=animatic, video=video, footage=footage, assembly=assembly, finish=finish,
-                                sharpen=sharpen, clip_progress=clip_progress, moon=moon)
+                                sharpen=sharpen, clip_progress=clip_progress, moon=moon, interpolate=interpolate)
     producer_acts = ProducerActivities(producer, voice)
     videos = VideoService(db, gateway, producer)
     return VideoContext(s, db, pricing, budget, ledger, presets, assets, media_urls or _lazy_urls(s), planner,

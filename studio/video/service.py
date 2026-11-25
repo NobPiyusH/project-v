@@ -37,9 +37,10 @@ REDO_WITH: dict[Stage, list[Stage]] = {
     # Clips cost GPU money: each runs alone, after showing its estimate (finals follow drafts on request).
     Stage.DRAFT_GEN: [Stage.DRAFT_GEN],
     Stage.FINAL_GEN: [Stage.FINAL_GEN],
-    Stage.UPSCALE: [Stage.UPSCALE, Stage.ASSEMBLY, Stage.MOON_LAYER],
-    Stage.ASSEMBLY: [Stage.ASSEMBLY, Stage.MOON_LAYER],  # the Moon layer skips itself for a video without a moon block
-    Stage.MOON_LAYER: [Stage.MOON_LAYER],
+    Stage.UPSCALE: [Stage.UPSCALE, Stage.ASSEMBLY, Stage.MOON_LAYER, Stage.INTERPOLATE],
+    Stage.ASSEMBLY: [Stage.ASSEMBLY, Stage.MOON_LAYER, Stage.INTERPOLATE],  # the Moon layer and interpolation skip themselves when not wanted
+    Stage.MOON_LAYER: [Stage.MOON_LAYER, Stage.INTERPOLATE],  # a new composite needs interpolating again
+    Stage.INTERPOLATE: [Stage.INTERPOLATE],
 }
 
 _IN_PRODUCTION = ("RUNNING", "WAITING", "PAUSED", "CREATED")
