@@ -47,7 +47,7 @@ def set_status(db, vid, status, stage=None):
 def test_redo_with_matches_java():
     assert REDO_WITH[Stage.SCRIPT] == [Stage.SCRIPT, Stage.NARRATION, Stage.SHOT_PLAN, Stage.KEYFRAMES, Stage.ANIMATIC]
     assert REDO_WITH[Stage.NARRATION] == [Stage.NARRATION, Stage.ANIMATIC]
-    assert REDO_WITH[Stage.UPSCALE] == [Stage.UPSCALE, Stage.ASSEMBLY]
+    assert REDO_WITH[Stage.UPSCALE] == [Stage.UPSCALE, Stage.ASSEMBLY, Stage.MOON_LAYER]  # the Moon layer skips itself without a moon block
     assert REDO_WITH[Stage.DRAFT_GEN] == [Stage.DRAFT_GEN]  # clips cost GPU money: each runs alone
     assert Stage.PUBLISH not in REDO_WITH and Stage.PLAN not in REDO_WITH
 

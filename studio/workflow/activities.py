@@ -58,13 +58,14 @@ class ControlActivities:
 
     def __init__(self, db: Any, planner: Any, *, researcher: Any, inspector: Any, creative: Any, research: Any, story: Any, music: Any, voice: Any,
                  shots: Any, stock: Any, animatic: Any, video: Any, footage: Any, assembly: Any, finish: Any, sharpen: Any,
-                 clip_progress: ClipProgress | None = None):
+                 clip_progress: ClipProgress | None = None, moon: Any = None):
         self.db, self.planner, self.researcher = db, planner, researcher
         self.inspector, self.creative = inspector, creative
         self.research_stage, self.story, self.music, self.voice = research, story, music, voice
         self.shots, self.stock_stage, self.animatic = shots, stock, animatic
         self.video, self.footage, self.assembly, self.finish, self.sharpen = video, footage, assembly, finish, sharpen
         self.clip_progress = clip_progress or ClipProgress()
+        self.moon = moon
 
     # ---- plan and placeholder stages
 
@@ -261,6 +262,12 @@ class ControlActivities:
 
     def save_master(self, video_id: str, result: dict[str, Any]) -> dict[str, Any]:
         return stage_result_json(self.assembly.save_master(_id(video_id), from_json(AssemblyResult, result)))
+
+    def moon_request(self, video_id: str) -> dict[str, Any]:
+        return self.moon.request(_id(video_id))
+
+    def save_moon_layer(self, video_id: str, request: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
+        return stage_result_json(self.moon.save(_id(video_id), request, result))
 
     def smooth_estimate(self, video_id: str) -> dict[str, Any]:
         return to_json(self.finish.estimate(_id(video_id)))

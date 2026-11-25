@@ -42,9 +42,11 @@ def _short_title(prompt: str) -> str:
     return t if len(t) <= 70 else t[:67] + "..."
 
 
-def stages_for(plan: VideoPlan) -> list[Stage]:
-    """Which stages this plan needs. PLAN itself always runs."""
+def stages_for(plan: VideoPlan, moon: bool = False) -> list[Stage]:
+    """Which stages this plan needs. PLAN itself always runs. MOON_LAYER only when the plan file has a `moon` block (`moon=True`)."""
     stages = list(Stage)
+    if not moon:
+        stages.remove(Stage.MOON_LAYER)
     if not plan.needsResearch:
         stages.remove(Stage.RESEARCH)
     if plan.music == "none":

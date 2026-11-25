@@ -55,6 +55,8 @@ class ImportedPlan(BaseModel):
     allowUntested: bool = False  # noqa: N815
     width: int = 720
     height: int = 1280
+    moonCaption: dict[str, Any] | None = None  # noqa: N815  the plan's overlay.caption (text, startSec, endSec), drawn by the Moon layer
+    moon: dict[str, Any] | None = None  # the plan's `moon` block (mode "layer"): composited by the MOON_LAYER stage; None = no such stage
 
     # ---- what the stages ask of it
 
@@ -136,10 +138,19 @@ def parse(doc: dict[str, Any]) -> ImportedPlan:
     except Exception as e:  # noqa: BLE001 - pydantic's message names the field
         problems.append(f"video: {e}")
         video = VideoPlan()
+    moon = doc.get("moon")
+    if moon is not None:
+        layer = moon.get("layer") if isinstance(moon, dict) else None
+        if not isinstance(moon, dict) or moon.get("mode") != "layer" or not isinstance(layer, dict):
+            problems.append("moon: needs mode 'layer' and a 'layer' object")
+        elif layer.get("imagePath") is not None and not isinstance(layer["imagePath"], str):
+            problems.append("moon.layer.imagePath must be a text path to a local picture")
     if problems:
         raise ValueError("; ".join(problems))
     return ImportedPlan(video=video, bank=banked.bank, beats=beats, lines=lines, allowUntested=allow,
-                        width=int(gen.get("width", 720)), height=int(gen.get("height", 1280)))
+                        width=int(gen.get("width", 720)), height=int(gen.get("height", 1280)),
+                        moon=moon if isinstance(moon, dict) else None,
+                        moonCaption=((doc.get("overlay") or {}).get("caption") if isinstance(doc.get("overlay"), dict) else None))
 
 
 def read_plan_file(name: str) -> dict[str, Any]:
@@ -180,6 +191,10 @@ class _Wrapper:
 
 
 class ImportedPlanner(_Wrapper):
+    def __init__(self, inner: Any, db: Any, moon_layer: bool = True):
+        super().__init__(inner, db)
+        self._moon_layer = moon_layer  # MOON_LAYER flag: on by default, but the stage only runs for a plan that has a moon block
+
     def plan(self, video_id, prompt: str, owner_notes: str | None):
         imp = load(self._db, video_id)
         if imp is None:
@@ -187,7 +202,7 @@ class ImportedPlanner(_Wrapper):
         from studio.planner.planner import Outcome, stages_for
 
         plan = self._inner.normalise(imp.video, prompt)
-        return Outcome(plan, stages_for(plan), "imported plan")
+        return Outcome(plan, stages_for(plan, moon=self._moon_layer and imp.moon is not None), "imported plan")
 
 
 class ImportedWriter(_Wrapper):

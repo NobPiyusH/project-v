@@ -65,11 +65,11 @@ def composite_cmd(
     plate: str, moon_png: str, out: str, *, w: int = 720, h: int = 1280, dur: float = 10.0, fps: int = 16,
     diameter_frac: float = 0.30, scale_from: float = 1.0, scale_to: float = 2.2, cx: float = 0.5, cy_from: float = 0.62, cy_to: float = 0.36,
     ease: str = "smooth", glow: float = 0.5, glow_scale: float = 1.7, glow_sigma: int = 60,
-    caption: str | None = None, caption_start: float = 0.0, caption_end: float = 4.0, fontfile: str = FONT_WIN,
+    caption: str | None = None, caption_start: float = 0.0, caption_end: float = 4.0, fontfile: str = FONT_WIN, keep_audio: bool = False,
 ) -> list[str]:
     """ffmpeg argv: the Moon PNG scaled from diameter_frac*w x scale_from to x scale_to, its centre moving from (cx, cy_from) to (cx, cy_to)
     (fractions of the frame), a blurred glow copy underneath (padded so the blur is not clipped to a square), an optional top caption, over `plate`. Output yuv420p, no audio (narration and
-    music are mixed later). `plate` is trimmed to `dur`."""
+    music are mixed later) unless `keep_audio` (the studio composites over the finished master: its audio track is copied). `plate` is trimmed to `dur`."""
     scale_curve(0, dur, scale_from, scale_to, ease)  # validates the arguments
     if not 0 < diameter_frac <= 1 or not 0 <= glow <= 1:
         raise ValueError("diameter_frac must be in (0, 1] and glow in [0, 1]")
@@ -93,9 +93,10 @@ def composite_cmd(
         graph.append(f"[b]{drawtext_filter(caption, caption_start, caption_end, max(24, round(w * 0.045)), fontfile=fontfile)}[c]")
         last = "c"
     graph.append(f"[{last}]format=yuv420p[v]")
+    audio = ["-map", "0:a?", "-c:a", "copy"] if keep_audio else ["-an"]
     return [
         "ffmpeg", "-y", "-i", plate, "-loop", "1", "-framerate", str(fps), "-t", f"{dur:g}", "-i", moon_png,
-        "-filter_complex", ";".join(graph), "-map", "[v]", "-r", str(fps), "-t", f"{dur:g}", "-c:v", "libx264", "-crf", "14", "-an", out,
+        "-filter_complex", ";".join(graph), "-map", "[v]", "-r", str(fps), "-t", f"{dur:g}", "-c:v", "libx264", "-crf", "14", *audio, out,
     ]  # fmt: skip
 
 
