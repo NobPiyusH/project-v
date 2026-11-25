@@ -23,6 +23,7 @@ from typing import Any
 
 from studio.db import Db
 from studio.ledger import BudgetExceededError, BudgetGuard, Pricing
+from studio.provider.caps import ProviderCaps
 
 MAX_COOLDOWN_SEC = 30 * 60
 
@@ -67,7 +68,8 @@ def _json_default(o: Any) -> Any:
 
 
 class Router:
-    def __init__(self, db: Db, budget: BudgetGuard, pricing: Pricing):
+    def __init__(self, db: Db, budget: BudgetGuard, pricing: Pricing, caps: ProviderCaps | None = None):
+        self._caps = caps  # per-provider spend limits (config providerCaps); None = not checked
         self._db = db
         self._budget = budget
         self._pricing = pricing
@@ -85,6 +87,7 @@ class Router:
         candidates: list[Candidate],
         preferred: str | None,
         log: bool,
+        scope_id: uuid.UUID | None = None,
     ) -> Choice:
         considered: list[dict[str, Any]] = []
         floor, enough = self._pricing.routing_quality(capability)
@@ -92,7 +95,7 @@ class Router:
         best_score = fallback_score = -math.inf
         for c in candidates:
             row: dict[str, Any] = {"provider": c.provider_id, "estimateInr": _scale(c.estimate_inr, 2)}
-            why = self.ineligible(c, capability)
+            why = self.ineligible(c, capability, stage=stage, scope_id=scope_id or video_id)
             p = self._provider(c.provider_id)
             quality = 0 if p is None else _int_of(p["quality"], 5)
             row["quality"] = quality
@@ -132,7 +135,7 @@ class Router:
             raise BudgetExceededError(f"{reason}. Raise a cap, wait for a cooldown, or switch this stage to Manual.")
         return Choice(chosen.provider_id, reason, decision_id, considered)
 
-    def ineligible(self, c: Candidate, capability: str) -> str | None:
+    def ineligible(self, c: Candidate, capability: str, stage: str | None = None, scope_id: uuid.UUID | None = None) -> str | None:
         """Why this candidate cannot run the job now, or None when it can."""
         p = self._provider(c.provider_id)
         if p is None:
@@ -155,7 +158,11 @@ class Router:
             fits = self._budget.can_spend_claude(c.estimate_inr)
         else:
             fits = True  # free / local / manual
-        return None if fits else f"≈₹{_scale(c.estimate_inr, 0)} would break the monthly {bucket} cap"
+        if not fits:
+            return f"≈₹{_scale(c.estimate_inr, 0)} would break the monthly {bucket} cap"
+        if self._caps is not None:  # the provider's own daily / per-video limit (providerCaps)
+            return self._caps.refusal(c.provider_id, c.estimate_inr, stage=stage, scope_id=scope_id)
+        return None
 
     # ---- health
 

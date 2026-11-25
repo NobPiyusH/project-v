@@ -37,6 +37,7 @@ from studio.media.wire import to_json
 from studio.production import timing as nt
 from studio.production.records import AudioVersion, StoredLine, StoredScript
 from studio.production.support import StageSupport, round3, with_lines
+from studio.provider.caps import check_provider_budget
 from studio.workflow.types import StageResult
 
 
@@ -130,6 +131,7 @@ class MusicStage(StageSupport):
         target = float(plan.durationSec)
         max_segments = int(min(6, math.ceil(target / 55.0) + 1))
         self.d.budget.require(self.d.pricing.music_inr(max_segments), f"MUSIC ({max_segments} Lyria generations at most)")
+        check_provider_budget("gemini_lyria", self.d.pricing.music_inr(max_segments), stage="MUSIC", scope_id=video_id)  # Lyria is not routed: its own cap
         brief = script.music_brief if script is not None and script.music_brief is not None else f"Cinematic score matching the tone: {plan.tone}"
         notes = "" if owner_notes is None or not owner_notes.strip() else "Owner's notes: " + owner_notes
         prompt = (f"Instrumental film score, no vocals, no lyrics. About {jround(target)} seconds long.\n"

@@ -129,6 +129,51 @@ providers:
     enabled: true
 
 # ---------------------------------------------------------------------------------------------------------------
+# Per-provider spend limits (provider-guard, 25 Nov 2026). The router refuses a paid call that would break one and the stage
+# waits for the owner (rule 2b). The ledger keys cost by billing account, so a cap names the rows it counts: ledgerProvider
+# (gemini_api for every Gemini feature) + unitType / noteLike. dailyInr is per UTC day over ALL videos; perVideoInr per video
+# or Short. stages = the only stages allowed to use it (empty = any). idempotent: true only when a failed call may be repeated
+# without billing twice (free, or the provider takes an idempotency key); false = never retried by studio/provider/resilience.
+# Free tiers have no limit but every call is logged. A provider with a key in .env and no entry here is warned about at startup.
+providerCaps:
+  gemini_lyria:                       # billed on the first live run: Lyria was called by itself
+    ledgerProvider: gemini_api
+    unitType: song
+    dailyInr: 30                      # about 3 songs a day (≈₹10 a Short)
+    perVideoInr: 15
+    stages: [MUSIC, DREAM_MUSIC]
+    idempotent: false
+  gemini_image:                       # Nano Banana keyframes
+    ledgerProvider: gemini_api
+    unitType: image
+    dailyInr: 60
+    perVideoInr: 40
+    stages: [KEYFRAMES]
+    idempotent: false
+  gemini_image_review:                # picture judge / VLM critic (tokens), billed on the first live run
+    ledgerProvider: gemini_api
+    unitType: tokens
+    noteLike: ["%review%", "%judge%", "%critic%", "%inspect%"]
+    dailyInr: 40
+    perVideoInr: 20
+    idempotent: true                  # read-only judging: repeating it bills again but never changes the result
+  gemini_omni:
+    ledgerProvider: gemini_api
+    unitType: output_tokens
+    dailyInr: 150
+    perVideoInr: 100
+    stages: [DRAFT_GEN, FINAL_GEN]
+    idempotent: false
+  gemini_api:                         # text; also bounded by the monthly Gemini cap in pricing.gemini
+    ledgerProvider: gemini_api
+    dailyInr: 200
+    idempotent: true
+  groq_whisper:                       # free tier: no limit, every call logged
+    ledgerProvider: groq
+    free: true
+    idempotent: true
+
+# ---------------------------------------------------------------------------------------------------------------
 # Pricing and budgets (M2a). Prices from Google's Gemini API pricing page, 16 Nov 2026: VERIFY before relying on them
 # (CLAUDE.md rule 7). Used to estimate every CostEntry and to enforce the hard monthly cap.
 pricing:

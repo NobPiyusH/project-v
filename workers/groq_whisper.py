@@ -8,8 +8,12 @@ import os
 import urllib.request
 import uuid
 
+from studio.provider.resilience import ProviderCaller
+
 URL = "https://api.groq.com/openai/v1/audio/transcriptions"
 MODEL = "whisper-large-v3"
+# Free tier and read-only (the same audio gives the same text): transient errors are retried; its own breaker pauses it after repeated failures.
+CALLER = ProviderCaller()
 CRLF = "\r\n"
 
 
@@ -31,5 +35,9 @@ def transcribe(wav: bytes, extra_fields: list[tuple[str, str]] | None = None, ti
     request = urllib.request.Request(URL, body, {
         "Authorization": "Bearer " + key, "Content-Type": f"multipart/form-data; boundary={boundary}",
         "User-Agent": "projectv"})
-    with urllib.request.urlopen(request, timeout=timeout) as r:
-        return json.load(r)
+
+    def send() -> dict:
+        with urllib.request.urlopen(request, timeout=timeout) as r:
+            return json.load(r)
+
+    return CALLER.call("groq_whisper", send, idempotent=True)

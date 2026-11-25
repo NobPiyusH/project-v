@@ -30,6 +30,7 @@ from studio.production.stages_m2a import AnimaticStage, MusicStage, ResearchStag
 from studio.production.support import ProductionDeps
 from studio.production.video_gpu import VideoGpu
 from studio.production.video_stage import VideoStage
+from studio.provider.caps import build_caps
 from studio.routing import Router
 from studio.video.clip_progress import ClipProgress
 from studio.video.service import VideoService
@@ -84,7 +85,7 @@ def build_video_context(db: Db, s: Settings, *, llm: Any = None, gateway: Any = 
     env = os.environ.get
     ledger, pricing = CostLedger(db), Pricing(s.config_dir)
     budget = BudgetGuard(db, pricing)
-    router = Router(db, budget, pricing)
+    router = Router(db, budget, pricing, build_caps(db, s.config_dir))
     presets = StylePresets(s.config_dir)
     assets = assets or AssetStore(db)
     llm = llm or (dream_ctx.dreams.llm if dream_ctx is not None else build_llm(s, ledger, pricing, budget, router))
