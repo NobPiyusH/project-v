@@ -108,7 +108,7 @@ def build_dream_gpu(s: Settings, db: Db, pricing: Pricing, ledger: CostLedger, d
     broker has no provider, so nothing can be rented. With =broker it holds RunPod (the studio's default provider; the others need their own
     config) and even then nothing is rented until a Short asks for pictures or clips. Every rental goes through GpuBroker.acquire()
     (self-stop wrapper + watchdog lease)."""
-    from studio.gpu.broker import support
+    from studio.gpu.broker import community, support
     from studio.gpu.broker.broker import GpuBroker
     from studio.gpu.broker.config import BrokerConfig
     from studio.gpu.broker.records import PgBrokerRecords
@@ -116,6 +116,7 @@ def build_dream_gpu(s: Settings, db: Db, pricing: Pricing, ledger: CostLedger, d
     from studio.gpu.broker.wallet import GpuWallet
     from studio.gpu.events import PgPodEvents
     from studio.gpu.leases import PgPodLeases
+    from studio.gpu.logs import PodLogs
     from studio.gpu.pods import GpuPodLimits, RunPodApi
 
     on = s.dream_gpu_provider.lower() == "broker"
@@ -126,7 +127,9 @@ def build_dream_gpu(s: Settings, db: Db, pricing: Pricing, ledger: CostLedger, d
         providers.append(RunPodProvider(api, s.runpod_base_url, s.runpod_api_key))
     prefs = support.PgPreferences(db)
     broker = GpuBroker(providers, cfg, GpuWallet.from_db(cfg, db, pricing), PgBrokerRecords(db, pricing), PgPodLeases(db), PgPodEvents(db, ledger, pricing),
-                       GpuPodLimits.from_settings(s), prefs=prefs, auth=support.WorkerAuth(), states=support.PgStates(db), boot_timings=support.PgTimings(db))
+                       GpuPodLimits.from_settings(s), prefs=prefs, auth=support.WorkerAuth(), states=support.PgStates(db), boot_timings=support.PgTimings(db),
+                       cloud_preference=s.pod_cloud_preference,
+                       boot_probe=community.PodLogsProbe(PodLogs(s.runpod_base_url, s.runpod_api_key)))
     estimate = RentalEstimate(fallback_hours=cfg.expected_hours)
     return DreamGpu(broker, db, prefs, pricing, "broker" if on else "modal", start_seconds=estimate.start_seconds, estimate=estimate,
                     worst_case_hourly_usd=s.gpu_max_hourly_usd, warm_image=_env("POD_WARM_IMAGE", "GPU_WARM_IMAGE"),

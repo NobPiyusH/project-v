@@ -58,6 +58,7 @@ class Settings:
     gpu_lease_grace_minutes: int = 10
     gpu_max_pods: int = 1
     gpu_max_hourly_usd: float = 2.0
+    pod_cloud_preference: str = "secure"  # POD_CLOUD_PREFERENCE: secure (default) or community_then_secure (abort-and-retry rule, studio/gpu/broker/community.py)
     gpu_watchdog_python: bool = False  # the Python watchdog loop inside this app (the only watchdog since Java was removed)
     # The plain dataclass keeps these OFF so unit tests build a quiet app; from_env() turns them ON (Python is the live control plane since the
     # Java removal, docs/java-removal.md): set STUDIO_DREAM_ROUTES, STUDIO_VIDEO_ROUTES, STUDIO_JOBS, STUDIO_GPU_WATCHDOG to "false" to switch one off.
@@ -121,6 +122,7 @@ class Settings:
             gpu_lease_grace_minutes=int(e.get("GPU_LEASE_GRACE_MINUTES", "10")),
             gpu_max_pods=int(e.get("GPU_MAX_PODS", "1")),
             gpu_max_hourly_usd=float(e.get("GPU_MAX_HOURLY_USD", "2.0")),
+            pod_cloud_preference=e.get("POD_CLOUD_PREFERENCE", "secure"),
             gpu_watchdog_python=e.get("STUDIO_GPU_WATCHDOG", "true").lower() == "true",
             dream_routes=e.get("STUDIO_DREAM_ROUTES", "true").lower() == "true",
             video_routes=e.get("STUDIO_VIDEO_ROUTES", "true").lower() == "true",
