@@ -1,3 +1,5 @@
+> **Java-era document.** The Java control plane was removed on 24 Nov 2026 (tag `java-final`); `CLAUDE.md` and `docs/DEVELOPER-TAKEOVER.md` win. Class and path names below refer to the removed `control-plane/`; see `docs/java-removal.md`.
+
 # M3 GPU broker: runbook
 
 Design: `docs/plans/m3-gpu-router.md`. Code: `control-plane/src/main/java/com/projectv/gpu/broker/`.

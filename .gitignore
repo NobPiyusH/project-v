@@ -35,3 +35,7 @@ research_notes/
 
 # Windows shell crash dumps
 *.stackdump
+
+# Local scratch
+logs-test.txt
+dashboard/dist/

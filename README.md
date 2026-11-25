@@ -1,10 +1,11 @@
 # Project V Studio
 
-A personal AI video studio: **text prompt → complete, publish-ready video**. Every production stage runs in
-**Auto** (default) or **Manual** mode. See [docs/HANDOVER.md](docs/HANDOVER.md) (start with "Revision R1") and
-[CLAUDE.md](CLAUDE.md).
+A personal AI video studio: **text prompt → complete, publish-ready video**. Python only (the Java control plane was removed on 24 Nov 2026). Every production stage runs in
+**Auto** (default) or **Manual** mode. New here? Read [docs/DEVELOPER-TAKEOVER.md](docs/DEVELOPER-TAKEOVER.md) first, then [CLAUDE.md](CLAUDE.md)
+(rules and commands) and [docs/README.md](docs/README.md) (index of all docs). The requirements book is
+[docs/HANDOVER.md](docs/HANDOVER.md) (stale on the stack; the takeover guide wins).
 
-**Current milestone: M2a (story pipeline).** Plan → Research (Google Search, sourced facts) → Concept → Script →
+**Status:** see the takeover guide section 10. Pipeline summary (M2a): Plan → Research (Google Search, sourced facts) → Concept → Script →
 Music (Lyria, beat-mapped) → Narration (Gemini TTS) + Shot plan (beat-snapped) → Keyframes (Nano Banana for hero
 shots, Z-Image on Modal for the rest) → Animatic. Every stage runs Auto or Manual; failed stages wait for you
 (Retry / Continue without it). Finished stages can be redone with only their dependents; single shots can be
@@ -40,7 +41,7 @@ uv run python -m workers.main
 npm --prefix dashboard run dev
 ```
 
-Tests: `uv run --group dev --group studio python -m pytest` (studio, workers, tools). Lint: `uvx ruff@0.17.5 check .`
+Tests: `uv run --group dev --group studio python -m pytest` (studio, workers, tools). Lint: `uvx ruff@0.17.5 check .`. Secret scan and lint on commit: see [docs/dev-setup.md](docs/dev-setup.md).
 
 ## Layout
 
