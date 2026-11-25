@@ -9,6 +9,8 @@ from studio.planner import imported, narration
 
 ROOT = Path(__file__).resolve().parents[2]
 MOON = json.loads((ROOT / "docs/shorts/moon-10x-closer-plan.json").read_text(encoding="utf-8"))
+# The repo plan was shortened after this check caught it (25 Nov 2026); these tests keep the line exactly as it ran live (31% over its beat).
+MOON["script"][1]["text"] = "Tides would climb far higher, flooding coasts twice a day beneath one enormous Moon."
 
 
 def test_estimate_uses_words_per_second_and_punctuation_pauses():
