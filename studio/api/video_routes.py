@@ -17,6 +17,7 @@ from fastapi.responses import RedirectResponse, Response
 
 from studio.api.video_wiring import VideoContext
 from studio.media.wire import to_json
+from studio.planner.imported import read_plan_file, title_of
 from studio.video.service import REDO_WITH, CreateVideo
 from studio.workflow.stage import Stage, StageMode
 
@@ -76,11 +77,25 @@ def register_video_routes(app: FastAPI, v: VideoContext, JavaJson: type[Response
     @guarded
     async def create(request: Request):
         b = await body(request)
+        plan_doc = b.get("plan")
+        if b.get("planFile") is not None:  # a plan file in docs/shorts, e.g. "moon-10x-closer-plan.json"
+            try:
+                plan_doc = read_plan_file(str(b["planFile"]))
+            except (ValueError, OSError) as e:
+                raise HTTPException(status_code=400, detail=str(e)) from e
+        if plan_doc is not None and not isinstance(plan_doc, dict):
+            raise HTTPException(status_code=400, detail="plan must be a JSON object")
         prompt = b.get("prompt")
+        if prompt is None and plan_doc is not None:
+            prompt = title_of(plan_doc)  # the plan carries the idea; the prompt is only its label
         if prompt is None or not str(prompt).strip() or len(prompt) > 4000:
             raise HTTPException(status_code=400, detail="prompt must not be blank and at most 4000 characters")
         modes = None if b.get("modes") is None else {_stage(k): StageMode.parse(m) for k, m in b["modes"].items()}
-        vid = v.videos.create(CreateVideo(prompt, None if b.get("defaultMode") is None else StageMode.parse(b["defaultMode"]), modes, b.get("reviewMinutes")))
+        try:
+            vid = v.videos.create(CreateVideo(prompt, None if b.get("defaultMode") is None else StageMode.parse(b["defaultMode"]), modes,
+                                              b.get("reviewMinutes"), plan_doc))
+        except ValueError as e:  # an invalid plan file
+            raise HTTPException(status_code=400, detail=f"plan rejected: {e}") from e
         return JavaJson({"id": vid}, status_code=201)
 
     @app.get("/api/videos")

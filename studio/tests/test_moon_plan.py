@@ -96,8 +96,9 @@ def test_the_moon_shot_plan_goes_through_the_real_shot_stage_with_the_bank_paste
     st.shot_plan(video, None)
     rows = st.shots(video)
     assert [r["camera_move"] for r in rows] == cams
-    # The stage times shots from the narration (each line starts its own shot), NOT from the plan's per-beat 5 s: with lines this short the
-    # stored shots come out about 2.7 / 3.9 / 8.4 s. Only the total is kept. Recorded in docs/runbooks/first-live-short.md (risk 3).
+    # A video WITHOUT an imported plan is timed from the narration (each line starts its own shot): with lines this short the stored shots come
+    # out about 2.7 / 3.9 / 8.4 s, only the total is kept. A video created from the plan file uses the plan's 5 s beats instead
+    # (test_a_plan_video_is_timed_from_its_five_second_beats_not_from_the_narration).
     assert abs(sum(float(r["duration_target_sec"]) for r in rows) - 15) < 0.6
     loc = p.bank.locations[0].description
     for r, stored in zip(rows, PLAN["resolvedPrompts"], strict=True):

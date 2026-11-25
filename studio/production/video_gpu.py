@@ -29,6 +29,8 @@ POD = "gpu_pod"  # the routing/provider id of the rented-pod route (config/provi
 DRAFT = "draft"
 FINAL = "final"
 REFERENCE_PIXELS = 480.0 * 832.0  # the size the pod's seconds-per-81-frames figure was measured at (Dream Shorts); scaling is an estimate
+CAMERA_SECONDS_PER_81 = 220.0  # Fun Camera 720x1280, 81 frames on a 4090: about 3.5 min a beat (motion block 25 Nov 2026; an estimate, not a quote)
+CAMERA_SETUP_SECONDS = 360.0  # the camera job fetches the Fun Camera experts, LoRAs and text encoder (about 38 GB) before its first beat
 PIXEL_EXPONENT = 1.75  # Modal H100 measured 30 s (480p) vs 133 s (720p) per 81 frames: 2.3x the pixels took 4.4x the time. Not measured on a pod.
 
 
@@ -89,8 +91,13 @@ class VideoGpu:
     def clip_seconds(self, video_id: uuid.UUID, jobs: list[ClipJob]) -> float:
         """Pod seconds for these clips (config time per 81 frames; the pod start-up only when no pod is open). The configured seconds
         were measured at 480x832: scale up for larger clips so 720p is not under-estimated."""
-        equivalent = sum(j.num_frames * max(1.0, math.pow(j.width * j.height / REFERENCE_PIXELS, PIXEL_EXPONENT)) for j in jobs)
-        return self.gpu.clip_seconds(video_id, math.ceil(equivalent))
+        plain = [j for j in jobs if not j.camera]
+        equivalent = sum(j.num_frames * max(1.0, math.pow(j.width * j.height / REFERENCE_PIXELS, PIXEL_EXPONENT)) for j in plain)
+        seconds = self.gpu.clip_seconds(video_id, math.ceil(equivalent))
+        cams = [j for j in jobs if j.camera]
+        if cams:  # measured per beat, not scaled from the SVI figure
+            seconds += CAMERA_SETUP_SECONDS + sum(CAMERA_SECONDS_PER_81 * j.num_frames / 81.0 for j in cams)
+        return seconds
 
     def picture_seconds(self, video_id: uuid.UUID, pictures: int) -> float:
         return self.gpu.picture_seconds(video_id, pictures)

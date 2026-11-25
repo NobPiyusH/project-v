@@ -315,6 +315,7 @@ class ClipJob:
     end_image_uri: str | None = None  # first-last frame chaining
     scene: int = 0  # SVI scenes (1-based), 0 = not an SVI beat
     beat: int = 0
+    camera: str | None = None  # Fun Camera preset (tools/film4k/camera_presets.py); set = the pod runs the Fun Camera graph (mode "camera")
 
 
 @dataclass

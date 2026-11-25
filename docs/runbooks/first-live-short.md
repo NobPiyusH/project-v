@@ -1,7 +1,7 @@
 # First live Short: "What if the Moon were 10 times closer?" (runbook, prepared 25 Nov 2026)
 
-Status: **prepared, nothing spent, nothing rented.** The plan file, its tests and a free rehearsal exist; the live run needs the owner's yes and a figure
-(section 8). All prices below are ESTIMATES from earlier measurements (`docs/pod-tests-24nov.md`, `docs/film4k.md`), not quotes: read the live price first (CLAUDE.md rule 7).
+Status: **prepared, nothing spent, nothing rented.** The plan file, the studio code for it (plan import, camera presets on the pod route, plan timing, $3.50/day cap; section 3) and
+a free rehearsal exist. The owner approved $2 for the first LIVE Moon Short (25 Nov 2026, "ok for 2$"); the live run itself is a separate step (section 8). All prices below are ESTIMATES from earlier measurements (`docs/pod-tests-24nov.md`, `docs/film4k.md`), not quotes: read the live price first (CLAUDE.md rule 7).
 
 ## 1. What was prepared
 
@@ -9,6 +9,9 @@ Status: **prepared, nothing spent, nothing rented.** The plan file, its tests an
 |---|---|
 | The plan (video plan, one-location bank, 3 timed beats, narration, camera presets, resolved prompts) | `docs/shorts/moon-10x-closer-plan.json` |
 | Test that the plan loads, validates (`bank.validate`), pastes the bank verbatim, uses legal Wan sizes and tested camera presets, and goes through the real `ShotStage` | `studio/tests/test_moon_plan.py` |
+| Plan import: `POST /api/videos` with `planFile` / `plan`; plan-driven PLAN, CONCEPT, SCRIPT, SHOT_PLAN and per-beat timing | `studio/planner/imported.py`, `studio/api/video_routes.py`, `studio/production/shot_stage.py` |
+| Camera presets on the pod route (Fun Camera, 720x1280, 81 frames, chains of 2) | `studio/production/camera.py`, `video_stage.py`, `workers/pod/server.py`, `workers/activities/clips.py` |
+| Tests for all of it (fakes only) | `studio/tests/test_camera_and_plan_import.py`, `workers/tests/test_pod_camera.py` |
 | Free rehearsal of the studio on live Temporal (no keys, no pod) | section 2 |
 
 The idea: 15 s vertical, 3 beats of 5 s, 720x1280, 81 frames at 16 fps (5.06 s per beat), style "realistic cinematic night". Camera: `zoom_in`, `pan_left`, `zoom_in`
@@ -26,7 +29,7 @@ a separate Temporal namespace (`TEMPORAL_NAMESPACE=rehearsal`, see bug 1 below),
 | CONCEPT | Fails closed: no LLM key anywhere in the text chain. |
 | SCRIPT, NARRATION, SHOT_PLAN | `No concept yet` / `No script yet` (correct: they depend on the LLM stages). |
 | MUSIC | Fails closed: no Gemini key (Lyria). |
-| KEYFRAMES | `No shots to render; run the shot plan first`. This is the first stage that would spend (images) and the first GPU stage. **Stop point.** |
+| KEYFRAMES | `No shots to render; run the shot plan first`. This is the first stage that would spend (images) and the first GPU stage. **Stop point.** (Before 25 Nov: CONCEPT to SHOT_PLAN failed for lack of LLM keys. With a plan file those four stages need no key, so the rehearsal now reaches KEYFRAMES: section 10.) |
 
 So: the whole control path (API, workflow, stage modes, owner approve/skip, failure-waits-for-owner, DB records) is proven live. Everything from CONCEPT on needs
 paid LLM keys; everything from KEYFRAMES on needs a pod. Not exercised at all: any media activity that succeeds, the clip batch, ANIMATIC, ASSEMBLY, the quality-gate hook.
@@ -46,27 +49,40 @@ paid LLM keys; everything from KEYFRAMES on needs a pod. Not exercised at all: a
 - A deterministic precondition error (`No shots to render`, `No concept yet`) is retried by Temporal up to 10 times with backoff (about 6 minutes) before the stage waits for the owner. Harmless, slow feedback.
 - On 25 Nov the owner's machine had ONE API and ONE media worker but TWO `studio.worker` processes listening on `projectv-control-py` (two launcher/child pairs). Two control workers share the queue, so an activity can run on either; harmless for the same code and DB, but stop one before a live run (`tools\ops\start_studio.ps1` is meant to be idempotent).
 
-## 3. Three things that will surprise you on the live run (read first)
+## 3. What was fixed on 25 Nov 2026, and what still surprises (read first)
 
-1. **The studio's GPU route cannot do the camera presets.** Studio clips on a pod (`VIDEO_PROVIDER_DRAFT=broker`) run the pod worker's Wan 2.2 + **SVI** graph
-   (`workers/pod/server.py`). Fun Camera (`zoom_in`, `pan_left`) exists only in `tools/film4k/camera_graphs.py`, used by the one-off script
-   `E:\project-data\outputs\camera-scene\run.py` (outside git). The shot's `cameraMove` is only a word in the prompt in the studio. So the Moon plan's presets are honoured
-   by **Route B**, not by **Route A** (section 4).
-2. **The studio times shots from the narration, not from the plan's 5 s beats.** `ShotStage` starts each shot at its narration line and fits the rest; with realistic line lengths the stored
-   shots come out about 2.7 / 3.9 / 8.4 s (total kept at 15 s). A 5.06 s clip stretched to 8.4 s is a hold or slow-down: judge it by eye. The plan's per-beat `startSec/durationSec` are checked by the validator and used by nothing else yet.
-3. **There is no "load this plan" entry point.** The Planner, Writer and Director (paid LLMs) write their own plan from the prompt. To steer them, put the beats, the narration lines and the camera words in the prompt (section 5). Importing the JSON directly into the DB would be a small, free feature; it is not built.
+The three blockers the first version of this runbook listed are fixed in code (tests: `studio/tests/test_camera_and_plan_import.py`, `workers/tests/test_pod_camera.py`); none of it has run on a real pod yet.
 
-## 4. Two routes: pick one (owner's call)
+1. **Camera presets on the studio's pod route.** With `VIDEO_CAMERA_PRESETS=true` (the default) every clip of a **9:16** video that goes to the broker (`VIDEO_PROVIDER_DRAFT=broker`) runs the Wan 2.2 **Fun Camera** graph instead of SVI:
+   720x1280, 81 frames, 16 fps, one take per shot (hero shots no longer get two takes: cost), mode `camera`, a preset per shot.
+   - The preset is the shot's `camera_move` when it names a preset (`zoom_in`, `pan_left`, `pan_right`, `slow_push`, `drift_right` are TESTED; "Pan Left" / "pan-left" also match). Any other camera text (a model's "slow push-in") gets a varied TESTED preset from `plan_camera`, never the same twice in a row.
+   - An **untested** preset (`pan_down`, `fast_push`, `zoom_out`, `pan_up`, `drift_left`, rolls) named by a plan file is **refused** (the plan is rejected at creation with a 400 naming the preset; the stage refuses it too) unless `VIDEO_CAMERA_ALLOW_UNTESTED=true` or the plan says `generation.allowUntested: true`. The pod worker refuses it as well unless `allowUntested` is sent.
+   - **Chains of two**: the request is `chain=true, chainGroup=2`: beat 2 starts from the last frame of beat 1, beat 3 restarts from its own fresh keyframe (rule of the 25 Nov motion block: from the third chained beat the scene drifts blue and soft). Only for a whole batch of consecutive shots 1..n; a redo of single shots starts each from its own keyframe.
+   - A camera clip is already 720x1280 and final quality: **FINAL_GEN makes no final pass** for camera shots unless you pick a shot for a redo.
+   - The pod fetches the Fun Camera experts + LoRAs + text encoder (about 38 GB) on the first camera clip, like SVI: the estimate adds about 6 min of setup and about 3.7 min per beat (`CAMERA_SETUP_SECONDS`, `CAMERA_SECONDS_PER_81` in `studio/production/video_gpu.py`; measured on 24-25 Nov, an estimate not a quote). The warm image (`POD_WARM_IMAGE`) does **not** contain these weights yet, so the first camera clip downloads them (the volume copy is used when `POD_VOLUME_ID` is set).
+   - Horizontal (16:9) videos and `VIDEO_CAMERA_PRESETS=false` keep the old SVI / plain route unchanged.
+2. **Load a plan.** `POST /api/videos` accepts `planFile` (a `.json` inside `docs/shorts`, by name) or `plan` (the object). It is validated first (`studio/planner/imported.py`: bank, location ids, beat timings, camera presets, script lines on real beats); a bad plan is a 400 listing every problem and nothing is created.
+   The plan is stored under `video.plan_json -> 'imported'`; the stages are the same (modes, approvals, redo) but for that video **PLAN, CONCEPT, SCRIPT and SHOT_PLAN cost nothing** (no planner/writer/director LLM call; the PLAN stage keeps the imported file next to the plan it writes). The Creative Director's shot-plan review is skipped too (it is a paid call that rewrites prompts in place). `prompt` is optional with a plan (the title is used as the label).
+3. **Shot timing from the plan.** Shots take the plan's per-beat `startSec` / `durationSec` (5 s each, 15 s total) instead of being fitted to the narration; the narration lines keep the plan's own `startSec` (0.3 / 5.2 / 10.2 s) and may be shorter than their beat. The edit trims the 5.06 s clip to the 5 s beat. A video without a plan is timed from the narration as before.
 
-| | Route A: the studio (Temporal, broker, gate) | Route B: the camera-scene script (Fun Camera) |
+Still surprising:
+- **Nothing here has run on a pod.** The Fun Camera graph is the one that worked on 24-25 Nov (`tools/film4k/camera_graphs.py`); the pod worker has its own copy (frames saved as images, encoded by the existing encoder) and a test that fails when the two drift. First live use of: `/clip` with `camera`, `ensure_camera` downloads, chain groups on the pod, the broker for video. Watch the first beat's log.
+- **Colour matching is not implemented.** Beat 3 restarts from its own FLUX keyframe, which is a fresh picture, not a colour-matched copy of beat 2's end. For one location with one text block pasted into every prompt this should look consistent; judge it by eye (and `quality-gate` `color_drift`).
+- **KEYFRAMES make one FLUX picture per beat** (three pictures, not one). That is intended (beats 1 and 3 each need their own start picture), about 16 GB of FLUX weights on the pod the first time.
+- A deterministic precondition error (`No shots to render`, `No concept yet`) is retried by Temporal up to 10 times (about 6 minutes) before the stage waits for the owner.
+- Two `studio.worker` processes can listen on `projectv-control-py` (two launcher/child pairs); harmless for the same code, but stop one before a live run. After this change restart the control plane, both workers (`studio.worker`, `workers.main`) so they run the new code.
+
+## 4. Routes: pick one (owner's call)
+
+| | Route A: the studio (Temporal, broker, gate) | Route B: the camera-scene script (Fun Camera moves, fallback) |
 |---|---|---|
-| Proves | the Python studio end to end (HIGH risk item in `docs/DEVELOPER-TAKEOVER.md`) | the Moon look with real camera moves |
-| Clips | Wan 2.2 + SVI, 9:16 drafts 480x832, finals 720p; no camera control | Wan 2.2 Fun Camera, 720x1280, 81 frames, 3 chained beats (last frame to next beat) |
-| Spend beyond the pod | LLM calls (plan, concept, script, shot plan), narration, music, keyframes on the pod | one keyframe (about $0.03 on Seedream) or a local image; no LLM, no audio |
+| Proves | the Python studio end to end (HIGH risk item in `docs/DEVELOPER-TAKEOVER.md`) with real camera moves | the Moon look with real camera moves, no studio |
+| Clips | Wan 2.2 Fun Camera, 720x1280, 81 frames, chains of 2 beats | the same graph, 3 chained beats (last frame to next beat; the "at most 2" rule is NOT in that script) |
+| Spend beyond the pod | keyframes on the pod (FLUX); narration (Gemini TTS or ElevenLabs) and music (Lyria) if those stages are on; **no LLM for plan/concept/script/shots** | one keyframe (about $0.03 on Seedream) or a local image; no LLM, no audio |
 | Quality gate | runs after ASSEMBLY (`quality_gate_check`) | run by hand (section 7) |
-| Code state | never run on a pod; first real use of the broker for video | `run.py` ran once (24 Nov, $0.32 est., 3 beats); needs 4 edits (section 6) |
+| Code state | the camera route has never run on a pod | `run.py` ran once (24 Nov, $0.32 est., 3 beats); needs 4 edits (section 6) |
 
-Recommendation: **Route B first** (about $0.6-1.0, one pod, the camera moves are the point of this Short), then Route A as its own approved test. If the owner wants a single run, Route A is the one that tests the studio.
+Recommendation: **Route A** for the first live run (the owner approved the $2 for the first LIVE Moon Short): it is the Short and the studio test in one. Keep Route B as the fallback if the studio's pod route fails on the first beat.
 
 ## 5. Route A: the studio
 
@@ -75,8 +91,10 @@ Settings (put in `.env`; never print it; restart the control plane and both work
 ```
 DREAM_GPU_PROVIDER=broker          # the broker itself
 VIDEO_PROVIDER_DRAFT=broker        # clips on a rented pod (default is wan = Modal, which is capped at 0 until 1 Dec 2026)
-VIDEO_PROVIDER_FINAL=broker
+VIDEO_PROVIDER_FINAL=broker        # camera shots make no final pass; this only keeps FINAL_GEN off Omni/Gemini
 VIDEO_PROVIDER_KEYFRAMES=broker    # FLUX.2 klein on the same pod; default would use Gemini images (paid) or Modal
+VIDEO_CAMERA_PRESETS=true          # default true: Fun Camera presets on 9:16 pod clips (this change)
+VIDEO_CAMERA_ALLOW_UNTESTED=false  # default false: untested presets are refused
 VIDEO_GPU_IDLE_MINUTES=5
 VIDEO_SHOT_BANK=true               # default; the bank is pasted into every shot
 QUALITY_GATE_ENABLED=1             # default
@@ -90,9 +108,8 @@ GPU_IDLE_MINUTES=10
 RUNPOD_API_KEY=...                 # already in .env
 ```
 
-Cap fields (`config/providers.yaml`, `pricing.gpuBroker`): `dailyCapUsd` is **10.00 today** ("while testing", 22 Nov) although the owner's standing GPU cap is **$3.50/day**; `totalCapUsd: 20`;
-`providers.runpod.monthlyCapUsd: 12`. For this run set `dailyCapUsd: 3.50` (a config change: owner's decision). Every rental also reserves against these caps before it starts.
-The Gemini monthly cap (`monthlyCapInr: 1000`) and the AICredits cap (Rs 150) apply to LLM spend; the OpenAI key (script writer) has no per-video cap in config: keep its key balance small.
+Cap fields (`config/providers.yaml`, `pricing.gpuBroker`): `dailyCapUsd` is **3.50** (set 25 Nov 2026, test `test_the_studio_daily_gpu_cap_is_three_fifty`); `totalCapUsd: 20`; `providers.runpod.monthlyCapUsd: 12`. Every rental reserves against these caps before it starts.
+The Gemini monthly cap (`monthlyCapInr: 1000`) and the AICredits cap (Rs 150) apply to LLM spend; the plan stages need none of it.
 
 Start everything (after the owner's yes):
 
@@ -111,24 +128,28 @@ powershell -File tools\podkit\reaper.ps1
 powershell -File tools\podkit\reaper.ps1 -Apply -MaxHours 1.5
 ```
 
-Create the video (MANUAL so every stage waits for you; the prompt carries the beats because there is no plan import, section 3):
+Create the video from the plan file (MANUAL so every stage waits for you; no prompt needed, the plan carries the beats, camera presets and narration):
 
 ```powershell
-$prompt = @'
-What if the Moon were 10 times closer? A 15-second vertical Short for the channel Strange If True, realistic cinematic night, no people, no text.
-Three 5-second beats. Beat 1: slow push-in on a quiet night coastal town with an oversized Moon; narration "Imagine the Moon were ten times closer."
-Beat 2: pan left, the huge Moon rising, ocean tides surging against the shore; narration "Tides would climb far higher, flooding coasts twice a day."
-Beat 3: zoom in on the cratered Moon surface filling the sky; narration "And every night, the sky would be wall to wall Moon."
-Use exactly these three narration lines, one location (a quiet coastal town at night under a vast Moon), no characters.
-'@
-$body = @{ prompt = $prompt; defaultMode = "MANUAL" } | ConvertTo-Json
-Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8080/api/videos -ContentType 'application/json' -Body $body   # -> {id}
+$body = @{ planFile = "moon-10x-closer-plan.json"; defaultMode = "MANUAL" } | ConvertTo-Json
+Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8080/api/videos -ContentType 'application/json' -Body $body   # -> {id}; 400 with every problem when the plan is invalid
 ```
 
 Walk the stages: `GET /api/videos/{id}` (stage runs with summaries), `POST /api/videos/{id}/stages/{STAGE}/approve` or `/reject` (with notes). Switch a stage to AUTO with
-`PUT /api/videos/{id}/modes/{STAGE}`. Order and what each costs: PLAN, RESEARCH (the plan file says `needsResearch: false`, but the planner decides: if it asks for research and you do not want to pay for it, set that stage's mode and Approve/skip it), CONCEPT and SHOT_PLAN (Claude, paid), SCRIPT (OpenAI, paid),
-NARRATION and MUSIC (Gemini TTS / Lyria; Google billing returned 403 on 24 Nov: expect these to fail until billing is fixed, then "Approve = continue without it" and add voice by hand), KEYFRAMES (pod), DRAFT_GEN (**pod: stops at an estimate; read it, compare with the figure the owner approved, then approve**), ASSEMBLY (laptop ffmpeg + gate).
+`PUT /api/videos/{id}/modes/{STAGE}`. Order and what each does with this plan:
+
+| Stage | With the plan file |
+|---|---|
+| PLAN, CONCEPT, SCRIPT, SHOT_PLAN | free: built from the file (RESEARCH is not in the stage list: `needsResearch: false`). Check the SHOT_PLAN summary: 3 shots, 15 s, camera moves `zoom_in / pan_left / zoom_in`; each shot prompt has the `moon-town` text word for word. |
+| MUSIC | Lyria (paid, Gemini): Google billing returned 403 on 24 Nov; expect failure, then "Approve = continue without it" and add music by hand, or switch the stage's mode and skip it. |
+| NARRATION | Gemini TTS or ElevenLabs (free plan: non-commercial, Private upload only); same 403 caveat for Gemini. Keep the plan's three lines as they are. |
+| KEYFRAMES | **pod**: three FLUX.2 klein pictures (first GPU use, the pod boots here). The batch releases the pod when it is saved, so DRAFT_GEN boots a SECOND pod (see below). Look at the three pictures before approving. |
+| DRAFT_GEN | **pod: stops at an estimate; read it, compare with the figure the owner approved, then approve.** 3 Fun Camera beats, chains of two. |
+| FINAL_GEN | nothing to render for camera shots (pick a shot only to redo it). |
+| ASSEMBLY | laptop ffmpeg + quality gate. |
+
 At the DRAFT_GEN estimate: if it is above the approved figure, Reject; do not approve.
+**Two boots**: KEYFRAMES releases the pod as soon as its pictures are saved (code: `ShotStage.release_gpu`), so DRAFT_GEN rents again: two boots (8-18 min each with the warm image, plus the Fun Camera download on the second pod, about 6 min). The section 8 estimate includes both. Not changed in this task: keeping one pod across the two stages would be a separate, owner-approved change.
 
 Where things land: assets and the master are in SeaweedFS bucket `projectv` (data on `E:\project-data`), listed per video by `GET /api/videos/{id}/production`; open one with
 `GET /api/assets/{asset_id}/content`. The master is `videos/{id}/master/...`; the gate report is `videos/{id}/master/quality-gate.json` (its URI is in the ASSEMBLY stage summary).
@@ -166,24 +187,36 @@ Per check: pass / warn / fail with a value and the `where` seconds. What matters
 
 ## 8. Cost estimate (ESTIMATE, not a quote) and what the owner must approve
 
-| Item | Estimate |
-|---|---|
-| Pod boot (weights, ComfyUI): about 10 min, about 8-18 with the warm image | about $0.15 at $0.89/h Secure 4090 (about $0.06-0.09 Community $0.34-0.55/h) |
-| 3 beats at 720x1280 x 81 frames: about 3.6 min each, about 11 min | about $0.16 |
-| Safety margin: one retry of a beat, a second boot attempt after a bad Community host | about $0.15-0.45 |
-| Keyframe (Seedream v4) | about $0.03 |
-| Route B total | about **$0.6-1.0** with the margin (the 24 Nov camera scene was about $0.32 without margin, bill not yet posted) |
-| Route A extra: Claude (concept, shots), OpenAI (script), keyframes on the pod, narration/music | LLM part about Rs 10-30 (estimate from earlier Shorts); Lyria about Rs 10 if billing works |
+The owner approved **$2** for the first live Moon Short (25 Nov 2026, his words "ok for 2$"); the daily cap is $3.50. Prices below are estimates from 24-25 Nov measurements at $0.89/h (Secure 4090); read the live price first (rule 7).
 
-Checklist, each needs the owner's own yes in chat (CLAUDE.md rule 2):
-- [ ] Which route: A (studio, no camera presets), B (Fun Camera), or both as two runs.
-- [ ] A spend figure for the GPU (suggested hard cap **$1.00** for one Route B run; $1.00 for the pod of Route A plus the LLM figure below). The $3.50/day GPU cap stays; today's RunPod balance was $4.73 on 25 Nov: re-read it.
-- [ ] LLM / API spend for Route A (suggest Rs 50 total) and which keys may be used (Gemini, Claude, OpenAI, ElevenLabs). Google billing is still failing (403) so Gemini TTS and Lyria may not work.
-- [ ] The keyframe source for Route B (Seedream $0.027 each; or FLUX on the pod).
-- [ ] `config/providers.yaml` `dailyCapUsd` 10.00 -> 3.50 (and `GPU_MAX_HOURLY_USD`, `GPU_WATCHDOG_DRY_RUN=false`).
+| Item (Route A) | Estimate |
+|---|---|
+| KEYFRAMES: pod boot (about 8-18 min with the warm image) + FLUX download (about 16 GB, first picture job) + 3 pictures | about $0.25-0.45 |
+| DRAFT_GEN: a SECOND pod boot (KEYFRAMES released the first) + Fun Camera download (about 6 min) + 3 beats x about 3.7 min | about $0.45-0.65 |
+| Safety margin: one retried beat, a bad host, a replacement pod (the client replaces a lost pod once) | about $0.25-0.5 |
+| Plan, concept, script, shot plan | $0 (plan file) |
+| Narration / music | Gemini TTS and Lyria: billing returned 403 on 24 Nov; ElevenLabs free plan is non-commercial. Expect a manual voice. |
+| Route A total (GPU) | about **$0.95-1.6**, inside the $2; the DRAFT_GEN estimate screen shows the studio's own figure before you approve |
+
+Route B (fallback) is about $0.6-1.0 including margin (the 24 Nov camera scene was about $0.32 without margin).
+
+Checklist, each needs the owner's own yes in chat (CLAUDE.md rule 2); the first line is already given:
+- [x] First live Short spend: **$2** (owner, 25 Nov 2026). Re-read the RunPod balance before starting (it was $4.73 on 25 Nov).
+- [x] `config/providers.yaml` `dailyCapUsd` 3.50 (done in code, 25 Nov 2026).
+- [ ] Set in `.env`: `GPU_MAX_HOURLY_USD=1.0`, `GPU_WATCHDOG_DRY_RUN=false`, the `VIDEO_PROVIDER_*` lines of section 5 (manual: the code never edits `.env`).
 - [ ] That the reaper may run with `-Apply` during the run.
-- [ ] Narration: ElevenLabs free plan is non-commercial (Private upload only) or the paid plan first.
+- [ ] Narration and music: which provider, or "add them by hand afterwards" (Gemini billing 403; ElevenLabs free plan = Private upload only, or the paid plan first).
+- [ ] Which stages to keep MANUAL (suggest all, so DRAFT_GEN's estimate is read before it spends).
 - [ ] Publishing: none in this run. Upload Private only, after he has watched it.
+
+### Still manual / not done before the live run
+
+- Restart the control plane and both workers so they run this code; stop the second `studio.worker` if two are running.
+- Put the `.env` settings in (section 5). Read the live pod price and the balance.
+- The pod image: the warm image does not contain the Fun Camera weights (they download on the first camera clip) and the pod worker file is shipped to the pod at rental time, so no image rebuild is needed for the worker change.
+- Look at the three FLUX keyframes before approving DRAFT_GEN; look at the clips by eye (the quality gate cannot see colour drift: run `motion-block/drift.py` style Lab check if in doubt).
+- Colour-matched restart keyframe for beat 3 is not built (fresh keyframe only). Keeping one pod across KEYFRAMES and DRAFT_GEN is not built (two boots).
+- Narration, music and the final mix of a first Short are the owner's call (see the list above); nothing was run live in this task.
 
 ## 9. Terminating pods and rollback
 
@@ -195,7 +228,7 @@ If a pod is left running (critical bug, rule 8):
 2. Release the lease so the watchdog stops watching: `python tools\gpu_lease\lease.py release runpod <pod_id>`.
 3. Note the minutes: the ledger is an estimate; the RunPod bill (`list-billing`) lags a few hours.
 
-Rollback of settings: put `DREAM_GPU_PROVIDER=modal`, `VIDEO_PROVIDER_DRAFT=wan`, `VIDEO_PROVIDER_FINAL=omni`, `VIDEO_PROVIDER_KEYFRAMES=default` back and restart; nothing can then rent a pod.
+Rollback of settings: `VIDEO_CAMERA_PRESETS=false` returns the pod route to SVI/plain clips (a video created from a plan file still takes its plan's text and timing). Put `DREAM_GPU_PROVIDER=modal`, `VIDEO_PROVIDER_DRAFT=wan`, `VIDEO_PROVIDER_FINAL=omni`, `VIDEO_PROVIDER_KEYFRAMES=default` back and restart; nothing can then rent a pod.
 A video stuck in a stage: `POST /api/videos/{id}/pause`; to cancel the workflow terminate `video-{id}` in the Temporal UI (http://127.0.0.1:8233). Code rollback: this change set is one branch, revert the commit; the migration set is unchanged.
 
 ## 10. Rehearse it yourself (free, no keys, no pod)
@@ -206,4 +239,4 @@ $env:TEMPORAL_NAMESPACE = "rehearsal"; $env:POSTGRES_DB = "projectv_dryrun"   # 
 # blank every key in the shell, then start: uv run --group studio python -m studio ; ... -m studio.worker ; ... -m workers.main (with an empty .env in the folder so the real one is not found)
 ```
 
-Expect PLAN to pass and RESEARCH to fail with "GEMINI_API_KEY is not set" (section 2).
+Expect PLAN to pass and RESEARCH to fail with "GEMINI_API_KEY is not set" (section 2). With `planFile` on `POST /api/videos` (section 5) PLAN, CONCEPT, SCRIPT and SHOT_PLAN pass with no keys; MUSIC and NARRATION fail closed (no Gemini key), then KEYFRAMES stops because no pod can be rented (`DREAM_GPU_PROVIDER=modal`): the free stop point is now KEYFRAMES.

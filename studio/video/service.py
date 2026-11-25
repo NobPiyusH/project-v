@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from studio.db import Db
+from studio.planner.imported import initial_plan_json
 from studio.workflow import queues
 from studio.workflow.stage import Stage, StageMode
 from studio.workflow.types import VideoRequest
@@ -63,6 +64,7 @@ class CreateVideo:
     default_mode: StageMode | None = None
     modes: dict[Stage, StageMode] | None = None
     review_minutes: int | None = None
+    plan_doc: dict | None = None  # a finished plan file (studio/planner/imported.py): the video starts from it, no paid planner/writer/director
 
 
 def modes_json(default_mode: StageMode, modes: dict[Stage, StageMode]) -> str:
@@ -87,10 +89,11 @@ class VideoService:
         modes = dict(req.modes or {})
         review = 10 if req.review_minutes is None or req.review_minutes < 1 else min(req.review_minutes, 24 * 60)
         prompt = req.prompt.strip()
+        plan_json = None if req.plan_doc is None else initial_plan_json(req.plan_doc)  # validates: a bad plan is refused before anything is stored
         self.db.execute(
-            "INSERT INTO video (id, prompt, status, modes_json, workflow_id, review_minutes) "
-            "VALUES (%(id)s, %(prompt)s, 'CREATED', CAST(%(modes)s AS jsonb), %(wf)s, %(review)s)",
-            {"id": vid, "prompt": prompt, "modes": modes_json(default_mode, modes), "wf": workflow_id, "review": review})
+            "INSERT INTO video (id, prompt, status, modes_json, workflow_id, review_minutes, plan_json) "
+            "VALUES (%(id)s, %(prompt)s, 'CREATED', CAST(%(modes)s AS jsonb), %(wf)s, %(review)s, CAST(%(plan)s AS jsonb))",
+            {"id": vid, "prompt": prompt, "modes": modes_json(default_mode, modes), "wf": workflow_id, "review": review, "plan": plan_json})
         self.gateway.start(queues.VIDEO_WORKFLOW, workflow_id, VideoRequest(str(vid), prompt, default_mode, modes, None, review))
         return vid
 

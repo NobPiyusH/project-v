@@ -25,6 +25,8 @@ from studio.assets import asset_store as lic
 from studio.assets.asset_store import NewAsset
 from studio.ledger.budget_guard import GEMINI, BudgetExceededError
 from studio.media.types import ClipEstimate, ClipJob, ClipRequest, ClipResult
+from studio.planner.imported import load as load_imported
+from studio.production import camera
 from studio.production.support import ProductionDeps, StageSupport, diagram_shot
 from studio.production.video_gpu import DRAFT, FINAL, POD, VideoGpu
 from studio.routing.router import Candidate
@@ -77,7 +79,7 @@ class VideoStage(StageSupport):
     def __init__(self, d: ProductionDeps, wan_app: str = "projectv-wan", wan_class: str = "Wan", public_url: str = "http://127.0.0.1:8080",
                  auto_approve_inr: Decimal = Decimal(0), hero_takes: int = 2, draft_provider: str = "wan", final_provider: str = "omni",
                  omni_model: str = "gemini-omni-1.2-flash", router: Any = None, video_gpu: VideoGpu | None = None,
-                 diagram_width: int = 1920, diagram_height: int = 1080):
+                 diagram_width: int = 1920, diagram_height: int = 1080, camera_presets: bool = False, camera_allow_untested: bool = False):
         super().__init__(d)
         self.wan_app, self.wan_class, self.public_url = wan_app, wan_class, public_url
         self.auto_approve_inr = auto_approve_inr
@@ -88,9 +90,24 @@ class VideoStage(StageSupport):
         self.router = router
         self.video_gpu = video_gpu  # None in tests; used only with provider-draft/final=broker
         self.diagram_width, self.diagram_height = diagram_width, diagram_height
+        # VIDEO_CAMERA_PRESETS (wiring default: on): vertical clips on the rented pod run the Wan 2.2 Fun Camera graph with a real camera
+        # preset per shot (tools/film4k/camera_presets.py) instead of the SVI graph, whose camera barely moves.
+        self.camera_presets, self.camera_allow_untested = camera_presets, camera_allow_untested
 
     def _on_broker(self, kind: str) -> bool:
         return self.video_gpu is not None and self.video_gpu.clips(kind)
+
+    def _camera_on(self, kind: str, use_omni: bool, vertical: bool) -> bool:
+        return self.camera_presets and not use_omni and vertical and self._on_broker(kind)
+
+    def shot_cameras(self, video_id: uuid.UUID) -> dict[str, str]:
+        """shot id -> Fun Camera preset, for every shot that is animated by a generated clip. The plan's (or the Director's) camera move wins
+        when it names a preset; the rest are varied tested presets. An untested preset named by an imported plan is refused."""
+        shots = [s for s in self._clip_shots(video_id) if not diagram_shot(s) and s["footage_asset_id"] is None]
+        imp = load_imported(self.db, video_id)
+        names = camera.assign([s["camera_move"] for s in shots], self.camera_allow_untested or (imp is not None and imp.allowUntested),
+                              strict=imp is not None)
+        return {str(s["id"]): n for s, n in zip(shots, names, strict=True)}
 
     def omni(self, kind: str) -> bool:
         """The owner's preferred provider for this kind (config); the router may still pick another (M3a)."""
@@ -217,8 +234,17 @@ class VideoStage(StageSupport):
         if self.router is not None:  # rule 6: the routing decision names the pod route
             self.router.choose(video_id, "DRAFT_GEN" if kind == DRAFT else "FINAL_GEN", "video.i2v.dream", [Candidate(POD, inr)], POD, True)
         session = gpu.session(video_id, sec)  # refused with the reason when the daily cap or every provider says no
+        chain = self._chain(jobs, only)
         return ClipRequest(str(video_id), self.wan_app, self.wan_class, self.public_url, jobs + drawn, 1, sec, inr, "pod", None, None, 0,
-                           session.url, session.ready_timeout_seconds, False)
+                           session.url, session.ready_timeout_seconds, chain, camera.CHAIN_BEATS if chain else 0)
+
+    @staticmethod
+    def _chain(jobs: list[ClipJob], only: list[uuid.UUID] | None) -> bool:
+        """Camera clips continue from the last frame of the shot before, two shots per chain, then restart from the next shot's own keyframe
+        (25 Nov motion block: from the third chained beat the scene drifts blue and soft). Only for a whole batch of consecutive shots 1..n:
+        a redo of single shots starts each from its own keyframe (no chain to break)."""
+        cams = [j for j in jobs if j.camera]
+        return bool(cams) and only is None and [j.shot_number for j in jobs] == list(range(1, len(jobs) + 1))
 
     def release_gpu(self, video_id: uuid.UUID, why: str) -> None:
         """The batch is saved: let go of the pod (the rental is booked on this Video's ledger when it ends)."""
@@ -260,6 +286,7 @@ class VideoStage(StageSupport):
         if not vertical and not use_omni and self._on_broker(kind):
             long_side, short_side = 1280, 720  # 16:9 on the rented pod: 720p-class drafts too (the pod worker's limit is 1280x720)
         wanted = None if only is None else {str(u) for u in only}
+        cams = self.shot_cameras(video_id) if self._camera_on(kind, use_omni, vertical) else {}
         jobs: list[ClipJob] = []
         for s in self._clip_shots(video_id):
             sid = str(s["id"])
@@ -267,6 +294,8 @@ class VideoStage(StageSupport):
                 continue
             if s["keyframe_uri"] is None or s["footage_asset_id"] is not None or diagram_shot(s):
                 continue  # no image to animate, real footage chosen, or a diagram shot (drawn, see diagram_jobs)
+            if cams and not draft and wanted is None:
+                continue  # a Fun Camera clip is already 720x1280 and final quality: a final pass only when the owner picks the shot
             if not draft and wanted is None and (s["draft_clip_asset_id"] is None or s["final_wanted"] is not True):
                 continue  # finals only for shots with a draft that the owner didn't mark "keep the draft"
             if not draft and wanted is None and use_omni and s["priority"] != "hero":
@@ -277,9 +306,14 @@ class VideoStage(StageSupport):
             first = int(s["draft_takes" if draft else "final_takes"]) + 1
             # Renders vary like seeds (owner, 17 Nov: one FA3 render "had better motion"): hero shots get several draft takes with different
             # seeds, so the best motion can be picked. Finals render the chosen draft once.
-            takes = self.hero_takes if draft and s["priority"] == "hero" else 1
+            takes = self.hero_takes if draft and s["priority"] == "hero" and sid not in cams else 1
             if use_omni:
                 long_side, short_side = 1280, 720
+            if sid in cams:  # Fun Camera: the tested size, 81 frames at 16 fps whatever the shot's length (the edit trims it)
+                for take in range(first, first + takes):
+                    jobs.append(ClipJob(sid, int(s["ord"]) + 1, take, kind, "camera", s["keyframe_uri"], prompt, camera.WIDTH, camera.HEIGHT,
+                                        camera.FRAMES, abs(string_hash(sid)) + take, camera=cams[sid]))
+                continue
             for take in range(first, first + takes):
                 jobs.append(ClipJob(sid, int(s["ord"]) + 1, take, kind, "omni" if use_omni else "fast" if draft else "hybrid", s["keyframe_uri"], prompt,
                                     short_side if vertical else long_side, long_side if vertical else short_side,
@@ -343,7 +377,8 @@ class VideoStage(StageSupport):
                     continue
                 omni = request.provider == "omni"
                 provider = "diagram_manim" if diagram else POD if pod else "gemini_omni" if omni else "modal_wan"
-                model = ("manim 1080p24 diagram" if diagram else "wan2.2-i2v-a14b fp8 (rented pod)" if pod
+                model = ("manim 1080p24 diagram" if diagram else f"wan2.2-fun-camera-a14b fp8 (rented pod, {job.camera})" if pod and job.camera
+                         else "wan2.2-i2v-a14b fp8 (rented pod)" if pod
                          else f"{request.omni_model} {request.resolution}" if omni else f"wan2.2-i2v-a14b {o.mode}")
                 licence = lic.LICENCE_OWN_RENDER if diagram else lic.LICENCE_GEMINI if omni else lic.LICENCE_WAN
                 asset_id = d.assets.create(NewAsset(video_id, "video", o.uri, "video/mp4", job.width, job.height,
@@ -400,7 +435,7 @@ class VideoStage(StageSupport):
     def _clip_shots(self, video_id: uuid.UUID) -> list[dict[str, Any]]:
         return self.db.rows(
             """
-            SELECT s.id, s.ord, s.duration_target_sec, s.description, s.prompt_json::text AS prompt_json, s.priority,
+            SELECT s.id, s.ord, s.duration_target_sec, s.camera_move, s.description, s.prompt_json::text AS prompt_json, s.priority,
                    s.draft_clip_asset_id, s.final_clip_asset_id, s.final_wanted, s.footage_asset_id, a.uri_hot AS keyframe_uri,
                    (SELECT count(*) FROM asset x WHERE x.shot_id = s.id AND x.kind = 'video' AND x.clip_kind = 'draft') AS draft_takes,
                    (SELECT count(*) FROM asset x WHERE x.shot_id = s.id AND x.kind = 'video' AND x.clip_kind = 'final') AS final_takes

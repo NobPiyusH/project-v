@@ -21,6 +21,7 @@ from studio.agents.jfmt import fixed
 from studio.agents.types import CreativeReview, ShotCritique
 from studio.ledger.budget_guard import GEMINI
 from studio.media.types import Finding, ImageReviewRequest, ImageReviewResult, ReviewLine, ReviewShot
+from studio.planner.imported import load as load_imported
 from studio.production.records import StoredLine, StoredScript
 from studio.production.support import ProductionDeps, StageSupport
 from studio.workflow.stage import Stage
@@ -123,8 +124,8 @@ class CreativeDirector(StageSupport):
     def review_shot_plan(self, video_id: uuid.UUID, attempt: int) -> list[Finding]:
         """Reviews the shot plan, rewrites weak shot prompts in place, stores the report card, returns findings."""
         shots = self.shots(video_id)
-        if not shots:
-            return []
+        if not shots or load_imported(self.d.db, video_id) is not None:
+            return []  # a video made from a plan file: the plan is the owner's, the review would spend and rewrite its prompts
         review = self._agent.review_shot_plan(video_id, self.context(video_id, shots))
         self._store(video_id, Stage.SHOT_PLAN, attempt, self.d.text_model.split(",")[0].strip(), review)
         by_n = by_number(shots)

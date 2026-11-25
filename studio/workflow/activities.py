@@ -74,7 +74,9 @@ class ControlActivities:
         if outcome.fallback_reason is not None:
             artifact["fallbackReason"] = outcome.fallback_reason
         artifact_json = _compact(artifact)
-        self.db.execute("UPDATE video SET plan_json = CAST(%(plan)s AS jsonb), title = %(title)s, updated_at = now() WHERE id = %(id)s",
+        # A video created from a plan file keeps that file under "imported" (the writer and director read it later).
+        self.db.execute("UPDATE video SET plan_json = CAST(%(plan)s AS jsonb) || jsonb_strip_nulls(jsonb_build_object('imported', plan_json -> 'imported')), "
+                        "title = %(title)s, updated_at = now() WHERE id = %(id)s",
                         {"plan": artifact_json, "title": outcome.plan.title, "id": _id(video_id)})
         # The PLAN cost is booked once, by Llm, when the model answers.
         p = outcome.plan

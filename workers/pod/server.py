@@ -12,6 +12,8 @@ onto the container disk, start ComfyUI on 127.0.0.1. Serves on [::]:PORT (IPv6, 
   POST /picture             {prompt, seed, width, height, model?}                 -> 202 {"id": job}
                             model: "zimage" (default) or "flux2-klein" (FLUX.2 klein 4B on ComfyUI, fetched on first use)
   POST /clip                {image: b64 PNG, prompt, negative, seed, frames, fps, width, height} -> 202 {"id": job}
+                            camera: a tested Fun Camera preset (zoom_in, pan_left, ...) runs Wan 2.2 Fun Camera instead (a real camera
+                            move; the first camera clip fetches the Fun Camera experts, about 38 GB); allowUntested: true lifts the tested-only rule
   POST /scene               SVI scene {image: b64 PNG (the anchor), beats: [{prompt, seed}], startBeat, prevLatent: b64
                             .latent (startBeat > 1), negative, frames, fps, width, height} -> 202 {"id": job}; result: a
                             zip of beatK.mp4 + beatK.latent for each beat rendered. The first scene job installs
@@ -118,6 +120,29 @@ FLUX_FILES = {  # name: (repo, path in repo, ComfyUI models subfolder, size in b
 }
 FLUX_STEPS, FLUX_CFG = 4, 1.0   # the distilled model's settings (ComfyUI's own template: 4 steps, CFG 1, euler)
 PICTURE_MODELS = ("zimage", "flux2-klein")
+# Wan 2.2 Fun Camera (first camera clip only, like SVI): a real camera move from a preset (judged by eye on real pods 24-25 Nov 2026,
+# docs/film4k.md). Copied from tools/film4k/camera_presets.py and camera_graphs.py because this file is shipped to the pod alone;
+# workers/tests/test_pod_camera.py fails when the copies drift. Files from tools/podkit/groups.py (sizes checked on Hugging Face 24 Nov 2026).
+CAMERA_REPO = "Comfy-Org/Wan_2.2_ComfyUI_Repackaged"
+CAMERA_UNETS = ("wan2.2_fun_camera_high_noise_14B_fp8_scaled.safetensors", "wan2.2_fun_camera_low_noise_14B_fp8_scaled.safetensors")
+CAMERA_LORAS = ("wan2.2_i2v_lightx2v_4steps_lora_v1_high_noise.safetensors", "wan2.2_i2v_lightx2v_4steps_lora_v1_low_noise.safetensors")
+CAMERA_TEXT = "umt5_xxl_fp8_e4m3fn_scaled.safetensors"
+CAMERA_FILES = {  # name: (repo, path in repo, ComfyUI models subfolder, size in bytes)
+    CAMERA_UNETS[0]: (CAMERA_REPO, f"split_files/diffusion_models/{CAMERA_UNETS[0]}", "diffusion_models", 15301408048),
+    CAMERA_UNETS[1]: (CAMERA_REPO, f"split_files/diffusion_models/{CAMERA_UNETS[1]}", "diffusion_models", 15301408048),
+    CAMERA_LORAS[0]: (CAMERA_REPO, f"split_files/loras/{CAMERA_LORAS[0]}", "loras", 1226977424),
+    CAMERA_LORAS[1]: (CAMERA_REPO, f"split_files/loras/{CAMERA_LORAS[1]}", "loras", 1226977424),
+    CAMERA_TEXT: (CAMERA_REPO, f"split_files/text_encoders/{CAMERA_TEXT}", "text_encoders", 6735906897),
+}
+CAMERA_PRESETS = {  # name: (WanCameraEmbedding pose, speed)
+    "static": ("Static", 1.0), "zoom_in": ("Zoom In", 1.0), "slow_push": ("Zoom In", 0.5), "fast_push": ("Zoom In", 1.8),
+    "zoom_out": ("Zoom Out", 1.0), "pan_left": ("Pan Left", 1.0), "pan_right": ("Pan Right", 1.0), "drift_left": ("Pan Left", 0.4),
+    "drift_right": ("Pan Right", 0.4), "pan_up": ("Pan Up", 1.0), "pan_down": ("Pan Down", 1.0),
+    "roll_cw": ("ClockWise (CW)", 1.0), "roll_acw": ("Anti Clockwise (ACW)", 1.0),
+}
+CAMERA_TESTED = {"zoom_in", "pan_left", "pan_right", "slow_push", "drift_right"}
+CAMERA_NEGATIVE = ("cartoon, painting, stylized, oversaturated, neon, glowing beam, morphing, warped, deformed, extra wings, extra limbs, "
+                   "text, blue tint, flicker")
 PIP = ["huggingface_hub>=0.34", "diffusers>=0.36.0", "transformers>=4.57.0", "accelerate>=1.10", "safetensors",
        "sentencepiece", "pillow", "imageio-ffmpeg"]
 NEGATIVE = ("blurry, low quality, low resolution, distorted, warped, morphing, flickering, jittery, text, captions, "
@@ -201,6 +226,14 @@ def validate_clip(c: dict) -> list[str]:
     seed = c.get("seed")
     if not isinstance(seed, int) or seed < 0:
         errors.append("seed must be a non-negative integer")
+    cam = c.get("camera")
+    if cam is not None:
+        if cam not in CAMERA_PRESETS:
+            errors.append(f"camera must be one of {', '.join(sorted(CAMERA_PRESETS))}")
+        elif cam not in CAMERA_TESTED and c.get("allowUntested") is not True:
+            errors.append(f"camera preset {cam} is not tested (tested: {', '.join(sorted(CAMERA_TESTED))}); send allowUntested to use it")
+        if c.get("endImage"):
+            errors.append("camera clips take no endImage")
     return errors
 
 
@@ -261,6 +294,59 @@ def _clip_graph(c: dict, image_name: str, prefix: str, split: int, seed: int, ne
         "15": {"class_type": "VAEDecode", "inputs": {"samples": ["14", 0], "vae": ["10", 0]}},
         "16": {"class_type": "SaveImage", "inputs": {"images": ["15", 0], "filename_prefix": prefix}},
     }
+
+
+def camera_node(cls: str, info: dict, **kw) -> dict:
+    """A node whose required inputs not named in kw are filled from the pod's /object_info defaults (first option for combos)."""
+    spec = (info.get(cls) or {}).get("input", {})
+    inputs: dict = {}
+    for name, v in (spec.get("required") or {}).items():
+        if name in kw:
+            continue
+        typ, opts = v[0], (v[1] if len(v) > 1 else {})
+        if "default" in opts:
+            inputs[name] = opts["default"]
+        elif isinstance(typ, list) and typ:
+            inputs[name] = typ[0]
+        elif typ == "COMBO" and opts.get("options"):
+            inputs[name] = opts["options"][0]
+    inputs.update(kw)
+    return {"class_type": cls, "inputs": inputs}
+
+
+def camera_graph(c: dict, image_name: str, prefix: str, info: dict) -> dict:
+    """ComfyUI API graph for one Fun Camera clip: the graph that worked on real pods on 24-25 Nov 2026 (tools/film4k/camera_graphs.py
+    fun_camera_graph), with the frames saved as images (node 16) so the existing encoder makes the MP4. 4 steps, CFG 1, 2+2 expert split."""
+    pose, speed = CAMERA_PRESETS[c["camera"]]
+    w, h, frames = c["width"], c["height"], c.get("frames", 81)
+    split = expert_split(STEPS)
+    seed = int(c["seed"]) & 0xFFFFFFFFFFFFFFFF
+    neg = CAMERA_NEGATIVE + (", " + c["negative"] if c.get("negative") else "")
+    g = {
+        "1": {"class_type": "UNETLoader", "inputs": {"unet_name": CAMERA_UNETS[0], "weight_dtype": "default"}},
+        "2": {"class_type": "UNETLoader", "inputs": {"unet_name": CAMERA_UNETS[1], "weight_dtype": "default"}},
+        "3": {"class_type": "LoraLoaderModelOnly", "inputs": {"model": ["1", 0], "lora_name": CAMERA_LORAS[0], "strength_model": 1.0}},
+        "4": {"class_type": "LoraLoaderModelOnly", "inputs": {"model": ["2", 0], "lora_name": CAMERA_LORAS[1], "strength_model": 1.0}},
+        "5": {"class_type": "ModelSamplingSD3", "inputs": {"model": ["3", 0], "shift": SHIFT}},
+        "6": {"class_type": "ModelSamplingSD3", "inputs": {"model": ["4", 0], "shift": SHIFT}},
+        "7": {"class_type": "CLIPLoader", "inputs": {"clip_name": CAMERA_TEXT, "type": "wan", "device": "default"}},
+        "8": {"class_type": "CLIPTextEncode", "inputs": {"text": c["prompt"], "clip": ["7", 0]}},
+        "9": {"class_type": "CLIPTextEncode", "inputs": {"text": neg, "clip": ["7", 0]}},
+        "10": {"class_type": "VAELoader", "inputs": {"vae_name": VAE}},
+        "11": {"class_type": "LoadImage", "inputs": {"image": image_name}},
+        "20": camera_node("WanCameraEmbedding", info, camera_pose=pose, width=w, height=h, length=frames, speed=speed),
+    }
+    g["12"] = camera_node("WanCameraImageToVideo", info, positive=["8", 0], negative=["9", 0], vae=["10", 0], width=w, height=h,
+                          length=frames, batch_size=1, start_image=["11", 0], camera_conditions=["20", 0])
+    common = {"noise_seed": seed, "steps": STEPS, "cfg": 1.0, "sampler_name": SAMPLER, "scheduler": "simple",
+              "positive": ["12", 0], "negative": ["12", 1]}
+    g["13"] = {"class_type": "KSamplerAdvanced", "inputs": {**common, "model": ["5", 0], "add_noise": "enable", "latent_image": ["12", 2],
+                                                           "start_at_step": 0, "end_at_step": split, "return_with_leftover_noise": "enable"}}
+    g["14"] = {"class_type": "KSamplerAdvanced", "inputs": {**common, "model": ["6", 0], "add_noise": "disable", "latent_image": ["13", 0],
+                                                           "start_at_step": split, "end_at_step": 10000, "return_with_leftover_noise": "disable"}}
+    g["15"] = {"class_type": "VAEDecode", "inputs": {"samples": ["14", 0], "vae": ["10", 0]}}
+    g["16"] = {"class_type": "SaveImage", "inputs": {"images": ["15", 0], "filename_prefix": prefix}}
+    return g
 
 
 def validate_scene(c: dict) -> list[str]:
@@ -799,6 +885,7 @@ class Gpu:
         self.flux_ready = False
         self.proc = proc
         self.svi_ready = False
+        self.camera_ready = False
 
     def ensure_svi(self) -> None:
         """First scene job only: KJNodes + the two SVI LoRAs, then a ComfyUI restart (custom nodes load at start).
@@ -820,6 +907,20 @@ class Gpu:
             raise RuntimeError("KJNodes loaded without WanImageToVideoSVIPro")
         self.svi_ready = True
         log(f"SVI ready in {time.time() - t:.0f} s")
+
+    def ensure_camera(self) -> None:
+        """First camera clip only: the Fun Camera experts, LoRAs and text encoder (core ComfyUI nodes: no restart needed)."""
+        if self.camera_ready:
+            return
+        if self.comfy is None or self.state is None:
+            raise RuntimeError("Fun Camera is not set up on this worker")
+        t = time.time()
+        fetch_files(self.comfy, self.state, CAMERA_FILES, "fun-camera")
+        info = http_json(f"http://127.0.0.1:{COMFY_PORT}/object_info/WanCameraImageToVideo")
+        if "WanCameraImageToVideo" not in (info or {}):
+            raise RuntimeError("this ComfyUI has no WanCameraImageToVideo node")
+        self.camera_ready = True
+        log(f"Fun Camera ready in {time.time() - t:.0f} s")
 
     def _free_comfy(self):
         try:
@@ -898,7 +999,14 @@ class Gpu:
             end_name = f"{jid}-end.png"
             Image.open(io.BytesIO(base64.b64decode(c["endImage"]))).convert("RGB") \
                 .resize((c["width"], c["height"]), Image.LANCZOS).save(ROOT / "comfy" / "in" / end_name)
-        hist = self._run_graph(clip_graph(c, name, f"clip/{jid}", end_name))
+        if c.get("camera"):
+            self.ensure_camera()
+            info: dict = {}
+            for cls in ("WanCameraEmbedding", "WanCameraImageToVideo"):
+                info.update(http_json(f"http://127.0.0.1:{COMFY_PORT}/object_info/{cls}") or {})
+            hist = self._run_graph(camera_graph(c, name, f"clip/{jid}", info))
+        else:
+            hist = self._run_graph(clip_graph(c, name, f"clip/{jid}", end_name))
         images = hist["outputs"]["16"]["images"]
         frames = [ROOT / "comfy" / "out" / im.get("subfolder", "") / im["filename"] for im in images]
         fps = int(c.get("fps", 16))

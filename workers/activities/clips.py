@@ -384,6 +384,9 @@ def _pod(req: dict, base: str, video_id: str) -> tuple[list[dict], bool]:
         payload = {"image": base64.b64encode(image).decode(), "prompt": j["prompt"],
                    "negative": j.get("negative"), "seed": int(j["seed"]), "frames": int(j["numFrames"]), "fps": fps,
                    "width": int(j["width"]), "height": int(j["height"])}
+        if j.get("camera"):  # Fun Camera preset: the pod runs the Wan 2.2 Fun Camera graph (a real camera move)
+            payload["camera"] = j["camera"]
+            payload["allowUntested"] = True  # the control plane already refused untested presets (VIDEO_CAMERA_ALLOW_UNTESTED decides there)
         if j.get("endImageUri"):  # first-last frame chaining: land on the next shot's picture
             try:
                 payload["endImage"] = base64.b64encode(get_bytes(j["endImageUri"])).decode()

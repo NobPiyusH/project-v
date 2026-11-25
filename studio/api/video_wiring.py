@@ -15,6 +15,7 @@ from studio.assets.media_urls import MediaUrls
 from studio.config import Settings
 from studio.db import Db
 from studio.ledger import BudgetGuard, CostLedger, Pricing
+from studio.planner.imported import ImportedDirector, ImportedPlanner, ImportedWriter
 from studio.planner.planner import Planner
 from studio.planner.presets import StylePresets
 from studio.production.creative_director import CreativeDirector
@@ -90,6 +91,7 @@ def build_video_context(db: Db, s: Settings, *, llm: Any = None, gateway: Any = 
     shot_bank = _flag("VIDEO_SHOT_BANK", "true")  # character/location bank in new shot plans; old stored plans load either way
     writer = WriterAgent(llm, presets, s.story_model, s.script_model)
     director = DirectorAgent(llm, presets, s.story_model, diagram_lane, stock_lane, shot_bank)
+    writer, director = ImportedWriter(writer, db), ImportedDirector(director, db)  # a video made from a plan file skips the paid LLM calls
     deps = ProductionDeps(db, writer, director, assets, ledger, pricing, budget, presets, text_model=s.text_model,
                           tts_model=env("GEMINI_TTS_MODEL", "gemini-3.8-flash-tts,gemini-3.1-flash-tts-preview"),
                           image_model=env("GEMINI_IMAGE_MODEL", "gemini-nano-banana-2.1,gemini-3.1-flash-image"),
@@ -110,12 +112,13 @@ def build_video_context(db: Db, s: Settings, *, llm: Any = None, gateway: Any = 
     video = VideoStage(deps, env("PROJECTV_VIDEO_MODAL_APP", "projectv-wan"), env("PROJECTV_VIDEO_MODAL_CLASS", "Wan"), public_url, approve,
                        draft_provider=env("VIDEO_PROVIDER_DRAFT", "wan"), final_provider=env("VIDEO_PROVIDER_FINAL", "omni"),
                        omni_model=env("OMNI_MODEL", "gemini-omni-1.2-flash"), router=router, video_gpu=video_gpu,
-                       diagram_width=int(env("VIDEO_DIAGRAM_WIDTH", "1920")), diagram_height=int(env("VIDEO_DIAGRAM_HEIGHT", "1080")))
+                       diagram_width=int(env("VIDEO_DIAGRAM_WIDTH", "1920")), diagram_height=int(env("VIDEO_DIAGRAM_HEIGHT", "1080")),
+                       camera_presets=_flag("VIDEO_CAMERA_PRESETS", "true"), camera_allow_untested=_flag("VIDEO_CAMERA_ALLOW_UNTESTED"))
     footage = FootageStage(deps)
     assembly = AssemblyStage(deps, int(env("VIDEO_OUTPUT_HEIGHT", "0")), _quality_gate_on(env("QUALITY_GATE_ENABLED", "1")))
     finish = FinishStage(deps, public_url, approve)
     sharpen = SharpenStage(deps, finish, public_url, approve)
-    planner = Planner(presets, llm, s.gemini_api_key, s.text_model, s.story_model)
+    planner = ImportedPlanner(Planner(presets, llm, s.gemini_api_key, s.text_model, s.story_model), db)
     researcher = researcher or ClaudeResearcher(ClaudeChat(s.anthropic_api_key), ledger, budget, pricing)
     control = ControlActivities(db, planner, researcher=researcher, inspector=inspector, creative=creative, research=research, story=story, music=music,
                                 voice=voice, shots=shots, stock=stock, animatic=animatic, video=video, footage=footage, assembly=assembly, finish=finish,

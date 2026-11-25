@@ -196,7 +196,7 @@ pricing:
   gpuBroker:
     order: [runpod, jarvislabs, cloudrift, vast, e2e, shadeform, modal]   # tie-break only: the cheapest live price in stock and inside its cap wins
     totalCapUsd: 20              # all rented GPUs together per month (owner, 22 Nov 2026: 20, was 8)
-    dailyCapUsd: 10.00           # all studio GPU spend per UTC day, booked rentals + the running pod (owner: 3.50 on 21 Nov 2026, 5.00 that evening, 10.00 on 22 Nov while testing); 0 = off
+    dailyCapUsd: 3.50            # all studio GPU spend per UTC day, booked rentals + the running pod (owner's standing cap 3.50 on 21 Nov 2026; 5.00 and 10.00 while testing on 21-22 Nov; back to 3.50 on 25 Nov 2026 for the first live Short); 0 = off
     providers:
       runpod:     { monthlyCapUsd: 12 }  # owner: 12 (22 Nov 2026, with the total at 20; was 8); other providers stay 0 until they have an adapter and a key
       # JarvisLabs (adapter built 22 Nov 2026 on the Python SDK; unproven until its canary passes, see docs/jarvislabs-provider-notes.md). Cap 0 = blocked: raise it

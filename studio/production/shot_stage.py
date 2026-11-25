@@ -24,6 +24,7 @@ from studio.media.types import (
     StockResult,
 )
 from studio.planner.bank import BeatPlan, bank_problems, beat_prompt, clean_ids, known_ids, references
+from studio.planner.imported import load as load_imported
 from studio.production import timing as nt
 from studio.production.records import ImagePolicy, StoredScript
 from studio.production.support import ProductionDeps, StageSupport, diagram_shot, round3, stock_shot
@@ -107,16 +108,23 @@ class ShotStage(StageSupport):
         timing = nt.plan([nt.Line(ln.index, ln.spoken and ln.duration_sec is not None, 0.0 if ln.duration_sec is None else ln.duration_sec)
                           for ln in script.lines], total, is_short)
         total = timing.total_sec
-        anchors: dict[int, float] = {}
-        seen_lines: set[int] = set()
-        for i, s in enumerate(shots):
-            li = s.lineIndex
-            if li is not None and li not in seen_lines:
-                seen_lines.add(li)
-                if li in timing.starts:
-                    # Cut to the line's shot a moment before its first word.
-                    anchors[i] = max(0.0, timing.starts[li] - nt.LEAD)
-        times = nt.fit_anchored([s.durationSec for s in shots], anchors, total, beats, 1.2 if is_short else 2.5)
+        imported = load_imported(self.db, video_id)
+        if imported is not None and len(imported.beats) == len(shots):
+            # A video made from a plan file: the plan's own beat times (5 s beats), not the narration's: a line may be shorter than its beat.
+            times = imported.beat_times()
+            total = max(imported.total_sec(), total)
+            timing.starts = {**timing.starts, **imported.line_starts()}
+        else:
+            anchors: dict[int, float] = {}
+            seen_lines: set[int] = set()
+            for i, s in enumerate(shots):
+                li = s.lineIndex
+                if li is not None and li not in seen_lines:
+                    seen_lines.add(li)
+                    if li in timing.starts:
+                        # Cut to the line's shot a moment before its first word.
+                        anchors[i] = max(0.0, timing.starts[li] - nt.LEAD)
+            times = nt.fit_anchored([s.durationSec for s in shots], anchors, total, beats, 1.2 if is_short else 2.5)
 
         # Hero shots get the premium (paid) image model; models over-assign them, so enforce <= 20% in code. The opening and the final shot
         # keep hero status first, then the director's picks in order.
