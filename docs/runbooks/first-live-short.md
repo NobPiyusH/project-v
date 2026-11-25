@@ -149,7 +149,25 @@ Walk the stages: `GET /api/videos/{id}` (stage runs with summaries), `POST /api/
 | ASSEMBLY | laptop ffmpeg + quality gate. |
 
 At the DRAFT_GEN estimate: if it is above the approved figure, Reject; do not approve.
-**Two boots**: KEYFRAMES releases the pod as soon as its pictures are saved (code: `ShotStage.release_gpu`), so DRAFT_GEN rents again: two boots (8-18 min each with the warm image, plus the Fun Camera download on the second pod, about 6 min). The section 8 estimate includes both. Not built yet. **CTO decision (25 Nov 2026): keep ONE pod across KEYFRAMES and DRAFT_GEN** (one boot, lower cost), provided the lease, the kill-timer/reaper and the $2 cap guard stay armed for the whole span and the pod is terminated at the end or on any failure (rule 8). It needs a code change (hold the pod from KEYFRAMES until DRAFT_GEN is saved or fails; `ShotStage.release_gpu` currently releases after the keyframe batch) and its own tests; until then the two-boot behaviour above applies.
+**Two boots, or one pod (`VIDEO_ONE_POD`, built 25 Nov 2026, default OFF until proven live).** Off: KEYFRAMES releases the pod as soon as its pictures are saved (`ShotStage.release_gpu`), so DRAFT_GEN rents again: two boots (8-18 min each with the warm image, plus the Fun Camera download on the second pod, about 6 min); the section 8 estimate includes both. On (`VIDEO_ONE_POD=true`, needs `VIDEO_PROVIDER_KEYFRAMES=broker` and `VIDEO_PROVIDER_DRAFT=broker`): the CTO decision to keep ONE pod across KEYFRAMES and DRAFT_GEN.
+
+How it behaves (AUTO stages only):
+
+- The workflow asks once at the start (`control.one_pod_enabled`). KEYFRAMES rents the pod sized for the whole span (pictures + the draft clips: the wallet reserve, the daily cap and the lease/kill-timer all see the span, not just the pictures) and the pod prefetches the Fun Camera group in the background after it is ready (`SV_PREFETCH=camera`, about 38 GB; the keyframes start at once), so DRAFT_GEN downloads nothing.
+- After the keyframes are saved the pod is **kept** only if KEYFRAMES and every stage up to and including DRAFT_GEN are AUTO. DRAFT_GEN joins the same pod (same lease, no new boot) and the pod is released when the draft clips are saved.
+- **Never kept across a human wait.** The pod is released (terminated and booked) the moment any stage waits for you: a failed stage, an inspector double-fail, a REVIEW window, MANUAL or PRODUCER holds, the clip spend approval, a pause, a cancel. If a REVIEW/MANUAL/PRODUCER mode sits on KEYFRAMES or on a stage before DRAFT_GEN, nothing is kept at all and DRAFT_GEN boots its own pod, exactly as with the flag off.
+- **Idle hold timeout**: a held pod whose next stage has not started within `VIDEO_ONE_POD_IDLE_MINUTES` (default 5) is terminated by a 30 s job in the control plane. Each stage that starts between the two restarts that clock. The keyframe checks, the animatic and library match run while the pod is held: if one of them can take more than the limit, raise the setting (an idle hour costs about the pod's hourly price; a second boot costs 10-25 min of it).
+- **Daily cap**: when DRAFT_GEN reuses the held pod and today's spend (booked + this running pod) has reached the cap, the pod is ended and the stage refuses (it waits for you). If the broker cannot reserve the whole span under the cap, the pictures are rented alone (one-pod is skipped for that video, the old two-boot behaviour).
+- **Clip spend approval**: with `PROJECTV_VIDEO_AUTO_APPROVE_INR=0` (the default above) DRAFT_GEN always waits for your go-ahead, which is a human wait: the held pod is released at that prompt and DRAFT_GEN boots its own. To get the benefit, set `PROJECTV_VIDEO_AUTO_APPROVE_INR` above the draft estimate (your yes and your figure) and leave the stages AUTO.
+
+How to turn it on (owner's go first; nothing here rents a pod by itself):
+
+```
+VIDEO_ONE_POD=true
+VIDEO_ONE_POD_IDLE_MINUTES=5
+```
+
+Restart the control plane and both workers. Turn it off by removing the line (or `false`) and restarting; videos already running finish on the mode they started with. First live run: see "What to check" in docs/plans/one-pod-first-run.md.
 
 Where things land: assets and the master are in SeaweedFS bucket `projectv` (data on `E:\project-data`), listed per video by `GET /api/videos/{id}/production`; open one with
 `GET /api/assets/{asset_id}/content`. The master is `videos/{id}/master/...`; the gate report is `videos/{id}/master/quality-gate.json` (its URI is in the ASSEMBLY stage summary).
@@ -215,7 +233,7 @@ Checklist, each needs the owner's own yes in chat (CLAUDE.md rule 2); the first 
 - Put the `.env` settings in (section 5). Read the live pod price and the balance.
 - The pod image: the warm image does not contain the Fun Camera weights (they download on the first camera clip) and the pod worker file is shipped to the pod at rental time, so no image rebuild is needed for the worker change.
 - Look at the three FLUX keyframes before approving DRAFT_GEN; look at the clips by eye (the quality gate cannot see colour drift: run `motion-block/drift.py` style Lab check if in doubt).
-- Colour-matched restart keyframe for beat 3 is not built (fresh keyframe only). Keeping one pod across KEYFRAMES and DRAFT_GEN is not built (two boots).
+- Colour-matched restart keyframe for beat 3 is not built (fresh keyframe only). Keeping one pod across KEYFRAMES and DRAFT_GEN is built but OFF (`VIDEO_ONE_POD`, section 5) and unproven live; with it off there are two boots.
 - Narration, music and the final mix of a first Short are the owner's call (see the list above); nothing was run live in this task.
 
 ## 9. Terminating pods and rollback

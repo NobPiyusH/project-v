@@ -43,6 +43,14 @@ class Periodic:
                 return
 
 
+def video_jobs(vctx, initial_delay: float = 30, every: float = 30) -> list[Periodic]:
+    """One-pod mode (VIDEO_ONE_POD): ends a pod held for a next stage that did not start in time. Exists only when that mode is on."""
+    g = getattr(vctx, "video_gpu", None)
+    if g is None or not g.one_pod:
+        return []
+    return [Periodic("video-gpu-holds", lambda: g.release_stale_holds(datetime.now(UTC)), every, 2 * initial_delay)]
+
+
 def dream_jobs(ctx, initial_delay: float = 30, gpu_every: float = 30, autopilot_every: float = 60) -> list[Periodic]:
     """The three Java schedules. The GPU ones only exist when the broker route is on (otherwise there is no pod to release)."""
     jobs: list[Periodic] = []

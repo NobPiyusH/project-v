@@ -248,7 +248,8 @@ class PgTimings(MemoryTimings):
 _CHUNK = 900
 
 
-def boot_env(worker_source: bytes, port: int, root: str, volume_mount: str | None = None, baked_root: str | None = None) -> dict[str, str]:
+def boot_env(worker_source: bytes, port: int, root: str, volume_mount: str | None = None, baked_root: str | None = None,
+             prefetch: tuple[str, ...] = ()) -> dict[str, str]:
     """Ships workers/pod/server.py to a rented pod with no image build: zlib + base64, split over env vars SV_BOOT_00.. (900-char
     chunks; some providers cap an env value) and a short command that joins, decodes and execs it."""
     b64 = base64.b64encode(zlib.compress(worker_source, 9)).decode("ascii")
@@ -266,6 +267,8 @@ def boot_env(worker_source: bytes, port: int, root: str, volume_mount: str | Non
         env["SV_VOLUME"] = volume_mount
     if baked_root and baked_root.strip():
         env["SV_BAKED"] = baked_root
+    if prefetch:  # model groups the worker downloads in the background once it is ready (one-pod mode: Fun Camera for the clips stage)
+        env["SV_PREFETCH"] = ",".join(prefetch)
     return env
 
 

@@ -15,6 +15,7 @@ video: it waits for the owner (approve = continue without it, reject = run it ag
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 from dataclasses import dataclass
 from datetime import timedelta
@@ -122,11 +123,24 @@ class VideoProductionWorkflow:
         self.producer_rounds: dict[str, int] = {}  # AI Producer (P2): redo rounds it started per stage
         self.producer_voice_notes: str | None = None
         self.skip_stage = False  # set when the owner declines a GPU batch: the stage is recorded as skipped instead of passed
+        # One-pod mode (VIDEO_ONE_POD, AUTO only): the pod rented for KEYFRAMES is kept for DRAFT_GEN. The workflow only decides WHEN (no stage
+        # between them waits for a human); every pod action is an activity (control.keyframe_request/save_keyframes/touch_held_pod/release_held_pod).
+        self.one_pod = False
+        self.chain: list[str] = []  # the stages this run will execute, in order
 
     # ------------------------------------------------------------------------------------------- the run
 
     @workflow.run
     async def run(self, request: dict[str, Any]) -> None:
+        try:
+            await self._run(request)
+        except (asyncio.CancelledError, Exception):
+            # Cancelled or failed with a pod possibly held: let it go before the workflow ends (rule 8). A terminated workflow cannot do this;
+            # the hold timer (VideoGpu.release_stale_holds) and the pod's own lease cover that case.
+            await self._release_pod(request["videoId"], "video workflow ended or was cancelled")
+            raise
+
+    async def _run(self, request: dict[str, Any]) -> None:
         self.default_mode = request.get("defaultMode") or "AUTO"
         if request.get("reviewMinutes") and request["reviewMinutes"] > 0:
             self.review_minutes = request["reviewMinutes"]
@@ -134,10 +148,13 @@ class VideoProductionWorkflow:
         video_id, prompt = request["videoId"], request["prompt"]
         self.phase = "RUNNING"
         await _ctl("set_video_status", video_id, "RUNNING")
+        if workflow.patched("one-pod-v1"):  # histories started before this feature never ask the question (replay-safe)
+            self.one_pod = bool(await _ctl("one_pod_enabled"))
 
         only = request.get("onlyStages")
         if only is not None:
             # Re-run: only the requested stages, in production order; everything else keeps its earlier output.
+            self.chain = [s for s in STAGES if s in only]
             for stage in STAGES:
                 if stage in only:
                     await self._execute(video_id, stage, prompt, await _ctl("last_attempt", video_id, stage))
@@ -147,6 +164,7 @@ class VideoProductionWorkflow:
         plan_result = await self._execute(video_id, "PLAN", prompt)
         planned = plan_result.get("plannedStages")
         planned = STAGES if planned is None else planned
+        self.chain = [s for s in STAGES if s != "PLAN" and s in planned]
         for stage in STAGES:
             if stage == "PLAN":
                 continue
@@ -158,6 +176,7 @@ class VideoProductionWorkflow:
         await self._complete(video_id)
 
     async def _complete(self, video_id: str) -> None:
+        await self._release_pod(video_id, "video finished")
         self.phase = "COMPLETED"
         self.current_stage = None
         await _ctl("set_video_status", video_id, "COMPLETED")
@@ -170,16 +189,20 @@ class VideoProductionWorkflow:
         while True:
             attempt += 1
             if self.paused:
+                await self._release_pod(video_id, "video paused: never keep a pod across a human wait")
                 await _ctl("set_video_status", video_id, "PAUSED")
                 await workflow.wait_condition(lambda: not self.paused)
                 await _ctl("set_video_status", video_id, "RUNNING")
             self.current_stage = stage
+            await self._pod_gate(video_id, stage)
             start_mode = self._mode(stage)
             self.views[stage] = self._view(stage, start_mode, "RUNNING", attempt, None)
             await _ctl("record_stage", video_id, stage, attempt, start_mode, "RUNNING", None, None, notes)
 
             try:
                 result = await self._run_stage_activity(video_id, stage, prompt, notes, attempt)
+                if stage == "DRAFT_GEN":  # the clips stage is over (saved, or nothing to make): the pod is not needed any more
+                    await self._release_pod(video_id, "draft clips stage finished")
                 if self.skip_stage:
                     self.skip_stage = False
                     await self._finish(video_id, stage, attempt, "SKIPPED", result, notes)
@@ -272,6 +295,7 @@ class VideoProductionWorkflow:
             if mode == "REVIEW":
                 # Semi-auto: wait a review window for the owner; continue automatically if nobody responds. Switching the stage to MANUAL during
                 # the window holds it until the owner decides.
+                await self._release_pod(video_id, "review window: never keep a pod across a human wait")
                 window = timedelta(minutes=self.review_minutes)
                 deadline = (workflow.now() + window).isoformat()
                 self.views[stage] = self._view(stage, "REVIEW", "WAITING_APPROVAL", attempt, result["summary"])
@@ -316,6 +340,7 @@ class VideoProductionWorkflow:
                            artifact_json: str | None, notes: str | None, auto_releases: bool) -> Any:
         """Records the stage as waiting and blocks until the owner approves/rejects (or, when auto_releases, until the stage is switched to AUTO,
         which returns None)."""
+        await self._release_pod(video_id, f"{stage} waits for the owner ({status}): never keep a pod across a human wait")
         self.views[stage] = self._view(stage, self._mode(stage), status, attempt, view_summary)
         await _ctl("record_stage", video_id, stage, attempt, self._mode(stage), status, summary, artifact_json, notes)
         self.phase = "WAITING"
@@ -400,8 +425,12 @@ class VideoProductionWorkflow:
             return await self._run_stock(video_id, await _agents("shot_plan", video_id, notes))
         if stage == "KEYFRAMES":
             fix = self._take_fix("KEYFRAMES")
-            request = await _ctl("keyframe_request", video_id, notes) if fix is None else await _agents("fix_keyframe_request", video_id, fix.shot_ids, fix.owner_notes)
-            return await _ctl("save_keyframes", video_id, request, await _media("generate_keyframes", request))
+            if not self.one_pod:
+                request = await _ctl("keyframe_request", video_id, notes) if fix is None else await _agents("fix_keyframe_request", video_id, fix.shot_ids, fix.owner_notes)
+                return await _ctl("save_keyframes", video_id, request, await _media("generate_keyframes", request))
+            keep = self._keep_pod_after_keyframes()
+            request = await _ctl("keyframe_request", video_id, notes, keep) if fix is None else await _agents("fix_keyframe_request", video_id, fix.shot_ids, fix.owner_notes)
+            return await _ctl("save_keyframes", video_id, request, await _media("generate_keyframes", request), keep and fix is None)
         if stage == "ANIMATIC":
             return await _ctl("save_animatic", video_id, await _media("render_animatic", await _ctl("animatic_request", video_id)))
         if stage == "LIBRARY_MATCH":
@@ -552,6 +581,37 @@ class VideoProductionWorkflow:
 
     def _mode(self, stage: str) -> str:
         return self.modes.get(stage, self.default_mode)
+
+    # ------------------------------------------------------------------------------------------- one-pod mode
+
+    def _keep_pod_after_keyframes(self) -> bool:
+        """True when the keyframes' pod may wait for DRAFT_GEN: one-pod mode, not paused, DRAFT_GEN comes later in this run, and the keyframes
+        and every stage up to and including DRAFT_GEN are AUTO (a review window, producer or manual hold in between = a human wait)."""
+        if not self.one_pod or self.paused or "KEYFRAMES" not in self.chain or "DRAFT_GEN" not in self.chain:
+            return False
+        k, d = self.chain.index("KEYFRAMES"), self.chain.index("DRAFT_GEN")
+        return k < d and all(self._mode(s) == "AUTO" for s in self.chain[k : d + 1])
+
+    async def _pod_gate(self, video_id: str, stage: str) -> None:
+        """At every stage start in one-pod mode: a stage between KEYFRAMES and DRAFT_GEN restarts the held pod's idle clock; a stage after
+        DRAFT_GEN means no pod should be held any more."""
+        if not self.one_pod:
+            return
+        order = STAGES.index(stage)
+        if order > STAGES.index("DRAFT_GEN"):
+            await self._release_pod(video_id, f"{stage} starts: the pod is not needed any more")
+        elif order > STAGES.index("KEYFRAMES"):
+            with contextlib.suppress(Exception):  # a failed touch only means the hold timer runs from the keyframes' save
+                await _ctl("touch_held_pod", video_id)
+
+    async def _release_pod(self, video_id: str, why: str) -> None:
+        """Idempotent. Never fails the video: if the call fails, the hold timer, the lease heartbeat and the watchdog still end the pod."""
+        if not self.one_pod:
+            return
+        try:
+            await _ctl("release_held_pod", video_id, why)
+        except Exception as e:  # noqa: BLE001
+            workflow.logger.warning("Could not release the held pod (%s); the hold timer and the watchdog will", e)
 
     @staticmethod
     def _view(stage: str, mode: str, status: str, attempt: int, summary: str | None) -> dict[str, Any]:

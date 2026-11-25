@@ -131,11 +131,12 @@ class DreamGpu:
         except Exception as e:
             log.warning("GPU warm-up for Short %s failed (%s); the pictures step will try again", dream_id, e)
 
-    def session(self, dream_id: uuid.UUID, expected_hours: float | None = None) -> Session:
+    def session(self, dream_id: uuid.UUID, expected_hours: float | None = None, prefetch: tuple[str, ...] = ()) -> Session:
         """Opens (or returns) the Short's pod. Raises when no provider can serve (the step then waits for the owner).
-        expected_hours: a caller that knows its own rental length (the Video path: its id is a Video's, the pick is Auto)."""
+        expected_hours: a caller that knows its own rental length (the Video path: its id is a Video's, the pick is Auto).
+        prefetch: model groups a NEW pod downloads in the background after it is ready (one-pod mode); ignored when a pod is already open."""
         hours = self.rental_hours(dream_id) if expected_hours is None else expected_hours
-        r = self.broker.acquire(dream_id, "video.i2v.dream", self.pod_image(), boot.boot_command(), self.pod_env(), self.volume_id,
+        r = self.broker.acquire(dream_id, "video.i2v.dream", self.pod_image(), boot.boot_command(), self.pod_env(prefetch), self.volume_id,
                                 self.pick(dream_id) if expected_hours is None else AUTO, hours)
         return Session(r.instance.endpoint, self.ready_timeout_minutes * 60)
 
@@ -147,9 +148,9 @@ class DreamGpu:
         with self._lock:
             self._external_holds.discard(video_id)
 
-    def pod_env(self) -> dict[str, str]:
+    def pod_env(self, prefetch: tuple[str, ...] = ()) -> dict[str, str]:
         return boot.boot_env(self._worker(), self.port, "/workspace/data", VOLUME_MOUNT if self.volume_id else None,
-                            WARM_ROOT if self.warm_image else None)
+                            WARM_ROOT if self.warm_image else None, prefetch)
 
     def pod_image(self) -> str:
         return self.warm_image if self.warm_image is not None else self.image

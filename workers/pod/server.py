@@ -886,6 +886,7 @@ class Gpu:
         self.proc = proc
         self.svi_ready = False
         self.camera_ready = False
+        self._camera_lock = threading.Lock()  # the background prefetch and a camera job must not download the same files twice
 
     def ensure_svi(self) -> None:
         """First scene job only: KJNodes + the two SVI LoRAs, then a ComfyUI restart (custom nodes load at start).
@@ -910,17 +911,18 @@ class Gpu:
 
     def ensure_camera(self) -> None:
         """First camera clip only: the Fun Camera experts, LoRAs and text encoder (core ComfyUI nodes: no restart needed)."""
-        if self.camera_ready:
-            return
-        if self.comfy is None or self.state is None:
-            raise RuntimeError("Fun Camera is not set up on this worker")
-        t = time.time()
-        fetch_files(self.comfy, self.state, CAMERA_FILES, "fun-camera")
-        info = http_json(f"http://127.0.0.1:{COMFY_PORT}/object_info/WanCameraImageToVideo")
-        if "WanCameraImageToVideo" not in (info or {}):
-            raise RuntimeError("this ComfyUI has no WanCameraImageToVideo node")
-        self.camera_ready = True
-        log(f"Fun Camera ready in {time.time() - t:.0f} s")
+        with self._camera_lock:
+            if self.camera_ready:
+                return
+            if self.comfy is None or self.state is None:
+                raise RuntimeError("Fun Camera is not set up on this worker")
+            t = time.time()
+            fetch_files(self.comfy, self.state, CAMERA_FILES, "fun-camera")
+            info = http_json(f"http://127.0.0.1:{COMFY_PORT}/object_info/WanCameraImageToVideo")
+            if "WanCameraImageToVideo" not in (info or {}):
+                raise RuntimeError("this ComfyUI has no WanCameraImageToVideo node")
+            self.camera_ready = True
+            log(f"Fun Camera ready in {time.time() - t:.0f} s")
 
     def _free_comfy(self):
         try:
@@ -1074,6 +1076,25 @@ def boot_heartbeat(state: State, interval: float = BOOT_BEAT_SECONDS) -> None:
         time.sleep(interval)
 
 
+def prefetch_groups(environ=os.environ) -> list[str]:
+    """Model groups named in SV_PREFETCH (comma separated; only "camera" is known). The control plane sets it for a pod that will serve the
+    keyframes AND the clips of one video (one-pod mode), so the clips stage needs no download."""
+    return [g for g in (x.strip().lower() for x in environ.get("SV_PREFETCH", "").split(",")) if g]
+
+
+def prefetch(gpu: "Gpu", groups: list[str]) -> None:
+    """Runs in the background after the worker is ready, so the keyframes start at once and the clips find their models on disk. Never raises:
+    a failed prefetch only means the first camera clip downloads the files itself, as before."""
+    for g in groups:
+        try:
+            if g == "camera":
+                gpu.ensure_camera()
+            else:
+                log(f"prefetch: unknown group {g!r}, ignored")
+        except Exception as e:  # noqa: BLE001
+            log(f"prefetch of {g} failed ({type(e).__name__}: {e}); the first job that needs it downloads it")
+
+
 def boot(state: State) -> None:
     try:
         ROOT.mkdir(parents=True, exist_ok=True)
@@ -1096,6 +1117,9 @@ def boot(state: State) -> None:
         state.phase, state.ready = "ready", True
         log(f"ready {tl.marks[-1]['since_start_s']:.0f} s after the worker started: "
             + ", ".join(f"{m['phase']}@{m['since_start_s']:.0f}s" for m in tl.marks))
+        groups = prefetch_groups()
+        if groups:
+            threading.Thread(target=prefetch, args=(gpu, groups), daemon=True, name="prefetch").start()
     except Exception as e:  # noqa: BLE001 - stay up and report it on /health; the control plane deletes the group
         state.phase, state.error = "failed", f"{type(e).__name__}: {e}"[:600]
         log(f"boot failed: {state.error}")
