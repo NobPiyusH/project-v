@@ -146,6 +146,14 @@ class Pricing:
     def gpu_container_start_seconds(self) -> float:
         return self._num(self._map(self._pricing, "modal"), "containerStartSeconds")
 
+    # ---- Per-video cap
+
+    def video_default_cap_inr(self) -> Decimal:
+        """Spend cap of one video when it has none of its own (pricing.perVideo.defaultCapInr). 0 or missing = no cap."""
+        v = self._pricing.get("perVideo")
+        n = v.get("defaultCapInr") if isinstance(v, dict) else None
+        return dec(n) if isinstance(n, (int, float)) and not isinstance(n, bool) and n > 0 else Decimal(0)
+
     # ---- AI Producer
 
     def producer_budget_inr(self, short_video: bool) -> Decimal:

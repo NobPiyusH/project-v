@@ -66,6 +66,7 @@ class CreateVideo:
     default_mode: StageMode | None = None
     modes: dict[Stage, StageMode] | None = None
     review_minutes: int | None = None
+    budget_inr: float | None = None  # this video's own spend cap in INR (0 = no cap); None = the default in config/providers.yaml
     plan_doc: dict | None = None  # a finished plan file (studio/planner/imported.py): the video starts from it, no paid planner/writer/director
 
 
@@ -93,9 +94,10 @@ class VideoService:
         prompt = req.prompt.strip()
         plan_json = None if req.plan_doc is None else initial_plan_json(req.plan_doc)  # validates: a bad plan is refused before anything is stored
         self.db.execute(
-            "INSERT INTO video (id, prompt, status, modes_json, workflow_id, review_minutes, plan_json) "
-            "VALUES (%(id)s, %(prompt)s, 'CREATED', CAST(%(modes)s AS jsonb), %(wf)s, %(review)s, CAST(%(plan)s AS jsonb))",
-            {"id": vid, "prompt": prompt, "modes": modes_json(default_mode, modes), "wf": workflow_id, "review": review, "plan": plan_json})
+            "INSERT INTO video (id, prompt, status, modes_json, workflow_id, review_minutes, plan_json, budget_inr) "
+            "VALUES (%(id)s, %(prompt)s, 'CREATED', CAST(%(modes)s AS jsonb), %(wf)s, %(review)s, CAST(%(plan)s AS jsonb), %(budget)s)",
+            {"id": vid, "prompt": prompt, "modes": modes_json(default_mode, modes), "wf": workflow_id, "review": review, "plan": plan_json,
+             "budget": req.budget_inr})
         self.gateway.start(queues.VIDEO_WORKFLOW, workflow_id, VideoRequest(str(vid), prompt, default_mode, modes, None, review))
         return vid
 

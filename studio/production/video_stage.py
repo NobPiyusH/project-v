@@ -192,12 +192,12 @@ class VideoStage(StageSupport):
             return ClipRequest(str(video_id), self.wan_app, self.wan_class, self.public_url, drawn, 0, 0, Decimal(0), "wan", None, None)
         if use_omni:
             inr = self.omni_inr(jobs, kind)
-            self.d.budget.require(inr, f"{len(jobs)} {kind} clips on Gemini Omni")
+            self.d.budget.require(inr, f"{len(jobs)} {kind} clips on Gemini Omni", video_id)
             return ClipRequest(str(video_id), self.wan_app, self.wan_class, self.public_url, jobs + drawn, 0, 0, _hu(inr, 2), "omni",
                                omni_resolution(kind), self.omni_model)
         gpu = self.gpu_seconds(jobs, kind)
         inr = self.d.pricing.modal_gpu_inr("H100", gpu)
-        self.d.budget.require_gpu(inr, f"{len(jobs)} {kind} clips")
+        self.d.budget.require_gpu(inr, f"{len(jobs)} {kind} clips", video_id)
         return ClipRequest(str(video_id), self.wan_app, self.wan_class, self.public_url, jobs + drawn, containers(kind, len(jobs)), gpu,
                            _hu(inr, 2), "wan", None, None)
 

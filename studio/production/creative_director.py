@@ -140,7 +140,7 @@ class CreativeDirector(StageSupport):
 
     def image_review_request(self, video_id: uuid.UUID) -> ImageReviewRequest:
         """What the media worker's vision review needs: every image with its line, paragraph and timing."""
-        self.d.budget.require(Decimal(5), "CREATIVE_REVIEW images")  # ~25 small images + text: well under ₹5 on Gemini Flash
+        self.d.budget.require(Decimal(5), "CREATIVE_REVIEW images", video_id)  # ~25 small images + text: well under ₹5 on Gemini Flash
         plan = self.plan(video_id)
         preset = self.d.presets.by_id_or_default(plan.stylePreset)
         concept = self.latest_concept(video_id)

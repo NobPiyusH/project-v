@@ -72,7 +72,9 @@ def test_the_read_routes_match_the_java_shapes(a):
     shot, img, clip = with_shots(db, video)
     lst = a.c.get("/api/videos").json()
     shape_ok("/api/videos", [r for r in lst if r["id"] == str(video)])
-    shape_ok("/api/videos/{id}", a.c.get(f"/api/videos/{video}").json())
+    detail = a.c.get(f"/api/videos/{video}").json()
+    detail.pop("budget", None)  # additive: the per-video cap, not in the recorded Java shape
+    shape_ok("/api/videos/{id}", detail)
     prod = a.c.get(f"/api/videos/{video}/production").json()
     shape_ok("/api/videos/{id}/production", prod)
     assert prod["shots"][0]["id"] == str(shot)

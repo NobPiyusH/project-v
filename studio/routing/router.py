@@ -95,7 +95,7 @@ class Router:
         best_score = fallback_score = -math.inf
         for c in candidates:
             row: dict[str, Any] = {"provider": c.provider_id, "estimateInr": _scale(c.estimate_inr, 2)}
-            why = self.ineligible(c, capability, stage=stage, scope_id=scope_id or video_id)
+            why = self.ineligible(c, capability, stage=stage, scope_id=scope_id or video_id, video_id=video_id)
             p = self._provider(c.provider_id)
             quality = 0 if p is None else _int_of(p["quality"], 5)
             row["quality"] = quality
@@ -135,8 +135,10 @@ class Router:
             raise BudgetExceededError(f"{reason}. Raise a cap, wait for a cooldown, or switch this stage to Manual.")
         return Choice(chosen.provider_id, reason, decision_id, considered)
 
-    def ineligible(self, c: Candidate, capability: str, stage: str | None = None, scope_id: uuid.UUID | None = None) -> str | None:
-        """Why this candidate cannot run the job now, or None when it can."""
+    def ineligible(
+        self, c: Candidate, capability: str, stage: str | None = None, scope_id: uuid.UUID | None = None, video_id: uuid.UUID | None = None
+    ) -> str | None:
+        """Why this candidate cannot run the job now, or None when it can. video_id: the video that would pay for it (its own cap counts)."""
         p = self._provider(c.provider_id)
         if p is None:
             return "not in the provider registry"
@@ -161,7 +163,11 @@ class Router:
         if not fits:
             return f"≈₹{_scale(c.estimate_inr, 0)} would break the monthly {bucket} cap"
         if self._caps is not None:  # the provider's own daily / per-video limit (providerCaps)
-            return self._caps.refusal(c.provider_id, c.estimate_inr, stage=stage, scope_id=scope_id)
+            why = self._caps.refusal(c.provider_id, c.estimate_inr, stage=stage, scope_id=scope_id)
+            if why is not None:
+                return why
+        if video_id is not None:  # a free / local / manual route estimates ₹0, which the video cap never refuses
+            return self._budget.video_refusal(video_id, c.estimate_inr, f"{capability} on {c.provider_id}")
         return None
 
     # ---- health

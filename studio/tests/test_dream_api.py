@@ -128,6 +128,7 @@ def test_list_detail_chain_reviews_and_gpu_match_the_java_shapes(app_):
     detail = c.get(f"/api/dream/{dream}")
     assert detail.status_code == 200
     d = detail.json()
+    d.pop("budget_inr", None)  # additive: the per-video cap (V44), not in the recorded Java shape
     shape_ok("/api/dream/{id}", d)
     assert d["modes_json"]["type"] == "jsonb" and isinstance(d["modes_json"]["value"], str), "Java sends the jsonb column as Jackson wrote the PGobject"
     assert len(d["shots"]) == 2 and len(d["costs"]) >= 3 and d["metrics"] and d["producer"] and d["timeline"][0]["step"] == "SCOUT"

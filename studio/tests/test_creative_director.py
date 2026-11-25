@@ -96,7 +96,7 @@ class FakeBudget:
     def __init__(self):
         self.required = []
 
-    def require(self, amount, what):
+    def require(self, amount, what, video_id=None):
         self.required.append((amount, what))
 
 

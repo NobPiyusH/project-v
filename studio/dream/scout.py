@@ -80,7 +80,7 @@ class DreamScout:
 
     def scout_request(self, dream_id: uuid.UUID, notes: str | None) -> DreamScoutRequest:
         d = self.svc.dream(dream_id)
-        self.budget.require(SCOUT_ESTIMATE_INR, "Dream Short Scout (watch similar Shorts)")
+        self.budget.require(SCOUT_ESTIMATE_INR, "Dream Short Scout (watch similar Shorts)", dream_id)
         query = (d.get("idea") or "") + ("" if not notes or not notes.strip() else " " + notes.strip())
         return DreamScoutRequest(self.svc.storage_id(dream_id), query.strip(), self.listen_model, SCOUT_VIDEOS,
                                  looks.look(d.get("look")).brief, self.watched_shorts())
