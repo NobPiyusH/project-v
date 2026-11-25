@@ -340,13 +340,10 @@ class FakeMedia:
         self.gate_calls = 0
         self.moon_fails = 0  # the next N Moon composites fail (missing picture)
         self.moon_calls = 0
-<<<<<<< HEAD
         self.interp_fails = 0  # the next N RIFE runs fail
         self.interp_skip = False  # the worker reports no RIFE program
         self.interp_calls = 0
-=======
         self.clip_jobs = 0  # generate_clips runs: each one is a pod's work
->>>>>>> claude/redo-resume-27da49
 
     def defs(self):
         m = self
@@ -389,7 +386,6 @@ class FakeMedia:
                 raise ApplicationError("The Moon picture was not found", type="MoonLayerInputMissing", non_retryable=True)
             return {"videoUri": "s3://b/moon-layer.mp4", "durationSec": 10.0, "width": 720, "height": 1280, "fps": 16}
 
-<<<<<<< HEAD
         def interp(req):
             m.interp_calls += 1
             if m.interp_fails > 0:
@@ -398,11 +394,9 @@ class FakeMedia:
             if m.interp_skip:
                 return {"skip": "Interpolation skipped: the RIFE program was not found."}
             return {"videoUri": "s3://b/interpolated.mp4", "durationSec": 10.0, "width": 720, "height": 1280, "fpsIn": 24.0, "fpsOut": 48.0}
-=======
         def clips(req):
             m.clip_jobs += 1
             return {"clips": [], "containers": 1, "stopped": False}
->>>>>>> claude/redo-resume-27da49
 
         def inspect(req):
             if m.fail_inspector:
@@ -925,13 +919,15 @@ def test_moon_layer_failure_can_be_continued_without_and_manual_mode_holds_a_goo
     run_case(manual)
 
 
-<<<<<<< HEAD
 def test_interpolate_is_skipped_without_a_media_call_when_the_flag_is_off():
     async def case(h):
         w = await h.start("interp-off")
         await w.result()
         assert "INTERPOLATE:1:SKIPPED" in h.c.events and h.m.interp_calls == 0 and h.c.events[-1] == "VIDEO:COMPLETED"
-=======
+
+    run_case(case)
+
+
 # ---------------------------------------------------------------------------------------------------- paid redos and Resume (25 Nov 2026)
 
 
@@ -950,12 +946,10 @@ def test_a_paid_automatic_redo_waits_for_the_owner_with_the_reason_and_the_estim
         await w.signal("approve", args=["KEYFRAMES", None])  # continue with the current result
         await w.result()
         assert "KEYFRAMES:1:APPROVED" in h.c.events and h.c.pod.count("ACQUIRE:keyframes") == 1 and h.c.events[-1] == "VIDEO:COMPLETED"
->>>>>>> claude/redo-resume-27da49
 
     run_case(case)
 
 
-<<<<<<< HEAD
 def test_interpolate_runs_after_the_moon_layer_and_a_missing_rife_program_is_a_clear_skip():
     async def run(h):
         h.c.interpolate, h.c.moon = True, True
@@ -1007,7 +1001,8 @@ def test_interpolate_failure_waits_for_the_owner_who_can_retry_or_continue_witho
         assert "INTERPOLATE:1:APPROVED" in h.c.events and "INTERP:s3://b/interpolated.mp4" in h.c.events
 
     run_case(manual)
-=======
+
+
 def test_the_owner_can_redo_a_held_paid_redo_and_a_second_fail_still_holds():
     async def case(h):
         h.c.keyframe_inspection_fails = 2
@@ -1089,4 +1084,3 @@ def test_resume_is_not_offered_when_the_media_job_itself_failed():
         await w.result()
 
     run_case(case)
->>>>>>> claude/redo-resume-27da49
