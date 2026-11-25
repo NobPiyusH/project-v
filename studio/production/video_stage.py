@@ -23,6 +23,7 @@ from typing import Any
 from studio.agents.jfmt import fixed, jround, string_hash
 from studio.assets import asset_store as lic
 from studio.assets.asset_store import NewAsset
+from studio.assets.cache import clip_key
 from studio.ledger.budget_guard import GEMINI, BudgetExceededError
 from studio.media.types import ClipEstimate, ClipJob, ClipRequest, ClipResult
 from studio.planner.imported import load as load_imported
@@ -385,6 +386,8 @@ class VideoStage(StageSupport):
                                                     o.frames / o.fps if o.fps > 0 else None, provider, model, job.prompt, job.seed, licence, True))
                 self.db.execute("UPDATE asset SET shot_id = %(s)s, clip_kind = %(k)s, fps = %(f)s WHERE id = %(a)s",
                                 {"s": shot_id, "k": job.kind, "f": o.fps if o.fps > 0 else FPS, "a": asset_id})
+                if d.cache is not None and not diagram:  # cache hook (record only: the clip request path has no reuse yet)
+                    d.cache.remember(asset_id, clip_key(job, provider, model, o.fps if o.fps > 0 else FPS))
                 if o.shot_id not in activated:
                     activated.add(o.shot_id)
                     column = "draft_clip_asset_id" if job.kind == DRAFT else "final_clip_asset_id"

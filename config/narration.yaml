@@ -1,0 +1,13 @@
+# Spoken-pace estimate used at plan time (studio/planner/narration.py). Measured: the first live Moon Short (25 Nov 2026) needed ~12 s of
+# speech for a 10 s plan. Words per second, per ISO 639-1 language; "default" covers any language not listed. Pauses are added in seconds.
+words_per_sec:
+  default: 2.5
+  en: 2.5
+  hi: 2.3
+  ta: 2.2
+  es: 2.8
+pause_sec:
+  comma: 0.30          # , ; : and dashes
+  sentence: 0.40       # . ! ? and an ellipsis
+warn_over: 0.10        # warn when the line is more than 10% longer than its slot
+fail_over: 0.25        # reject the plan when it is more than 25% longer

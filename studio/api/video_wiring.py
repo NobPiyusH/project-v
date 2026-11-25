@@ -11,6 +11,7 @@ from typing import Any
 
 from studio.api.wiring import DreamContext, LazyGateway, build_llm
 from studio.assets.asset_store import AssetStore
+from studio.assets.cache import AssetCache
 from studio.assets.media_urls import MediaUrls
 from studio.config import Settings
 from studio.db import Db
@@ -100,7 +101,8 @@ def build_video_context(db: Db, s: Settings, *, llm: Any = None, gateway: Any = 
                           tts_model=env("GEMINI_TTS_MODEL", "gemini-3.8-flash-tts,gemini-3.1-flash-tts-preview"),
                           image_model=env("GEMINI_IMAGE_MODEL", "gemini-nano-banana-2.1,gemini-3.1-flash-image"),
                           music_model=env("GEMINI_MUSIC_MODEL", "lyria-3.5,lyria-3-pro-preview"), default_voice=env("GEMINI_TTS_VOICE", "Charon"),
-                          modal_app=env("PROJECTV_MODAL_ZIMAGE_APP", "projectv-zimage"), modal_class=env("PROJECTV_MODAL_ZIMAGE_CLASS", "ZImage"))
+                          modal_app=env("PROJECTV_MODAL_ZIMAGE_APP", "projectv-zimage"), modal_class=env("PROJECTV_MODAL_ZIMAGE_CLASS", "ZImage"),
+                          cache=AssetCache(db, assets, ledger))
     public_url = env("PROJECTV_PUBLIC_URL", "http://127.0.0.1:8080")
     approve = Decimal(env("PROJECTV_VIDEO_AUTO_APPROVE_INR", "0"))
     video_gpu = None
