@@ -1,13 +1,13 @@
 {
-  "plan_version": "1.0",
+  "plan_version": "2.0",
   "title": "What if the Moon were 10 times closer?",
   "channel": "Strange If True",
-  "note": "First live test of the Python studio (docs/runbooks/first-live-short.md). Validated by studio/tests/test_moon_plan.py.",
+  "note": "First live Short, reference style (docs/shorts/moon-reference-analysis.md): ONE continuous 10 s vertical shot, 2 chained 5 s beats, a real-looking shore plate with ambient waves, and the Moon as a separate layer composited in code. Validated by studio/tests/test_moon_plan.py. Runbook: docs/runbooks/first-live-short.md.",
   "video": {
     "title": "What if the Moon were 10 times closer?",
-    "summary": "A 15-second vertical Short: a quiet night town, the Moon ten times closer, tides flooding the coast, and a sky that is wall to wall Moon.",
+    "summary": "A 10-second vertical Short: one continuous locked-off shot of a night shore with waves rolling in while a huge Moon slowly rises and grows above the sea.",
     "format": "short",
-    "durationSec": 15,
+    "durationSec": 10,
     "aspectRatio": "9:16",
     "outputResolution": "1080p",
     "stylePreset": "shorts_punchy",
@@ -23,11 +23,12 @@
     ],
     "shortsCount": 0,
     "mustInclude": [
-      "oversized Moon over a night town",
-      "ocean tides surging",
-      "cratered Moon surface filling the sky"
+      "one continuous shot",
+      "real-looking shore with waves",
+      "huge Moon slowly growing and rising",
+      "top caption: What if the Moon were 10x closer?"
     ],
-    "rationale": "Owner-chosen idea; three 5 s beats with real camera moves."
+    "rationale": "Owner-chosen idea in the style of his five reference Shorts: one shot, one huge object, real ambient motion, tiny caption."
   },
   "generation": {
     "width": 720,
@@ -36,48 +37,87 @@
     "fps": 16,
     "engine": "wan2.2 fun_camera (4-step lightx2v, fp8)",
     "cameraPresets": [
-      "zoom_in",
-      "pan_left",
-      "zoom_in"
+      "slow_push",
+      "slow_push"
     ],
-    "style": "realistic cinematic night, photographic, natural motion blur, no text, no people"
+    "style": "realistic photographic night, natural motion blur, locked-off camera, no text, no people"
+  },
+  "moon": {
+    "mode": "layer",
+    "note": "Primary (b): the plate prompts show an EMPTY sky; the Moon is a separate picture composited by tools/film4k/moon_layer.py over the whole 10 s timeline (continuous across the beat seam).",
+    "layer": {
+      "diameterFrac": 0.3,
+      "scaleFrom": 1.0,
+      "scaleTo": 2.2,
+      "ease": "smooth",
+      "cx": 0.5,
+      "cyFrom": 0.62,
+      "cyTo": 0.36,
+      "glow": 0.5,
+      "glowScale": 1.7,
+      "asset": "one Moon picture on black (lit disc, real craters), luma-keyed to alpha; source decided by the owner (public-domain photo or one FLUX picture)"
+    },
+    "fallback": {
+      "mode": "in_plate",
+      "note": "(a) If the layer looks fake: let the model draw the large Moon inside the plate, same camera presets, no composite step.",
+      "beatPrompts": [
+        "Locked-off camera, gentle waves rolling in over the wet sand, a huge full Moon low and large above the horizon, cratered and glowing, silver light on the water",
+        "Same locked-off shot continuing, waves foaming further up the sand, the same huge full Moon now higher in the sky and larger, silver light on the water"
+      ],
+      "resolvedPrompts": [
+        {
+          "beat": 1,
+          "camera": "slow_push",
+          "keyframePrompt": "Locked-off camera, gentle waves rolling in over the wet sand, a huge full Moon low and large above the horizon, cratered and glowing, silver light on the water. A real-looking quiet shore at night, filmed locked-off from a low vertical viewpoint: dark wet sand in the foreground, small waves rolling in and breaking in white foam, a calm dark sea to a clear horizon, a few tiny warm lights far along the coast, a clear night sky with faint stars and soft cold blue moonlight on the water.",
+          "motionPrompt": "Locked-off camera, gentle waves rolling in over the wet sand, a huge full Moon low and large above the horizon, cratered and glowing, silver light on the water. A real-looking quiet shore at night, filmed locked-off from a low vertical viewpoint: dark wet sand in the foreground, small waves rolling in and breaking in white foam, a calm dark sea to a clear horizon, a few tiny warm lights far along the coast, a clear night sky with faint stars and soft cold blue moonlight on the water."
+        },
+        {
+          "beat": 2,
+          "camera": "slow_push",
+          "keyframePrompt": "Same locked-off shot continuing, waves foaming further up the sand, the same huge full Moon now higher in the sky and larger, silver light on the water. A real-looking quiet shore at night, filmed locked-off from a low vertical viewpoint: dark wet sand in the foreground, small waves rolling in and breaking in white foam, a calm dark sea to a clear horizon, a few tiny warm lights far along the coast, a clear night sky with faint stars and soft cold blue moonlight on the water.",
+          "motionPrompt": "Same locked-off shot continuing, waves foaming further up the sand, the same huge full Moon now higher in the sky and larger, silver light on the water. A real-looking quiet shore at night, filmed locked-off from a low vertical viewpoint: dark wet sand in the foreground, small waves rolling in and breaking in white foam, a calm dark sea to a clear horizon, a few tiny warm lights far along the coast, a clear night sky with faint stars and soft cold blue moonlight on the water. Keep the same as the previous beat: same shore, same sea, same cold moonlight, same camera position."
+        }
+      ]
+    }
+  },
+  "overlay": {
+    "caption": {
+      "text": "What if the Moon were 10x closer?",
+      "position": "top",
+      "startSec": 0.0,
+      "endSec": 4.0
+    }
   },
   "bank": {
     "locations": [
       {
-        "id": "moon-town",
-        "description": "A quiet small coastal town at night under a clear sky: low rooftops with a few warm lit windows, a church steeple, a dark sea and a narrow shore beyond it, and a vast full Moon ten times larger than the real Moon hanging low and lighting everything in cold silver light."
+        "id": "moon-shore",
+        "description": "A real-looking quiet shore at night, filmed locked-off from a low vertical viewpoint: dark wet sand in the foreground, small waves rolling in and breaking in white foam, a calm dark sea to a clear horizon, a few tiny warm lights far along the coast, a clear night sky with faint stars and soft cold blue moonlight on the water."
       }
     ]
   },
   "script": [
     {
       "n": 1,
-      "text": "Imagine the Moon were ten times closer.",
+      "text": "Imagine the Moon ten times closer, rising huge over a calm sea.",
       "startSec": 0.3,
       "beat": 1
     },
     {
       "n": 2,
-      "text": "Tides would climb far higher, flooding coasts twice a day.",
+      "text": "Tides would climb far higher, flooding coasts twice a day beneath one enormous Moon.",
       "startSec": 5.2,
       "beat": 2
-    },
-    {
-      "n": 3,
-      "text": "And every night, the sky would be wall to wall Moon.",
-      "startSec": 10.2,
-      "beat": 3
     }
   ],
   "scenes": [
     {
-      "lengthSec": 15,
+      "lengthSec": 10,
       "beats": [
         {
-          "prompt": "Slow push-in on the quiet night town, the oversized Moon glowing above the rooftops, a faint mist over the shore",
+          "prompt": "Locked-off camera, gentle waves rolling in over the wet sand, the sea and an empty clear night sky above the horizon, only faint stars, no Moon",
           "locationIds": [
-            "moon-town"
+            "moon-shore"
           ],
           "startSec": 0.0,
           "durationSec": 5.0,
@@ -86,25 +126,16 @@
           ]
         },
         {
-          "prompt": "Pan left as the huge Moon rises over the sea, heavy ocean tides surging up against the shore and flooding the low coast",
+          "prompt": "Same locked-off shot continuing, waves foaming further up the sand, the sea shimmering faintly, empty clear night sky, no Moon",
           "locationIds": [
-            "moon-town"
+            "moon-shore"
           ],
           "startSec": 5.0,
           "durationSec": 5.0,
-          "continuity": "same giant Moon, same cold silver night light, same shoreline",
+          "continuity": "same shore, same sea, same cold moonlight, same camera position",
           "claims": [
             "The Moon's pull raises the tides; a closer Moon would raise much higher tides."
           ]
-        },
-        {
-          "prompt": "Zoom in on the cratered grey surface of the Moon, now filling the whole sky above the town, craters and mountain ridges in sharp detail",
-          "locationIds": [
-            "moon-town"
-          ],
-          "startSec": 10.0,
-          "durationSec": 5.0,
-          "continuity": "same giant Moon, same cold silver night light"
         }
       ]
     }
@@ -112,21 +143,15 @@
   "resolvedPrompts": [
     {
       "beat": 1,
-      "camera": "zoom_in",
-      "keyframePrompt": "Slow push-in on the quiet night town, the oversized Moon glowing above the rooftops, a faint mist over the shore. A quiet small coastal town at night under a clear sky: low rooftops with a few warm lit windows, a church steeple, a dark sea and a narrow shore beyond it, and a vast full Moon ten times larger than the real Moon hanging low and lighting everything in cold silver light.",
-      "motionPrompt": "Slow push-in on the quiet night town, the oversized Moon glowing above the rooftops, a faint mist over the shore. A quiet small coastal town at night under a clear sky: low rooftops with a few warm lit windows, a church steeple, a dark sea and a narrow shore beyond it, and a vast full Moon ten times larger than the real Moon hanging low and lighting everything in cold silver light."
+      "camera": "slow_push",
+      "keyframePrompt": "Locked-off camera, gentle waves rolling in over the wet sand, the sea and an empty clear night sky above the horizon, only faint stars, no Moon. A real-looking quiet shore at night, filmed locked-off from a low vertical viewpoint: dark wet sand in the foreground, small waves rolling in and breaking in white foam, a calm dark sea to a clear horizon, a few tiny warm lights far along the coast, a clear night sky with faint stars and soft cold blue moonlight on the water.",
+      "motionPrompt": "Locked-off camera, gentle waves rolling in over the wet sand, the sea and an empty clear night sky above the horizon, only faint stars, no Moon. A real-looking quiet shore at night, filmed locked-off from a low vertical viewpoint: dark wet sand in the foreground, small waves rolling in and breaking in white foam, a calm dark sea to a clear horizon, a few tiny warm lights far along the coast, a clear night sky with faint stars and soft cold blue moonlight on the water."
     },
     {
       "beat": 2,
-      "camera": "pan_left",
-      "keyframePrompt": "Pan left as the huge Moon rises over the sea, heavy ocean tides surging up against the shore and flooding the low coast. A quiet small coastal town at night under a clear sky: low rooftops with a few warm lit windows, a church steeple, a dark sea and a narrow shore beyond it, and a vast full Moon ten times larger than the real Moon hanging low and lighting everything in cold silver light.",
-      "motionPrompt": "Pan left as the huge Moon rises over the sea, heavy ocean tides surging up against the shore and flooding the low coast. A quiet small coastal town at night under a clear sky: low rooftops with a few warm lit windows, a church steeple, a dark sea and a narrow shore beyond it, and a vast full Moon ten times larger than the real Moon hanging low and lighting everything in cold silver light. Keep the same as the previous beat: same giant Moon, same cold silver night light, same shoreline."
-    },
-    {
-      "beat": 3,
-      "camera": "zoom_in",
-      "keyframePrompt": "Zoom in on the cratered grey surface of the Moon, now filling the whole sky above the town, craters and mountain ridges in sharp detail. A quiet small coastal town at night under a clear sky: low rooftops with a few warm lit windows, a church steeple, a dark sea and a narrow shore beyond it, and a vast full Moon ten times larger than the real Moon hanging low and lighting everything in cold silver light.",
-      "motionPrompt": "Zoom in on the cratered grey surface of the Moon, now filling the whole sky above the town, craters and mountain ridges in sharp detail. A quiet small coastal town at night under a clear sky: low rooftops with a few warm lit windows, a church steeple, a dark sea and a narrow shore beyond it, and a vast full Moon ten times larger than the real Moon hanging low and lighting everything in cold silver light. Keep the same as the previous beat: same giant Moon, same cold silver night light."
+      "camera": "slow_push",
+      "keyframePrompt": "Same locked-off shot continuing, waves foaming further up the sand, the sea shimmering faintly, empty clear night sky, no Moon. A real-looking quiet shore at night, filmed locked-off from a low vertical viewpoint: dark wet sand in the foreground, small waves rolling in and breaking in white foam, a calm dark sea to a clear horizon, a few tiny warm lights far along the coast, a clear night sky with faint stars and soft cold blue moonlight on the water.",
+      "motionPrompt": "Same locked-off shot continuing, waves foaming further up the sand, the sea shimmering faintly, empty clear night sky, no Moon. A real-looking quiet shore at night, filmed locked-off from a low vertical viewpoint: dark wet sand in the foreground, small waves rolling in and breaking in white foam, a calm dark sea to a clear horizon, a few tiny warm lights far along the coast, a clear night sky with faint stars and soft cold blue moonlight on the water. Keep the same as the previous beat: same shore, same sea, same cold moonlight, same camera position."
     }
   ]
 }

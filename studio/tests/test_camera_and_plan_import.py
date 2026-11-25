@@ -117,25 +117,25 @@ def test_the_untested_preset_in_a_plan_is_refused_by_the_stage_too(scratch_db):
 
 def test_the_moon_plan_parses_with_five_second_beats_and_its_script_starts():
     imp = imported.parse(PLAN)
-    assert [(b.startSec, b.durationSec, b.camera) for b in imp.beats] == [(0.0, 5.0, "zoom_in"), (5.0, 5.0, "pan_left"), (10.0, 5.0, "zoom_in")]
-    assert imp.total_sec() == 15 and imp.line_starts() == {0: 0.3, 1: 5.2, 2: 10.2}
+    assert [(b.startSec, b.durationSec, b.camera) for b in imp.beats] == [(0.0, 5.0, "slow_push"), (5.0, 5.0, "slow_push")]
+    assert imp.total_sec() == 10 and imp.line_starts() == {0: 0.3, 1: 5.2}
     assert imp.script().lines[1].text == PLAN["script"][1]["text"]
     sp = imp.shot_plan()
-    assert [s.cameraMove for s in sp.shots] == ["zoom_in", "pan_left", "zoom_in"] and sp.bank.locations[0].id == "moon-town"
+    assert [s.cameraMove for s in sp.shots] == ["slow_push", "slow_push"] and sp.bank.locations[0].id == "moon-shore"
 
 
 def test_a_bad_plan_lists_every_problem():
     bad = json.loads(json.dumps(PLAN))
-    bad["generation"]["cameraPresets"] = ["zoom_in", "pan_down", "zoom_in"]
+    bad["generation"]["cameraPresets"] = ["slow_push", "pan_down"]
     bad["script"][0]["beat"] = 9
     bad["scenes"][0]["beats"][0]["locationIds"] = ["nowhere"]
     with pytest.raises(ValueError) as e:
         imported.parse(bad)
     assert "not tested" in str(e.value) and "unknown location" in str(e.value) and "beat 9 does not exist" in str(e.value)
     bad["generation"]["allowUntested"] = True
-    bad["generation"]["cameraPresets"] = ["zoom_in", "pan_down", "zoom_in"]
+    bad["generation"]["cameraPresets"] = ["slow_push", "pan_down"]
     bad["script"][0]["beat"] = 1
-    bad["scenes"][0]["beats"][0]["locationIds"] = ["moon-town"]
+    bad["scenes"][0]["beats"][0]["locationIds"] = ["moon-shore"]
     assert imported.parse(bad).beats[1].camera == "pan_down"
 
 
@@ -166,7 +166,7 @@ def test_post_videos_with_a_plan_file_stores_it_and_the_stages_use_it_without_an
     planner = api.v.planner
     assert isinstance(planner, ImportedPlanner)
     out = planner.plan(vid, "x", None)
-    assert out.source == "imported plan" and (out.plan.durationSec, out.plan.aspectRatio) == (15, "9:16")
+    assert out.source == "imported plan" and (out.plan.durationSec, out.plan.aspectRatio) == (10, "9:16")
     assert [s.name for s in out.stages][:2] == ["PLAN", "CONCEPT"], "no research: the plan says so"
     # the PLAN activity writes its plan next to the imported file, not over it
     from studio.workflow.activities import ControlActivities
@@ -183,7 +183,7 @@ def test_post_videos_rejects_a_bad_or_foreign_plan_and_creates_nothing(api):
     n = api.db.rows("SELECT count(*) AS n FROM video")[0]["n"]
     assert api.c.post("/api/videos", json={"planFile": "../../.env"}).status_code == 400
     bad = json.loads(json.dumps(PLAN))
-    bad["generation"]["cameraPresets"] = ["zoom_in", "fast_push", "zoom_in"]
+    bad["generation"]["cameraPresets"] = ["slow_push", "fast_push"]
     r = api.c.post("/api/videos", json={"plan": bad})
     assert r.status_code == 400 and "not tested" in r.json()["detail"]
     assert api.db.rows("SELECT count(*) AS n FROM video")[0]["n"] == n
@@ -209,22 +209,22 @@ def test_without_an_imported_plan_the_wrappers_use_the_real_planner_writer_and_d
 # ---------------------------------------------------------------------------------------------------- timing from the plan's beats
 
 def test_a_plan_video_is_timed_from_its_five_second_beats_not_from_the_narration(scratch_db):
-    video = seed_video(scratch_db, duration=15)
+    video = seed_video(scratch_db, duration=10)
     scratch_db.execute("UPDATE video SET plan_json = plan_json || CAST(%(i)s AS jsonb) WHERE id = %(v)s",
                        {"v": video, "i": json.dumps({"imported": PLAN})})
     db_concept(scratch_db, video)
-    voiced_script(scratch_db, video, [2.2, 3.4, 3.2])  # narration shorter than the 5 s beats
+    voiced_script(scratch_db, video, [3.4, 3.6])  # narration shorter than the 5 s beats
     imp = imported.parse(PLAN)
     deps = make_deps(scratch_db, None, FakeDirector(imp.shot_plan().shots))
     deps.director = type("D", (), {"plan": lambda self, *a: imp.shot_plan()})()
     ShotStage(deps).shot_plan(video, None)
     rows = ShotStage(deps).shots(video)
-    assert [float(r["duration_target_sec"]) for r in rows] == [5.0, 5.0, 5.0]
-    assert [json.loads(r["prompt_json"])["startSec"] for r in rows] == [0.0, 5.0, 10.0]
-    assert [r["camera_move"] for r in rows] == ["zoom_in", "pan_left", "zoom_in"]
+    assert [float(r["duration_target_sec"]) for r in rows] == [5.0, 5.0]
+    assert [json.loads(r["prompt_json"])["startSec"] for r in rows] == [0.0, 5.0]
+    assert [r["camera_move"] for r in rows] == ["slow_push", "slow_push"]
     starts = json.loads(scratch_db.rows("SELECT beat_sheet_json::text AS b FROM script WHERE video_id = %(v)s ORDER BY version DESC LIMIT 1",
                                         {"v": video})[0]["b"])
-    assert starts["lineStarts"] == {"0": 0.3, "1": 5.2, "2": 10.2}, "each line starts inside its own beat, as the plan says"
+    assert starts["lineStarts"] == {"0": 0.3, "1": 5.2}, "each line starts inside its own beat, as the plan says"
 
 
 # ---------------------------------------------------------------------------------------------------- GPU cap

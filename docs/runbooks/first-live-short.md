@@ -1,4 +1,4 @@
-# First live Short: "What if the Moon were 10 times closer?" (runbook, prepared 25 Nov 2026)
+# First live Short: "What if the Moon were 10 times closer?" (runbook, prepared 25 Nov 2026, plan rewritten to the reference style the same day)
 
 Status: **prepared, nothing spent, nothing rented.** The plan file, the studio code for it (plan import, camera presets on the pod route, plan timing, $3.50/day cap; section 3) and
 a free rehearsal exist. The owner approved $2 for the first LIVE Moon Short (25 Nov 2026, "ok for 2$"); the live run itself is a separate step (section 8). All prices below are ESTIMATES from earlier measurements (`docs/pod-tests-24nov.md`, `docs/film4k.md`), not quotes: read the live price first (CLAUDE.md rule 7).
@@ -7,15 +7,20 @@ a free rehearsal exist. The owner approved $2 for the first LIVE Moon Short (25 
 
 | Thing | Where |
 |---|---|
-| The plan (video plan, one-location bank, 3 timed beats, narration, camera presets, resolved prompts) | `docs/shorts/moon-10x-closer-plan.json` |
+| The plan (video plan, one-location bank, 2 timed beats, narration, camera presets, resolved prompts, `moon` layer settings and fallback prompts, caption) | `docs/shorts/moon-10x-closer-plan.json` |
+| The Moon layer composite (pure command builder, scale curve; ffmpeg only runs by hand) and its tests | `tools/film4k/moon_layer.py`, `tools/film4k/tests/test_moon_layer.py` |
+| Measurements of the five reference Shorts | `docs/shorts/moon-reference-analysis.md` |
 | Test that the plan loads, validates (`bank.validate`), pastes the bank verbatim, uses legal Wan sizes and tested camera presets, and goes through the real `ShotStage` | `studio/tests/test_moon_plan.py` |
 | Plan import: `POST /api/videos` with `planFile` / `plan`; plan-driven PLAN, CONCEPT, SCRIPT, SHOT_PLAN and per-beat timing | `studio/planner/imported.py`, `studio/api/video_routes.py`, `studio/production/shot_stage.py` |
 | Camera presets on the pod route (Fun Camera, 720x1280, 81 frames, chains of 2) | `studio/production/camera.py`, `video_stage.py`, `workers/pod/server.py`, `workers/activities/clips.py` |
 | Tests for all of it (fakes only) | `studio/tests/test_camera_and_plan_import.py`, `workers/tests/test_pod_camera.py` |
 | Free rehearsal of the studio on live Temporal (no keys, no pod) | section 2 |
 
-The idea: 15 s vertical, 3 beats of 5 s, 720x1280, 81 frames at 16 fps (5.06 s per beat), style "realistic cinematic night". Camera: `zoom_in`, `pan_left`, `zoom_in`
-(the two presets judged good by eye on 24 Nov). No characters; one location, `moon-town`, whose text is pasted word for word into every beat prompt.
+**The idea (reference style, rewritten 25 Nov 2026 after measuring the owner's five reference Shorts: `docs/shorts/moon-reference-analysis.md`).** ONE continuous 10 s vertical shot, not three scenes:
+2 chained beats of 5 s (beat 2 starts from the last frame of beat 1: the "at most 2 chained" rule), 720x1280, 81 frames at 16 fps (5.06 s per beat), Fun Camera `slow_push` on both (a tested preset, speed 0.5: the references have a still or slowly drifting camera).
+The plate is a real-looking night shore with waves rolling in (one location, `moon-shore`, text pasted word for word into both beat prompts, **no Moon in the plate prompts**).
+**The Moon is the hero and is a separate layer (option b, primary):** one Moon picture composited over the whole 10 s timeline in code by `tools/film4k/moon_layer.py` (scale x1.0 to x2.2 with a smoothstep curve, rising from 62% to 36% of the frame height, soft glow underneath), so its growth is continuous across the beat seam and does not depend on the model. A short caption sits at the top for the first 4 s: "What if the Moon were 10x closer?". Narration: two lines, 25 words, about 10 s.
+**Fallback (a), in the plan under `moon.fallback`:** if the layer looks fake, the model draws a large Moon inside the plate (the same beats with Moon prompts), no composite step.
 
 ## 2. Free rehearsal: how far the Python studio got (live Temporal, no keys, no pod)
 
@@ -63,12 +68,12 @@ The three blockers the first version of this runbook listed are fixed in code (t
    - Horizontal (16:9) videos and `VIDEO_CAMERA_PRESETS=false` keep the old SVI / plain route unchanged.
 2. **Load a plan.** `POST /api/videos` accepts `planFile` (a `.json` inside `docs/shorts`, by name) or `plan` (the object). It is validated first (`studio/planner/imported.py`: bank, location ids, beat timings, camera presets, script lines on real beats); a bad plan is a 400 listing every problem and nothing is created.
    The plan is stored under `video.plan_json -> 'imported'`; the stages are the same (modes, approvals, redo) but for that video **PLAN, CONCEPT, SCRIPT and SHOT_PLAN cost nothing** (no planner/writer/director LLM call; the PLAN stage keeps the imported file next to the plan it writes). The Creative Director's shot-plan review is skipped too (it is a paid call that rewrites prompts in place). `prompt` is optional with a plan (the title is used as the label).
-3. **Shot timing from the plan.** Shots take the plan's per-beat `startSec` / `durationSec` (5 s each, 15 s total) instead of being fitted to the narration; the narration lines keep the plan's own `startSec` (0.3 / 5.2 / 10.2 s) and may be shorter than their beat. The edit trims the 5.06 s clip to the 5 s beat. A video without a plan is timed from the narration as before.
+3. **Shot timing from the plan.** Shots take the plan's per-beat `startSec` / `durationSec` (5 s each, 10 s total) instead of being fitted to the narration; the narration lines keep the plan's own `startSec` (0.3 / 5.2 s) and may be shorter than their beat. The edit trims the 5.06 s clip to the 5 s beat. A video without a plan is timed from the narration as before.
 
 Still surprising:
 - **Nothing here has run on a pod.** The Fun Camera graph is the one that worked on 24-25 Nov (`tools/film4k/camera_graphs.py`); the pod worker has its own copy (frames saved as images, encoded by the existing encoder) and a test that fails when the two drift. First live use of: `/clip` with `camera`, `ensure_camera` downloads, chain groups on the pod, the broker for video. Watch the first beat's log.
 - **Colour matching is not implemented.** Beat 3 restarts from its own FLUX keyframe, which is a fresh picture, not a colour-matched copy of beat 2's end. For one location with one text block pasted into every prompt this should look consistent; judge it by eye (and `quality-gate` `color_drift`).
-- **KEYFRAMES make one FLUX picture per beat** (three pictures, not one). That is intended (beats 1 and 3 each need their own start picture), about 16 GB of FLUX weights on the pod the first time.
+- **KEYFRAMES make one FLUX picture per beat** (two pictures). Only the first is a real start picture: beat 2 starts from beat 1's last frame (chain), so the second picture is an unused extra of a few cents; it is kept because the stage makes one per shot, about 16 GB of FLUX weights on the pod the first time.
 - A deterministic precondition error (`No shots to render`, `No concept yet`) is retried by Temporal up to 10 times (about 6 minutes) before the stage waits for the owner.
 - Two `studio.worker` processes can listen on `projectv-control-py` (two launcher/child pairs); harmless for the same code, but stop one before a live run. After this change restart the control plane, both workers (`studio.worker`, `workers.main`) so they run the new code.
 
@@ -140,13 +145,13 @@ Walk the stages: `GET /api/videos/{id}` (stage runs with summaries), `POST /api/
 
 | Stage | With the plan file |
 |---|---|
-| PLAN, CONCEPT, SCRIPT, SHOT_PLAN | free: built from the file (RESEARCH is not in the stage list: `needsResearch: false`). Check the SHOT_PLAN summary: 3 shots, 15 s, camera moves `zoom_in / pan_left / zoom_in`; each shot prompt has the `moon-town` text word for word. |
+| PLAN, CONCEPT, SCRIPT, SHOT_PLAN | free: built from the file (RESEARCH is not in the stage list: `needsResearch: false`). Check the SHOT_PLAN summary: 2 shots, 10 s, camera moves `slow_push / slow_push`; each shot prompt has the `moon-shore` text word for word and says "no Moon" (layer mode). |
 | MUSIC | Lyria (paid, Gemini): Google billing returned 403 on 24 Nov; expect failure, then "Approve = continue without it" and add music by hand, or switch the stage's mode and skip it. |
-| NARRATION | Gemini TTS or ElevenLabs (free plan: non-commercial, Private upload only); same 403 caveat for Gemini. Keep the plan's three lines as they are. |
-| KEYFRAMES | **pod**: three FLUX.2 klein pictures (first GPU use, the pod boots here). The batch releases the pod when it is saved, so DRAFT_GEN boots a SECOND pod (see below). Look at the three pictures before approving. |
-| DRAFT_GEN | **pod: stops at an estimate; read it, compare with the figure the owner approved, then approve.** 3 Fun Camera beats, chains of two. |
+| NARRATION | Gemini TTS or ElevenLabs (free plan: non-commercial, Private upload only); same 403 caveat for Gemini. Keep the plan's two lines as they are (25 words, about 10 s). |
+| KEYFRAMES | **pod**: two FLUX.2 klein pictures (first GPU use, the pod boots here). The batch releases the pod when it is saved, so DRAFT_GEN boots a SECOND pod (see below). Look at the first picture before approving: a real-looking shore, an EMPTY sky, room above the horizon for the Moon. |
+| DRAFT_GEN | **pod: stops at an estimate; read it, compare with the figure the owner approved, then approve.** 2 Fun Camera beats, one chain of two (`slow_push`). |
 | FINAL_GEN | nothing to render for camera shots (pick a shot only to redo it). |
-| ASSEMBLY | laptop ffmpeg + quality gate. |
+| ASSEMBLY | laptop ffmpeg + quality gate. **The studio does not composite the Moon layer yet**: the master from ASSEMBLY is the plate only. Composite by hand afterwards (free): section 5b. |
 
 At the DRAFT_GEN estimate: if it is above the approved figure, Reject; do not approve.
 **Two boots**: KEYFRAMES releases the pod as soon as its pictures are saved (code: `ShotStage.release_gpu`), so DRAFT_GEN rents again: two boots (8-18 min each with the warm image, plus the Fun Camera download on the second pod, about 6 min). The section 8 estimate includes both. Not built yet. **CTO decision (25 Nov 2026): keep ONE pod across KEYFRAMES and DRAFT_GEN** (one boot, lower cost), provided the lease, the kill-timer/reaper and the $2 cap guard stay armed for the whole span and the pod is terminated at the end or on any failure (rule 8). It needs a code change (hold the pod from KEYFRAMES until DRAFT_GEN is saved or fails; `ShotStage.release_gpu` currently releases after the keyframe batch) and its own tests; until then the two-boot behaviour above applies.
@@ -155,6 +160,20 @@ Where things land: assets and the master are in SeaweedFS bucket `projectv` (dat
 `GET /api/assets/{asset_id}/content`. The master is `videos/{id}/master/...`; the gate report is `videos/{id}/master/quality-gate.json` (its URI is in the ASSEMBLY stage summary).
 Spend: `GET /api/videos/{id}` -> `costs`, `GET /api/budget`; the pod is booked as ONE CostEntry on the video when it is released. Pod state: `GET /api/gpu/pods`, `GET /api/gpu/pods/{id}/logs`, `GET /api/gpu/watchdog`.
 
+## 5b. The Moon layer (by hand, free, after the plate exists)
+
+1. **The Moon picture** (a lit disc with real craters on a black sky; the owner's decision, nothing downloaded or generated yet): either a public-domain full-Moon photograph (a download: ask the owner first, state file, source and size) or one extra FLUX picture on the pod ("full Moon, sharp craters, black background"; a few cents). Key it to alpha with `moon_matte_cmd` in `moon_layer.py` (luma key), or use a picture that already has alpha.
+2. **Plate**: the ASSEMBLY master (or the two clips joined), 720x1280, 10 s. Composite, with the caption (this prints the command; drop `--dry` to run):
+
+```powershell
+uv run python tools/film4k/moon_layer.py E:\project-data\outputs\moon-short\plate.mp4 E:\project-data\outputs\moon-short\moon.png E:\project-data\outputs\moon-short\moon-layer.mp4 --caption "What if the Moon were 10x closer?" --dry
+```
+
+   The defaults equal the plan's `moon.layer` block. The caption uses `C:\Windows\Fonts\arialbd.ttf` (the helper's `FONT_WIN`).
+3. Judge by eye: does the Moon read as part of the scene (glow, size, position), does the growth feel slow and natural? If it looks stuck-on, switch to fallback (a) (`moon.fallback.beatPrompts`: redo the two beats with the Moon in the plate), another round of the pod beats (about $0.35-0.55, estimate).
+4. Narration and music: mix to about -14 LUFS, true peak under -1 dBTP (the five references sit at -13.5 to -14.2 LUFS).
+5. Not built: wiring the composite into the studio's ASSEMBLY stage. The helper is a pure, tested command builder (checked on synthetic input only); the by-hand run above is its first use on real footage.
+
 ## 6. Route B: the camera-scene script (Fun Camera moves)
 
 `E:\project-data\outputs\camera-scene\run.py` already does this for another scene: Community then Secure RTX 4090 with a price ceiling, lease (`tools/gpu_lease/lease.py keep`) plus kill-timer
@@ -162,12 +181,12 @@ Spend: `GET /api/videos/{id}` -> `costs`, `GET /api/budget`; the pod is booked a
 It refuses to rent if the studio database (lease) is unreachable. Edits needed for the Moon (do them on a COPY, in a new folder, e.g. `E:\project-data\outputs\moon-short\`):
 
 1. `CAP_USD = 1.00` (the figure the owner approves); keep the deadline logic.
-2. `PRESETS = ["zoom_in", "pan_left", "zoom_in"]` (already) and `PROMPTS`: use the three `motionPrompt` values from `docs/shorts/moon-10x-closer-plan.json` -> `resolvedPrompts` (they contain the location text word for word).
-3. Keyframe: replace `scene02_720x1280.png` / `scene02_576x1024.png` in `in\` with ONE Moon keyframe (720x1280, a quiet night town under an oversized Moon). Make it with an approved image source (Seedream v4 about $0.027, or the studio's FLUX route); look at it before any GPU is rented.
+2. `PRESETS = ["slow_push", "slow_push"]` and `PROMPTS`: use the two `motionPrompt` values from `docs/shorts/moon-10x-closer-plan.json` -> `resolvedPrompts` (they contain the location text word for word).
+3. Keyframe: replace `scene02_720x1280.png` / `scene02_576x1024.png` in `in\` with ONE plate keyframe (720x1280, a real-looking night shore with an empty sky). Make it with an approved image source (Seedream v4 about $0.027, or the studio's FLUX route); look at it before any GPU is rented.
 4. Pod name `projectv-camscene` -> `projectv-moon-maxh=1` so the reaper's wall-clock rule is 1 h for this pod.
 
 Run: `python run.py --dry` (prints the plan, spends nothing) and only then `python run.py --secure` (or without `--secure` to try Community first, cheaper but some hosts are bad).
-Outputs: `...\moon-short\out\` (`log.txt`, `spend.json`, per-beat clips, chained last frames); joining the three beats and adding the narration is done locally with ffmpeg
+Outputs: `...\moon-short\out\` (`log.txt`, `spend.json`, per-beat clips, chained last frames); joining the two beats and adding the narration is done locally with ffmpeg
 (`tools/film4k/edit.py` / `assemble.py` for the cut; no audio in this route: narration by hand, ElevenLabs free plan is non-commercial: private upload only).
 
 ## 7. Reading the quality-gate report
@@ -185,18 +204,21 @@ Per check: pass / warn / fail with a value and the `where` seconds. What matters
 - `motion` below 0.25 = near-static; `sharpness`, `flicker` as in `docs/quality-gate.md`. Loudness: a silent clip skips it; with narration the target is about -14 LUFS.
 - Thresholds are calibrated on very few clips: a warn is "look at it", not a verdict. The owner's eye decides.
 
+Expected quality-gate results for this plan (a prediction, not a measurement): no `fail`. A near-still camera with small waves as the only independent motion can land `independent_motion` in the warn band (1.5 to 4.5): look at it by eye (the references have a median frame difference of 1.8-5.0 of 255 even when the camera is still). `color_drift` should stay quiet with only two chained beats. `loudness` is skipped until narration is mixed in; the composited Moon is not in the ASSEMBLY master, so run the gate on the final composite too.
+
 ## 8. Cost estimate (ESTIMATE, not a quote) and what the owner must approve
 
 The owner approved **$2** for the first live Moon Short (25 Nov 2026, his words "ok for 2$"); the daily cap is $3.50. Prices below are estimates from 24-25 Nov measurements at $0.89/h (Secure 4090); read the live price first (rule 7).
 
 | Item (Route A) | Estimate |
 |---|---|
-| KEYFRAMES: pod boot (about 8-18 min with the warm image) + FLUX download (about 16 GB, first picture job) + 3 pictures | about $0.25-0.45 |
-| DRAFT_GEN: a SECOND pod boot (KEYFRAMES released the first) + Fun Camera download (about 6 min) + 3 beats x about 3.7 min | about $0.45-0.65 |
+| KEYFRAMES: pod boot (about 8-18 min with the warm image) + FLUX download (about 16 GB, first picture job) + 2 pictures | about $0.25-0.4 |
+| DRAFT_GEN: a SECOND pod boot (KEYFRAMES released the first) + Fun Camera download (about 6 min) + 2 beats x about 3.7 min | about $0.35-0.55 |
 | Safety margin: one retried beat, a bad host, a replacement pod (the client replaces a lost pod once) | about $0.25-0.5 |
+| The Moon layer: composite on the laptop (ffmpeg) | $0 |
 | Plan, concept, script, shot plan | $0 (plan file) |
 | Narration / music | Gemini TTS and Lyria: billing returned 403 on 24 Nov; ElevenLabs free plan is non-commercial. Expect a manual voice. |
-| Route A total (GPU) | about **$0.95-1.6**, inside the $2; the DRAFT_GEN estimate screen shows the studio's own figure before you approve |
+| Route A total (GPU), two boots as built today | about **$0.85-1.45** (ESTIMATE), inside the $2; with ONE pod kept across KEYFRAMES and DRAFT_GEN (decided, not built) about **$0.5-1.0**; the DRAFT_GEN estimate screen shows the studio's own figure before you approve |
 
 Route B (fallback) is about $0.6-1.0 including margin (the 24 Nov camera scene was about $0.32 without margin).
 
@@ -214,8 +236,8 @@ Checklist, each needs the owner's own yes in chat (CLAUDE.md rule 2); the first 
 - Restart the control plane and both workers so they run this code; stop the second `studio.worker` if two are running.
 - Put the `.env` settings in (section 5). Read the live pod price and the balance.
 - The pod image: the warm image does not contain the Fun Camera weights (they download on the first camera clip) and the pod worker file is shipped to the pod at rental time, so no image rebuild is needed for the worker change.
-- Look at the three FLUX keyframes before approving DRAFT_GEN; look at the clips by eye (the quality gate cannot see colour drift: run `motion-block/drift.py` style Lab check if in doubt).
-- Colour-matched restart keyframe for beat 3 is not built (fresh keyframe only). Keeping one pod across KEYFRAMES and DRAFT_GEN is not built (two boots).
+- Look at the FLUX keyframe before approving DRAFT_GEN; look at the clips by eye (the quality gate cannot see colour drift: run `motion-block/drift.py` style Lab check if in doubt).
+- A colour-matched restart keyframe is not needed with two beats (beat 2 chains from beat 1; no fresh restart). Keeping one pod across KEYFRAMES and DRAFT_GEN is not built (two boots).
 - Narration, music and the final mix of a first Short are the owner's call (see the list above); nothing was run live in this task.
 
 ## 9. Terminating pods and rollback
