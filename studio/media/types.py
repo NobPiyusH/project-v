@@ -345,13 +345,13 @@ class ClipOutput:
     shot_id: str
     take: int
     kind: str
-    uri: str | None
-    gpu_seconds: float
-    frames: int
-    fps: int
-    mode: str | None
-    error: str | None
-    output_tokens: int
+    uri: str | None = None
+    gpu_seconds: float = 0.0
+    frames: int = 0
+    fps: int = 0
+    mode: str | None = None
+    error: str | None = None
+    output_tokens: int = 0
 
 
 @dataclass
