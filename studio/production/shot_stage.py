@@ -231,7 +231,7 @@ class ShotStage(StageSupport):
         """Per-shot redo: only the given shots, with the owner's notes and image policy."""
         r = self._build_keyframe_request(video_id, set(shot_ids), owner_notes, policy)
         premium = sum(1 for j in r.jobs if j.provider == "gemini_api")
-        self.d.budget.require(self.d.pricing.image_inr("1K") * premium, f"SHOT REDO ({premium} premium images)")
+        self.d.budget.require(self.d.pricing.image_inr("1K") * premium, f"SHOT REDO ({premium} premium images)", video_id)
         return r
 
     def _build_keyframe_request(self, video_id: uuid.UUID, only: set[uuid.UUID] | None, owner_notes: str | None,

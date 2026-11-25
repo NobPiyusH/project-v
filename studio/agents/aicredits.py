@@ -17,7 +17,7 @@ from typing import Any
 import httpx
 
 from studio.agents.chat import CLAUDE_PREFIX, OpenAiCompatChat, handles_claude, handles_openai_compat
-from studio.ledger import BudgetExceededError, BudgetGuard, CostLedger, Pricing
+from studio.ledger import BudgetExceededError, BudgetGuard, CostLedger, Pricing, VideoBudgetExceededError
 from studio.ledger.budget_guard import AICREDITS
 
 log = logging.getLogger(__name__)
@@ -39,6 +39,8 @@ def should_fall_back(failure: BaseException) -> bool:
     errors, and for the autopilot daily cap (never worked around)."""
     if any("daily cap" in str(c).lower() for c in _chain(failure)):
         return False
+    if any(isinstance(c, VideoBudgetExceededError) for c in _chain(failure)):
+        return False  # the video's own cap: a second paid route would spend past it
     for c in _chain(failure):
         if isinstance(c, BudgetExceededError) or "cap reached" in str(c).lower():
             return True

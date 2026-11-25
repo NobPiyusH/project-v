@@ -136,6 +136,11 @@ pricing:
   # Router scoring (M3a, owner 18 Nov 2026): a provider must reach minQuality for the job; among those,
   # score = min(quality, enoughQuality) - lambda x cost, where lambda = lambdaPerInr / (share of that budget left,
   # floor 0.1): quality first, the cheaper tool when extra quality isn't needed, thriftier as a cap runs low.
+  # Per-video spend cap (owner, 25 Nov 2026): every paid call or pod rental checks spent + reserved + estimate <= the video's cap
+  # and refuses (the stage waits for the owner: Retry / Continue without it). A video may carry its own cap (budgetInr at creation);
+  # 0 = no cap. 150 INR is about $1.6, the budget of one Short.
+  perVideo:
+    defaultCapInr: 150
   # AI Producer mode (docs/plans/ai-producer.md, owner 18 Nov 2026). P1 = advise-only: it recommends, the owner decides.
   producer:
     budgetPerShortInr: 100       # owner set: what the Producer may approve per Short (never above the monthly caps)

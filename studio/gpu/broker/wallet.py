@@ -3,20 +3,24 @@ with no cap in config (or 0) is blocked. Amounts are USD; the ledger stores INR,
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import Callable
+from decimal import Decimal
 
 from studio.agents.jfmt import fixed
 from studio.db import Db
 from studio.gpu.broker.config import BrokerConfig
-from studio.ledger import Pricing
+from studio.ledger import BudgetGuard, Pricing
 
+VIDEO_CAP = "Video cap"  # a per-video refusal starts with this text (BudgetGuard.video_refusal)
 DAILY_CAP = "daily GPU cap"  # a daily-cap refusal starts with this text (the broker turns it into the Short's message)
 
 
 class GpuWallet:
     def __init__(self, config: BrokerConfig, spent_usd_this_month: Callable[[str], float],
-                 spent_usd_today: Callable[[], float] = lambda: 0.0):
-        self._config, self._month, self._today = config, spent_usd_this_month, spent_usd_today
+                 spent_usd_today: Callable[[], float] = lambda: 0.0,
+                 video_refusal: Callable[[uuid.UUID, float, float, bool], str | None] = lambda *_: None):
+        self._config, self._month, self._today, self._video = config, spent_usd_this_month, spent_usd_today, video_refusal
 
     @staticmethod
     def from_db(config: BrokerConfig, db: Db, pricing: Pricing) -> GpuWallet:
@@ -40,7 +44,18 @@ class GpuWallet:
             )[0]
             return float(row["s"]) / pricing.fx()
 
-        return GpuWallet(config, month, today)
+        guard = BudgetGuard(db, pricing)
+
+        def video(short_id: uuid.UUID, estimate_usd: float, reserved_usd: float, strict: bool) -> str | None:
+            fx = Decimal(repr(pricing.fx()))
+            return guard.video_refusal(short_id, Decimal(repr(estimate_usd)) * fx, "this GPU rental", Decimal(repr(reserved_usd)) * fx, strict)
+
+        return GpuWallet(config, month, today, video)
+
+    def video_refusal(self, short_id: uuid.UUID, estimate_usd: float, reserved_usd: float = 0.0, strict: bool = False) -> str | None:
+        """None when spent + reserved + this rental fits the video's (or Dream Short's) own cap, else the reason. reserved_usd: what its
+        running pod has cost so far and is not booked yet. Counts every booked attempt, aborted pods included."""
+        return self._video(short_id, estimate_usd, reserved_usd, strict)
 
     def spent_today_usd(self) -> float:
         """Booked GPU spend today (UTC), USD."""

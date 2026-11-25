@@ -311,7 +311,7 @@ class FinishStage(StageSupport):
     def request(self, video_id: uuid.UUID) -> SmoothRequest:
         jobs = self.jobs(video_id)
         inr = self.estimate_inr(jobs)
-        self.d.budget.require_gpu(inr, f"{len(jobs)} clips to smooth")
+        self.d.budget.require_gpu(inr, f"{len(jobs)} clips to smooth", video_id)
         return SmoothRequest(str(video_id), self.public_url, self.TARGET_FPS, jobs, inr)
 
     def save(self, video_id: uuid.UUID, req: SmoothRequest, r: SmoothResult) -> StageResult:
@@ -413,7 +413,7 @@ class SharpenStage(StageSupport):
     def request(self, video_id: uuid.UUID) -> SmoothRequest:
         jobs = self.jobs(video_id)
         inr = self.estimate_inr(len(jobs))
-        self.d.budget.require_gpu(inr, f"{len(jobs)} clips to sharpen")
+        self.d.budget.require_gpu(inr, f"{len(jobs)} clips to sharpen", video_id)
         return SmoothRequest(str(video_id), self.public_url, FinishStage.TARGET_FPS, jobs, inr)
 
     def save(self, video_id: uuid.UUID, req: SmoothRequest, r: SmoothResult) -> StageResult:

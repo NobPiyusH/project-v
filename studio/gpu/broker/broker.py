@@ -37,7 +37,7 @@ from studio.gpu.broker.provider import (
     State,
 )
 from studio.gpu.broker.records import BrokerRecords
-from studio.gpu.broker.wallet import DAILY_CAP, GpuWallet
+from studio.gpu.broker.wallet import DAILY_CAP, VIDEO_CAP, GpuWallet
 from studio.gpu.events import PodEvents
 from studio.gpu.leases import PgPodLeases
 from studio.gpu.pods import GpuPodLimits, Pod
@@ -369,6 +369,12 @@ class GpuBroker:
             existing, carried = self._shared, []
             if existing is not None:
                 if not self._gone(existing):
+                    # The pod is on and costs by the minute: a video already at its own cap gets no more of it (running time counts as reserved)
+                    why = self._wallet.video_refusal(short_id, 0.0, self.running_usd(), True)
+                    if why is not None:
+                        msg = f"{why} The shared pod stays on for the others."
+                        self._records.decision(short_id, capability, [{"provider": existing.instance.provider, "skipped": why}], None, msg)
+                        raise NoGpuAvailableError(msg)
                     existing = self._with_endpoint(existing)
                     self._attach(short_id)
                     self._leases.heartbeat(existing.instance.id)
@@ -377,6 +383,11 @@ class GpuBroker:
                 carried = list(self._users)  # the Shorts that were using it move to the new pod
                 self._end_shared("pod gone before reuse (self-stopped or killed)")
             allc = self._candidates(self._spec(), hours)
+            for c in allc:  # the video's own cap, on top of the wallet and the daily cap: spent (failed attempts included) + this rental
+                if c.ok() and c.q.available:
+                    vwhy = self._wallet.video_refusal(short_id, c.q.hourly_usd * hours)
+                    if vwhy is not None:
+                        c.why = c.row["skipped"] = vwhy
             considered = [c.row for c in allc]
             # Cheapest live price first (owner, 20 Nov 2026); config order only breaks ties (the sort is stable).
             eligible = sorted((c for c in allc if c.ok()), key=lambda c: c.q.hourly_usd)
@@ -417,7 +428,7 @@ class GpuBroker:
                 on_community = self._community and id_ == "runpod" and community.is_community(q.gpu)
                 if on_community and attempts_made > 0:
                     # every earlier attempt is already booked in the ledger the wallet reads: the cap counts failed attempts too
-                    why = self._wallet.refusal(id_, q.hourly_usd * hours)
+                    why = self._wallet.refusal(id_, q.hourly_usd * hours) or self._wallet.video_refusal(short_id, q.hourly_usd * hours)
                     if why is not None:
                         row["skipped"] = f"retry not started: {why}"
                         continue
@@ -484,6 +495,10 @@ class GpuBroker:
                        " after 00:00 UTC, or raise pricing.gpuBroker.dailyCapUsd in config/providers.yaml.")
                 self._records.decision(short_id, capability, considered, None, msg)
                 raise NoGpuAvailableError(msg)
+            vcap = next((str(r["skipped"]) for r in considered if r.get("skipped") and str(r["skipped"]).startswith(VIDEO_CAP)), None)
+            if vcap is not None and not eligible and not unsafe:
+                self._records.decision(short_id, capability, considered, None, vcap)
+                raise NoGpuAvailableError(vcap)
             skipped = [f"{r['provider']}{'' if r.get('gpu') is None else ' ' + str(r['gpu'])} ({r['skipped']})"
                        for r in considered if r.get("skipped") is not None]
             reason = f"No GPU can run {capability} now: {skipped}"

@@ -46,7 +46,7 @@ class DreamMusic:
         target = self.svc.short_seconds(len(self.svc.shots(dream_id)), lk)
         inr = self.pricing.music_inr(1)
         self.svc.route(dream_id, "DREAM_MUSIC", "music.dream", LYRIA, inr)
-        self.budget.require(inr, "Dream Short music (1 Lyria generation)")
+        self.budget.require(inr, "Dream Short music (1 Lyria generation)", dream_id)
         world = str(d.get("idea")) if w is None else " ".join([w.world or "", "Palette:", w.palette or "", "Light:", w.light or ""])
         prompt = "\n".join([
             f"Instrumental music only, no vocals, no lyrics. About {jround(target)} seconds, for a wordless vertical Short.",
