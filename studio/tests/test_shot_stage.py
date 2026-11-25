@@ -474,9 +474,10 @@ def test_no_match_reverts_the_shot_to_the_ai_lane_and_never_fails(tv):
 
 def test_an_error_only_keyframe_result_still_parses():
     """The media worker answers {"error", "provider", "shotId", "uri": null} when the pod is lost; that used to crash save_keyframes."""
+    import json
+
     from studio.media.types import KeyframeResult
     from studio.media.wire import from_json
-    import json
     r = from_json(KeyframeResult, json.loads('{"modalGpuSeconds":0.0,"podGpuSeconds":0.0,"results":[{"error":"RuntimeError: GPU pod lost","provider":"gpu_pod","shotId":"s1","uri":null}]}'))
     assert r.results[0].error and r.results[0].seed is None
 
@@ -484,6 +485,7 @@ def test_an_error_only_keyframe_result_still_parses():
 def test_a_pod_clip_result_without_output_tokens_parses():
     """The pod route's clip result has no output_tokens (Modal's has): save_clips crashed on the first live Short after the clips were made."""
     import json
+
     from studio.media.types import ClipResult
     from studio.media.wire import from_json
     r = from_json(ClipResult, json.loads('{"clips":[{"shotId":"s1","take":1,"kind":"draft","uri":"s3://b/c.mp4","gpuSeconds":468.0,"frames":81,"fps":16,"mode":"camera","error":null}],"containers":1,"stopped":false}'))
