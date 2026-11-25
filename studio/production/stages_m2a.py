@@ -17,6 +17,7 @@ from studio.agents.jfmt import fixed, jround
 from studio.agents.writer import VOICES
 from studio.assets import asset_store as lic
 from studio.assets.asset_store import NewAsset
+from studio.assets.cache import narration_key
 from studio.ledger.budget_guard import GEMINI
 from studio.media.types import (
     AnimaticLine,
@@ -169,14 +170,49 @@ class VoiceStage(StageSupport):
         if s is None:
             raise RuntimeError("No script yet")
         lines = [NarrationLine(ln.index, ln.text, ln.delivery) for ln in s.lines if ln.spoken]
+        lines = self._reuse_cached_lines(video_id, s, plan.language, lines)  # cache hook: identical checked lines are not voiced (or paid) again
         # ~25 audio tokens per second of speech at ~2.3 words per second.
         words = sum(_words(ln.text) for ln in lines)
         self.d.budget.require(self.d.pricing.tts_inr(Usage(words * 2, jround(words / 2.3 * 25 * 1.5), 0, 0)), "NARRATION", video_id)
+        style = self._style(s)
+        return NarrationRequest(str(video_id), self.d.tts_model, self.d.text_model, s.voice_name, style, plan.language, lines)
+
+    @staticmethod
+    def _style(s: StoredScript) -> str:
         # Short "in a <style> voice" phrase: long instructions get read aloud by the TTS model (owner feedback).
         raw = re.sub(r"[.\s]+$", "", (s.voice_style or "").strip())
         short_style = " ".join(re.split(r"\s+", raw)[:8]).lower()
-        style = "in a calm documentary narrator's voice" if not short_style.strip() else f"in a {short_style} voice"
-        return NarrationRequest(str(video_id), self.d.tts_model, self.d.text_model, s.voice_name, style, plan.language, lines)
+        return "in a calm documentary narrator's voice" if not short_style.strip() else f"in a {short_style} voice"
+
+    def _reuse_cached_lines(self, video_id: uuid.UUID, s: StoredScript, language: str | None, lines: list[NarrationLine]) -> list[NarrationLine]:
+        """Lines whose content key (model, voice, style, language, text, delivery) already has a checked take get it as a new take (Rs 0)."""
+        cache = self.d.cache
+        if cache is None or not cache.enabled(video_id):
+            return lines
+        left: list[NarrationLine] = []
+        hits: dict[int, uuid.UUID] = {}
+        for ln in lines:
+            key = narration_key(self.d.tts_model, s.voice_name, self._style(s), language, ln.text, ln.delivery)
+            new_id = cache.reuse_if_cached(video_id, key, "audio", what=f"narration line {ln.index}")
+            if new_id is None:
+                left.append(ln)
+            else:
+                hits[ln.index] = new_id
+        if hits:
+            now = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+            with self.db.transaction():
+                cur = self.lock_script(video_id)
+                out: list[StoredLine] = []
+                for ln in cur.lines:
+                    new_id = hits.get(ln.index)
+                    if new_id is None:
+                        out.append(ln)
+                        continue
+                    uri = self.d.assets.uri_of(new_id)
+                    dur = float(self.d.assets.describe(new_id)["duration_sec"] or 0.0)
+                    out.append(ln.with_new_take(AudioVersion(new_id, uri, dur, now, "cache", None, ln.text), True))
+                self.write_script(video_id, with_lines(cur, out))
+        return left
 
     def save_narration(self, video_id: uuid.UUID, r: NarrationResult) -> StageResult:
         with self.db.transaction():
@@ -208,6 +244,7 @@ class VoiceStage(StageSupport):
             provider, licence = "kokoro", lic.LICENCE_KOKORO
         else:
             provider, licence = "gemini_api", lic.LICENCE_GEMINI
+        language = self.plan(video_id).language
         lines: list[StoredLine] = []
         for ln in s.lines:
             c = by_index.get(ln.index)
@@ -217,6 +254,8 @@ class VoiceStage(StageSupport):
             asset_id = self.d.assets.create(NewAsset(video_id, "audio", c.uri, "audio/wav", None, None, c.duration_sec, provider, r.model,
                                                      f"[{r.voice_name}] {ln.text}", None, licence, True))
             lines.append(ln.with_new_take(AudioVersion(asset_id, c.uri, c.duration_sec, now, c.check, style, ln.text), c.passed))
+            if self.d.cache is not None and c.passed and style is None:  # cache hook: only a checked take of a whole-stage run is reusable
+                self.d.cache.remember(asset_id, narration_key(self.d.tts_model, s.voice_name, self._style(s), language, ln.text, ln.delivery))
         self.write_script(video_id, with_lines(s, lines))
         if r.eleven_labs():
             # Free plan: no money, but the credits are tracked (10,000 a month).

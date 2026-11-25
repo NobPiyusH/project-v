@@ -150,6 +150,7 @@ class KeyframeRequest:
     jobs: list[KeyframeJob]
     gpu_url: str | None = None  # rented-pod route only
     ready_timeout_seconds: int = 0
+    reused: int = 0  # shots whose picture came from the asset cache (studio/assets/cache.py): already stored, not in `jobs`
 
 
 @dataclass

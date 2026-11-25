@@ -14,6 +14,7 @@ from studio.agents.director import TimedLine
 from studio.agents.jfmt import fixed, jround, string_hash
 from studio.assets import asset_store as lic
 from studio.assets.asset_store import NewAsset
+from studio.assets.cache import keyframe_key
 from studio.ledger.budget_guard import GEMINI
 from studio.media.types import (
     KeyframeJob,
@@ -265,14 +266,34 @@ class ShotStage(StageSupport):
         if not jobs:
             raise RuntimeError("No shots to render; run the shot plan first" if only is None else "None of those shots belong to this video")
         d = self.d
+        reused = 0
+        if only is None and d.cache is not None:  # cache hook: the first render of the stage may reuse identical checked pictures (a per-shot redo never does)
+            jobs, reused = self._reuse_cached_keyframes(video_id, jobs)
+        if not jobs:  # every picture came from the cache: nothing to rent or generate
+            return KeyframeRequest(str(video_id), d.image_model, d.modal_app, d.modal_class, [], reused=reused)
         if on_pod:  # FLUX.2 klein pictures on the rented pod (same broker session as Dream, same daily cap)
             sec = self.video_gpu.picture_seconds(video_id, len(jobs))
             if self.router is not None:
                 self.router.choose(video_id, "KEYFRAMES", "image.dream", [Candidate(POD, self.video_gpu.inr(sec))], POD, True)
             span = self.video_gpu.span_seconds(video_id, len(jobs), len(jobs)) if one_pod and self.video_gpu.one_pod_ready() else None
             session = self.video_gpu.session(video_id, sec, span)
-            return KeyframeRequest(str(video_id), d.image_model, d.modal_app, d.modal_class, jobs, session.url, session.ready_timeout_seconds)
-        return KeyframeRequest(str(video_id), d.image_model, d.modal_app, d.modal_class, jobs)
+            return KeyframeRequest(str(video_id), d.image_model, d.modal_app, d.modal_class, jobs, session.url, session.ready_timeout_seconds,
+                                   reused)
+        return KeyframeRequest(str(video_id), d.image_model, d.modal_app, d.modal_class, jobs, reused=reused)
+
+    def _reuse_cached_keyframes(self, video_id: uuid.UUID, jobs: list[KeyframeJob]) -> tuple[list[KeyframeJob], int]:
+        """Jobs whose content key already has a checked picture are answered from the cache (new asset + provenance 'reused from', Rs 0)."""
+        left: list[KeyframeJob] = []
+        for j in jobs:
+            new_id = self.d.cache.reuse_if_cached(video_id, keyframe_key(j, self.d.image_model), "image", what=f"keyframe of shot {j.shot_id}")
+            if new_id is None:
+                left.append(j)
+                continue
+            with self.db.transaction():
+                self.db.execute("UPDATE asset SET shot_id = %(s)s WHERE id = %(a)s", {"s": uuid.UUID(j.shot_id), "a": new_id})
+                self.db.execute("UPDATE shot SET keyframe_asset_id = %(a)s, status = 'READY', error = NULL, updated_at = now() WHERE id = %(s)s",
+                                {"a": new_id, "s": uuid.UUID(j.shot_id)})
+        return left, len(jobs) - len(left)
 
     def mark_shots(self, video_id: uuid.UUID, shot_ids: list[uuid.UUID], status: str | None, error: str | None) -> None:
         """Status shown on each shot card while a redo runs (REDOING / READY / FAILED)."""
@@ -318,7 +339,7 @@ class ShotStage(StageSupport):
     def save_keyframes(self, video_id: uuid.UUID, request: KeyframeRequest, r: KeyframeResult) -> StageResult:
         jobs = {j.shot_id: j for j in request.jobs}
         try:
-            return self._store_keyframes(video_id, jobs, r)
+            return self._store_keyframes(video_id, jobs, r, request.reused)
         finally:
             # M3a health, per provider: a provider whose every image failed cools down. Reported even when the stage fails (and so rolls back).
             if self.router is not None:
@@ -336,7 +357,7 @@ class ShotStage(StageSupport):
                             sample = o.error if sample is None else sample
                     self.router.report_batch(GEMINI_IMAGE if prov == "gemini_api" else ZIMAGE, good, bad, sample)
 
-    def _store_keyframes(self, video_id: uuid.UUID, jobs: dict[str, KeyframeJob], r: KeyframeResult) -> StageResult:
+    def _store_keyframes(self, video_id: uuid.UUID, jobs: dict[str, KeyframeJob], r: KeyframeResult, reused: int = 0) -> StageResult:
         d = self.d
         ok = gem = 0
         errors: list[str | None] = []
@@ -357,6 +378,8 @@ class ShotStage(StageSupport):
                 self.db.execute("UPDATE asset SET shot_id = %(s)s WHERE id = %(a)s", {"s": uuid.UUID(o.shot_id), "a": asset_id})
                 self.db.execute("UPDATE shot SET keyframe_asset_id = %(a)s, status = 'READY', error = NULL, updated_at = now() WHERE id = %(s)s",
                                 {"a": asset_id, "s": uuid.UUID(o.shot_id)})
+                if d.cache is not None:  # cache hook: a stored picture is reusable by its content key
+                    d.cache.remember(asset_id, keyframe_key(job, d.image_model))
                 if is_gemini:
                     gem += 1
                     d.ledger.record(video_id, GEMINI, d.pricing.image_inr("1K"), Decimal(1), "image", True, f"KEYFRAME hero ({o.model})")
@@ -364,13 +387,15 @@ class ShotStage(StageSupport):
             if r.modal_gpu_seconds > 0:
                 d.ledger.record(video_id, "modal_l40s", d.pricing.modal_gpu_inr("L40S", r.modal_gpu_seconds), Decimal(str(r.modal_gpu_seconds)),
                                 "gpu_seconds", True, "KEYFRAMES Z-Image (free Modal credit; excludes container start-up)")
-            if ok == 0:
+            if ok == 0 and reused == 0:
                 raise RuntimeError("No keyframes were produced: " + " | ".join(_j(e) for e in errors))
         on_rented_pod = any(j.provider == POD for j in jobs.values())
         standard_label = "FLUX.2 klein on a rented pod" if on_rented_pod else "Z-Image on Modal"  # the label says where the pictures really came from
         failed = "" if not errors else f"; {len(errors)} failed: {_j(errors[0])}"
         summary = f"{ok}/{len(jobs)} keyframes ({gem} hero via Nano Banana, {ok - gem} via {standard_label}){failed}."
-        return StageResult.of(summary, json.dumps({"ok": ok, "failed": errors}, separators=(",", ":")))
+        if reused:
+            summary = summary[:-1] + f"; {reused} reused from the cache at Rs 0."
+        return StageResult.of(summary, json.dumps({"ok": ok, "failed": errors, "reused": reused}, separators=(",", ":")))
 
 
 class StockStage(StageSupport):

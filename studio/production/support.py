@@ -43,6 +43,7 @@ class ProductionDeps:
     default_voice: str = "Charon"
     modal_app: str = ""
     modal_class: str = ""
+    cache: Any = None  # studio.assets.cache.AssetCache: reuse of identical checked assets; None = no caching
 
 
 def stock_shot(shot: dict[str, Any] | None) -> bool:
