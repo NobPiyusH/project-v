@@ -1,3 +1,4 @@
+"""Shared fixtures for the quality-gate tests."""
 import sys
 from pathlib import Path
 

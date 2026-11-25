@@ -15,7 +15,7 @@ from workers.quality_gate import config as gate_config  # noqa: E402
 from workers.quality_gate.ledger import Ledger  # noqa: E402
 
 SHOT = Shot("s1", 0.0, 4.0)
-GOOD = json.dumps({"scores": {k: 9 for k in RUBRIC}, "defects": []})
+GOOD = json.dumps({"scores": dict.fromkeys(RUBRIC, 9), "defects": []})
 KEY = "sk-test-SECRET-123"
 
 
