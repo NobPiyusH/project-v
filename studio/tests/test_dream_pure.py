@@ -2,7 +2,7 @@
 DreamIdeaPacksTest, DreamTimelineTest, DreamSviTest and RentalEstimateTest."""
 
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -97,7 +97,7 @@ def test_clip_frames_and_sizes():
 
 # ------------------------------------------------------------------------------------------------ timeline
 
-T0 = datetime(2026, 11, 19, 10, 0, 0, tzinfo=timezone.utc)
+T0 = datetime(2026, 11, 19, 10, 0, 0, tzinfo=UTC)
 
 
 def at(sec):

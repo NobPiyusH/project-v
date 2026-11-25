@@ -12,7 +12,6 @@ history to replay and every feature the Java version gated behind a version mark
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any
@@ -353,7 +352,7 @@ class DreamShortWorkflow:
         try:
             await workflow.wait_condition(cond, timeout=timeout)
             return True
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return False
 
     async def _show(self, step: str, status: str, message: str | None) -> None:
