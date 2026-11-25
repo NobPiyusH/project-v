@@ -149,7 +149,7 @@ Walk the stages: `GET /api/videos/{id}` (stage runs with summaries), `POST /api/
 | ASSEMBLY | laptop ffmpeg + quality gate. |
 
 At the DRAFT_GEN estimate: if it is above the approved figure, Reject; do not approve.
-**Two boots**: KEYFRAMES releases the pod as soon as its pictures are saved (code: `ShotStage.release_gpu`), so DRAFT_GEN rents again: two boots (8-18 min each with the warm image, plus the Fun Camera download on the second pod, about 6 min). The section 8 estimate includes both. Not changed in this task: keeping one pod across the two stages would be a separate, owner-approved change.
+**Two boots**: KEYFRAMES releases the pod as soon as its pictures are saved (code: `ShotStage.release_gpu`), so DRAFT_GEN rents again: two boots (8-18 min each with the warm image, plus the Fun Camera download on the second pod, about 6 min). The section 8 estimate includes both. Not built yet. **CTO decision (25 Nov 2026): keep ONE pod across KEYFRAMES and DRAFT_GEN** (one boot, lower cost), provided the lease, the kill-timer/reaper and the $2 cap guard stay armed for the whole span and the pod is terminated at the end or on any failure (rule 8). It needs a code change (hold the pod from KEYFRAMES until DRAFT_GEN is saved or fails; `ShotStage.release_gpu` currently releases after the keyframe batch) and its own tests; until then the two-boot behaviour above applies.
 
 Where things land: assets and the master are in SeaweedFS bucket `projectv` (data on `E:\project-data`), listed per video by `GET /api/videos/{id}/production`; open one with
 `GET /api/assets/{asset_id}/content`. The master is `videos/{id}/master/...`; the gate report is `videos/{id}/master/quality-gate.json` (its URI is in the ASSEMBLY stage summary).
