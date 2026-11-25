@@ -33,7 +33,7 @@ def run(out_dir: Path, name: str, music: Path, clips: list[Path], width: int = 7
         for label, on in (("before", False), ("after", True)):
             req = {"dreamId": f"{name}-{label}", "look": "lonely", "width": width, "height": height, "fps": 24,
                    "clips": [{"uri": str(c), "fps": 16} for c in clips], "musicUri": str(music), "musicName": music.name,
-                   "ambience": False, "keepOrder": True, **{f: on for f in polish.FLAGS}}
+                   "ambience": False, "keepOrder": True, **dict.fromkeys(polish.FLAGS, on)}
             with workdir("edit-ab") as d:
                 res = dream.finish(req, Path(d))
                 dst = out_dir / f"{name}-{label}.mp4"
