@@ -80,9 +80,9 @@ def max_deviation_from_moving_average(values: list[float], half: int = 8) -> flo
 def _grade(name: str, value: float, shot: Shot, fail_below: float | None, warn_below: float | None, fail_above: float | None,
            warn_above: float | None, msg: str) -> CheckResult:  # fmt: skip
     status = Status.PASS
-    if warn_below is not None and value < warn_below or warn_above is not None and value > warn_above:
+    if (warn_below is not None and value < warn_below) or (warn_above is not None and value > warn_above):
         status = Status.WARN
-    if fail_below is not None and value < fail_below or fail_above is not None and value > fail_above:
+    if (fail_below is not None and value < fail_below) or (fail_above is not None and value > fail_above):
         status = Status.FAIL
     return CheckResult(name, status, round(value, 3), "", ((shot.start, shot.end),), msg, shot.id)
 

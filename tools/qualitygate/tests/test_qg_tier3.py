@@ -13,7 +13,7 @@ SHOT = Shot("s1", 10.0, 14.0)
 
 
 def reply(scores=None, defects=None):
-    s = {k: 9 for k in RUBRIC} | (scores or {})
+    s = dict.fromkeys(RUBRIC, 9) | (scores or {})
     return json.dumps({"scores": s, "defects": defects or []})
 
 
@@ -74,7 +74,7 @@ def test_big_or_long_or_unboxed_defects_become_reroll():
 
 
 def test_low_score_is_reroll_even_with_boxed_defect():
-    scores = {k: 2 for k in RUBRIC}
+    scores = dict.fromkeys(RUBRIC, 2)
     d = [{"kind": "a", "severity": "major", "t0": 0, "t1": 1, "box": [0.1, 0.1, 0.2, 0.2]}]
     dec = tier3.decide(tier3.parse_verdict(reply(scores, d)), SHOT)
     assert [p.mode for p in dec.repairs] == ["reroll"]
