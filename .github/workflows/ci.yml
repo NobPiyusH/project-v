@@ -1,8 +1,11 @@
-# Quality gate: lint + the tests that need no GPU, keys or Docker. Runs on pull requests and by hand (never on a plain push).
+# Quality gate: lint, the control-plane tests on a real Postgres (pgvector, the real db/migration schema) and a secret scan.
+# Runs on pull requests, on every push to main, and by hand. No keys, no pods, nothing spent.
 # The worker tests (workers/tests) need torch, Kokoro and manim and run on the laptop: `uv run --group dev python -m pytest`.
 name: ci
 on:
   pull_request:
+  push:
+    branches: [main]
   workflow_dispatch:
 permissions:
   contents: read
@@ -14,11 +17,13 @@ jobs:
       - uses: astral-sh/setup-uv@v5
       - name: Lint (ruff)
         run: uvx ruff@0.17.5 check .
-      - name: Tool tests (podkit, film4k, gpu_lease: pure Python, no network)
+      - name: Tool tests (podkit, film4k, gpu_lease, pure Python, no network)
         run: uvx --with pytest pytest tools/podkit tools/film4k tools/gpu_lease tools/vetting -q -p no:cacheprovider
   studio:
     # The Python control plane (studio/): its tests run on a throwaway Postgres with the real schema (db/migration), a Temporal test server and
-    # fakes for every paid or GPU service. No keys, no pods, nothing spent.
+    # fakes for every paid or GPU service. conftest.py reads POSTGRES_* (default 127.0.0.1:5433), creates projectv_test_<id> from the real
+    # migrations and drops it afterwards; the service database itself is never written by the tests. With this service up the Postgres-backed
+    # tests run instead of skipping ("no local Postgres").
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -28,11 +33,37 @@ jobs:
           POSTGRES_USER: projectv
           POSTGRES_PASSWORD: projectv-local
         ports:
-          - 5433:5432
+          - 5432:5432
         options: >-
           --health-cmd "pg_isready -U projectv" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      POSTGRES_HOST: 127.0.0.1
+      POSTGRES_PORT: "5432"  # locally the compose file maps 5433; the CI service container is on the default port
+      POSTGRES_DB: projectv
+      POSTGRES_USER: projectv
+      POSTGRES_PASSWORD: projectv-local
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      - name: Control-plane tests
-        run: uv run --group studio pytest studio -q -p no:cacheprovider
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Migrations apply cleanly to an empty database (the same runner the app uses at start)
+        run: uv run --group studio python -m studio.migrate
+      - name: Lint (ruff)
+        run: uvx ruff@0.17.5 check .
+      - name: Control-plane and tool tests (Postgres-backed tests included)
+        # workers/tests need torch/Kokoro/manim and a GPU-era toolchain: they run on the laptop.
+        run: uv run --group dev --group studio python -m pytest studio tools/podkit tools/film4k tools/gpu_lease tools/vetting tools/qualitygate -q -p no:cacheprovider -rs
+  secrets:
+    # gitleaks with the repo's .gitleaks.toml (default rules). Full history so a key committed and later removed is still found.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2.3.9
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
