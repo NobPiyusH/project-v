@@ -26,6 +26,7 @@ class Stage(Enum):
     UPSCALE = ("Upscale", "Upscale to 4K, interpolate, colour-match")
     AUDIO = ("Audio", "Final narration, sound effects, mix and loudness")
     ASSEMBLY = ("Assembly", "Timeline, Premiere XML and the master render")
+    MOON_LAYER = ("Moon layer", "Optional: composite a growing Moon picture (scale curve, glow, caption) over the master; only for plans with a moon block")
     ROUGH_CUT_REVIEW = ("Rough cut review", "Review the cut and turn notes into changes")
     PACKAGING = ("Packaging", "Captions, dubs, titles, thumbnails, Shorts")
     FINAL_APPROVAL = ("Final approval", "Last check before publishing")

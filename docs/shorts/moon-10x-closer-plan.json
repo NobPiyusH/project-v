@@ -55,6 +55,8 @@
       "cyTo": 0.36,
       "glow": 0.5,
       "glowScale": 1.7,
+      "imagePath": "E:/project-data/outputs/moon-short/moon.png",
+      "keyBlack": true,
       "asset": "one Moon picture on black (lit disc, real craters), luma-keyed to alpha; source decided by the owner (public-domain photo or one FLUX picture)"
     },
     "fallback": {

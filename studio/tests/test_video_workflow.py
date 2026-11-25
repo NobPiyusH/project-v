@@ -76,6 +76,7 @@ class FakeControl:
         self.fail_creative = False
         self.keyframe_inspection_fails = 0
         self.quality_gate = False
+        self.moon = False  # the plan has a moon block: MOON_LAYER is planned and asks for a composite
         self.lock = threading.Lock()
         self.pod = FakePodState()
         self.one_pod = False  # control.one_pod_enabled: VIDEO_ONE_POD with keyframes and drafts on the pod
@@ -91,7 +92,7 @@ class FakeControl:
     def plan(self, video_id, prompt, owner_notes, attempt):
         if owner_notes is not None:
             self.notes_seen.append(owner_notes)
-        return ok(f"plan v{attempt}", planned=[s for s in ALL if s not in ("RESEARCH", "MUSIC")])  # a plan that skips RESEARCH and MUSIC
+        return ok(f"plan v{attempt}", planned=[s for s in ALL if s not in ("RESEARCH", "MUSIC") and (self.moon or s != "MOON_LAYER")])  # skips RESEARCH, MUSIC and (no moon block) MOON_LAYER
 
     def run_stage(self, video_id, stage, owner_notes, attempt):
         return ok(f"{stage} done")
@@ -242,6 +243,13 @@ class FakeControl:
         self.ev(f"MASTER:{result['masterUri']}")
         return ok("master")
 
+    def moon_request(self, video_id):
+        return {"videoId": video_id, "plateUri": "s3://b/master.mp4"} if self.moon else {"skip": "No Moon layer: this plan has no moon block."}
+
+    def save_moon_layer(self, video_id, request, result):
+        self.ev(f"MOON:{result['videoUri']}")
+        return ok("moon saved")
+
     def footage_search_request(self, video_id, shot_ids, query):
         return {"queries": [{"shotId": f"shot-{i}", "query": "solar flare"} for i in range(self.footage_queries)]}
 
@@ -300,6 +308,8 @@ class FakeMedia:
         self.fail_stock = False
         self.gate_fails = 0  # the next N gate checks fail
         self.gate_calls = 0
+        self.moon_fails = 0  # the next N Moon composites fail (missing picture)
+        self.moon_calls = 0
 
     def defs(self):
         m = self
@@ -335,6 +345,13 @@ class FakeMedia:
                 raise ApplicationError("Quality gate: FAIL, 1 failed: freeze: frozen 3.0 s", type="QualityGateFailed", non_retryable=True)
             return {"status": "warn", "summary": "Quality gate: WARN, 1 warning: motion/s2 low.", "reportUri": "s3://b/qg.json", "warnings": ["x"]}
 
+        def moon(req):
+            m.moon_calls += 1
+            if m.moon_fails > 0:
+                m.moon_fails -= 1
+                raise ApplicationError("The Moon picture was not found", type="MoonLayerInputMissing", non_retryable=True)
+            return {"videoUri": "s3://b/moon-layer.mp4", "durationSec": 10.0, "width": 720, "height": 1280, "fps": 16}
+
         def inspect(req):
             if m.fail_inspector:
                 raise ApplicationError("ffmpeg missing", type="Test", non_retryable=True)
@@ -351,6 +368,7 @@ class FakeMedia:
             mk("smooth_clips", lambda r: {"clips": [], "containers": 1, "stopped": False}),
             mk("upscale_clips", lambda r: {"clips": [], "containers": 1, "stopped": False}),
             mk("quality_gate_check", gate),
+            mk("moon_layer_composite", moon),
             mk("assemble_video", lambda r: {"masterUri": "s3://b/master.mp4"}),
             mk("search_footage", lambda r: {"results": [{"shotId": q["shotId"], "query": q["query"]} for q in r["queries"]]}),
             mk("fetch_footage", lambda r: {"uri": "s3://b/f.mp4"}),
@@ -803,3 +821,47 @@ def test_clip_redo_and_footage_and_creative_review_workflows():
 
 
 _ = (uuid, WorkflowFailureError, ControlActivities, ProducerActivities)
+
+
+def test_moon_layer_without_a_moon_block_is_not_planned_and_never_calls_the_composite():
+    async def case(h):
+        w = await h.start("moon-none")
+        await w.result()
+        assert "MOON_LAYER:0:SKIPPED" in h.c.events and h.m.moon_calls == 0 and h.c.events[-1] == "VIDEO:COMPLETED"
+
+    run_case(case)
+
+
+def test_moon_layer_with_a_moon_block_runs_after_the_edit_and_a_missing_picture_waits_for_the_owner():
+    async def case(h):
+        h.c.moon, h.m.moon_fails = True, 1
+        w = await h.start("moon-fail")
+        await h.await_waiting(w, "MOON_LAYER")  # failed stage: held even in AUTO; the video is not killed
+        assert "MOON_LAYER:1:FAILED" in h.c.events and h.m.moon_calls == 1, "a missing picture is not retried by Temporal"
+        await w.signal("reject", args=["MOON_LAYER", "retry"])
+        await w.result()
+        assert "MOON_LAYER:2:AUTO_PASSED" in h.c.events and "MOON:s3://b/moon-layer.mp4" in h.c.events and h.c.events[-1] == "VIDEO:COMPLETED"
+
+    run_case(case)
+
+
+def test_moon_layer_failure_can_be_continued_without_and_manual_mode_holds_a_good_composite():
+    async def fail(h):
+        h.c.moon, h.m.moon_fails = True, 5
+        w = await h.start("moon-continue")
+        await h.await_waiting(w, "MOON_LAYER")
+        await w.signal("approve", args=["MOON_LAYER", None])
+        await w.result()
+        assert "MOON_LAYER:1:SKIPPED" in h.c.events and h.c.events[-1] == "VIDEO:COMPLETED"
+
+    run_case(fail)
+
+    async def manual(h):
+        h.c.moon = True
+        w = await h.start("moon-manual", modes={"MOON_LAYER": "MANUAL"})
+        await h.await_waiting(w, "MOON_LAYER")
+        await w.signal("approve", args=["MOON_LAYER", None])
+        await w.result()
+        assert "MOON_LAYER:1:APPROVED" in h.c.events and "MOON:s3://b/moon-layer.mp4" in h.c.events
+
+    run_case(manual)

@@ -59,6 +59,9 @@ INSPECTOR_MEDIA = dict(task_queue=queues.MEDIA, start_to_close_timeout=timedelta
 # Quality gate after the edit: free ffmpeg checks; a fail is not retried (it would only fail again), the owner decides.
 GATE_MEDIA = dict(task_queue=queues.MEDIA, start_to_close_timeout=timedelta(minutes=20), schedule_to_close_timeout=timedelta(hours=24),
                   retry_policy=_retry(15, None, 2, ["QualityGateFailed"]))
+# Moon layer composite: free local ffmpeg; a missing picture is not retried (it would only fail again), the owner decides.
+MOON_MEDIA = dict(task_queue=queues.MEDIA, start_to_close_timeout=timedelta(minutes=30), schedule_to_close_timeout=timedelta(hours=24),
+                  retry_policy=_retry(15, None, 2, ["MoonLayerInputMissing"]))
 # Wan clips: a batch can take an hour. Never retried by Temporal: a retry would pay for every clip again, so a failure waits for the owner.
 CLIP_MEDIA = dict(task_queue=queues.MEDIA, start_to_close_timeout=timedelta(hours=4), heartbeat_timeout=timedelta(minutes=3),
                   schedule_to_close_timeout=timedelta(hours=24), retry_policy=_retry(None, None, 1))
@@ -127,6 +130,7 @@ class VideoProductionWorkflow:
         # between them waits for a human); every pod action is an activity (control.keyframe_request/save_keyframes/touch_held_pod/release_held_pod).
         self.one_pod = False
         self.chain: list[str] = []  # the stages this run will execute, in order
+        self.stages = STAGES  # without MOON_LAYER for runs started before it existed (replay-safe, see _run)
 
     # ------------------------------------------------------------------------------------------- the run
 
@@ -151,11 +155,13 @@ class VideoProductionWorkflow:
         if workflow.patched("one-pod-v1"):  # histories started before this feature never ask the question (replay-safe)
             self.one_pod = bool(await _ctl("one_pod_enabled"))
 
+        if not workflow.patched("moon-layer-v1"):
+            self.stages = [s for s in STAGES if s != "MOON_LAYER"]
         only = request.get("onlyStages")
         if only is not None:
             # Re-run: only the requested stages, in production order; everything else keeps its earlier output.
-            self.chain = [s for s in STAGES if s in only]
-            for stage in STAGES:
+            self.chain = [s for s in self.stages if s in only]
+            for stage in self.stages:
                 if stage in only:
                     await self._execute(video_id, stage, prompt, await _ctl("last_attempt", video_id, stage))
             await self._complete(video_id)
@@ -163,9 +169,9 @@ class VideoProductionWorkflow:
 
         plan_result = await self._execute(video_id, "PLAN", prompt)
         planned = plan_result.get("plannedStages")
-        planned = STAGES if planned is None else planned
-        self.chain = [s for s in STAGES if s != "PLAN" and s in planned]
-        for stage in STAGES:
+        planned = self.stages if planned is None else planned
+        self.chain = [s for s in self.stages if s != "PLAN" and s in planned]
+        for stage in self.stages:
             if stage == "PLAN":
                 continue
             if stage not in planned:
@@ -453,6 +459,13 @@ class VideoProductionWorkflow:
             # (Reject = redo the edit, Approve = continue without it). Warnings only join the summary.
             gate = await _media("quality_gate_check", {"videoId": video_id, "masterUri": made["masterUri"], "srtUri": made.get("srtUri")}, GATE_MEDIA)
             return {**saved, "summary": f"{saved['summary']} {gate['summary']}"}
+        if stage == "MOON_LAYER":
+            # Optional, free: a plan with a moon block gets its Moon picture composited over the master. A failure raises (waits for the owner).
+            request = await _ctl("moon_request", video_id)
+            if request.get("skip"):
+                self.skip_stage = True
+                return _result(request["skip"])
+            return await _ctl("save_moon_layer", video_id, request, await _media("moon_layer_composite", request, MOON_MEDIA))
         return await _ctl("run_stage", video_id, stage, notes, attempt)
 
     async def _run_clips(self, video_id: str, stage: str, attempt: int, notes: str | None) -> dict[str, Any]:

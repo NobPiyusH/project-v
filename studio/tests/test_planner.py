@@ -76,7 +76,8 @@ def test_stages_skip_what_the_plan_does_not_need():
     plan = VideoPlan(needsResearch=False, music="none", narration="none")
     s = stages_for(plan)
     assert Stage.PLAN in s and not {Stage.RESEARCH, Stage.MUSIC, Stage.NARRATION} & set(s)
-    assert len(stages_for(VideoPlan(needsResearch=True, music="lead", narration="full"))) == len(Stage)
+    full = VideoPlan(needsResearch=True, music="lead", narration="full")
+    assert Stage.MOON_LAYER not in stages_for(full) and len(stages_for(full, moon=True)) == len(Stage)
 
 
 def test_stage_mode_parse_defaults_to_auto():
