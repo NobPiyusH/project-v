@@ -130,3 +130,18 @@ def test_media_request_per_stage(scratch_db, video):
     assert [f.code for f in i.structural(video, Stage.ANIMATIC)] == ["NO_ANIMATIC"]
     assert [f.code for f in i.structural(video, Stage.SHOT_PLAN)] == ["NO_SHOTS"]
     assert i.structural(video, Stage.PLAN) == [] and Stage.PLAN not in ins.INSPECTED
+
+
+def test_a_moon_layer_plate_is_not_sent_to_the_picture_judge(scratch_db, video):
+    """First live Short: the plate has no Moon on purpose; the judge failed it and the automatic redo rented a second pod."""
+    i = inspector(scratch_db)
+    assert i.media_request(video, Stage.KEYFRAMES) is not None
+    from studio.planner import imported
+    import pathlib
+    doc = json.loads((pathlib.Path(__file__).resolve().parents[2] / "docs" / "shorts" / "moon-10x-closer-plan.json").read_text(encoding="utf-8"))
+    planned = {"plan": plan("short", 10, []).model_dump(), "imported": doc}
+    scratch_db.execute("UPDATE video SET plan_json = CAST(%(p)s AS jsonb) WHERE id = %(v)s", {"p": json.dumps(planned), "v": video})
+    assert imported.load(scratch_db, video).moon is not None
+    for st in (Stage.KEYFRAMES, Stage.DRAFT_GEN):
+        assert i.media_request(video, st) is None
+    assert i.media_request(video, Stage.ASSEMBLY) is not None

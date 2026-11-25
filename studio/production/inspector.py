@@ -251,9 +251,21 @@ class Inspector(StageSupport):
             {"v": video_id},
         )
 
+    def _moon_is_a_layer(self, video_id: uuid.UUID) -> bool:
+        from studio.planner import imported
+        try:
+            imp = imported.load(self.db, video_id)
+        except Exception:  # noqa: BLE001 - a plan that cannot be read is judged like any other
+            return False
+        return imp is not None and imp.moon is not None and (imp.moon.get("mode") or "layer") == "layer"
+
     def media_request(self, video_id: uuid.UUID, stage: Stage) -> MediaInspectRequest | None:
         """What the media worker should look at, or None when this stage has no file checks."""
         if stage not in _MEDIA:
+            return None
+        if stage in (Stage.KEYFRAMES, Stage.DRAFT_GEN, Stage.FINAL_GEN) and self._moon_is_a_layer(video_id):
+            # The plate is Moon-free ON PURPOSE (the Moon is composited by MOON_LAYER). The picture judge compared the plate with the narration
+            # ("the colossal Moon is entirely missing"), failed it, and the automatic redo rented a second pod for the same result.
             return None
         plan = self.plan(video_id)
         is_short = plan.format == "short"
