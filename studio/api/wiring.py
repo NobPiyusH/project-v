@@ -47,8 +47,9 @@ class DreamContext:
 class LazyGateway:
     """The Temporal client, connected on first use (so an app with no Temporal running still starts and serves everything else)."""
 
-    def __init__(self, address: str):
+    def __init__(self, address: str, namespace: str = "default"):
         self.address = address
+        self.namespace = namespace
         self._gateway: Any = None
         self._client: Any = None
         self._lock = threading.Lock()
@@ -62,7 +63,7 @@ class LazyGateway:
 
                 loop = asyncio.new_event_loop()
                 threading.Thread(target=loop.run_forever, name="temporal-lazy", daemon=True).start()
-                self._client = asyncio.run_coroutine_threadsafe(Client.connect(self.address), loop).result(timeout=15)
+                self._client = asyncio.run_coroutine_threadsafe(Client.connect(self.address, namespace=self.namespace), loop).result(timeout=15)
                 self._gateway = TemporalGateway(self._client, loop)
             return self._gateway
 
@@ -96,6 +97,12 @@ def build_llm(s: Settings, ledger: CostLedger, pricing: Pricing, budget: BudgetG
                timeout_seconds=s.agents_timeout_seconds, model=s.text_model, fallbacks=s.text_fallbacks, effort_overrides=s.claude_effort_overrides)
 
 
+def _env(*names: str) -> str:
+    """First non-blank of these environment variables. POD_* are the names .env.example, the docs and the Java app used (POD_WARM_IMAGE ...);
+    the Python port first read GPU_*, so a warm image set as documented was silently ignored (found in the first-live-Short rehearsal)."""
+    return next((v for n in names if (v := os.environ.get(n, "").strip())), "")
+
+
 def build_dream_gpu(s: Settings, db: Db, pricing: Pricing, ledger: CostLedger, dream_settings: DreamSettings) -> DreamGpu:
     """The Dream door to the GPU broker. Like Java's bean it always exists; with DREAM_GPU_PROVIDER=modal (default) it is disabled and its
     broker has no provider, so nothing can be rented. With =broker it holds RunPod (the studio's default provider; the others need their own
@@ -122,9 +129,9 @@ def build_dream_gpu(s: Settings, db: Db, pricing: Pricing, ledger: CostLedger, d
                        GpuPodLimits.from_settings(s), prefs=prefs, auth=support.WorkerAuth(), states=support.PgStates(db), boot_timings=support.PgTimings(db))
     estimate = RentalEstimate(fallback_hours=cfg.expected_hours)
     return DreamGpu(broker, db, prefs, pricing, "broker" if on else "modal", start_seconds=estimate.start_seconds, estimate=estimate,
-                    worst_case_hourly_usd=s.gpu_max_hourly_usd, warm_image=os.environ.get("GPU_WARM_IMAGE", ""),
-                    volume_id=os.environ.get("GPU_POD_VOLUME_ID", ""),
-                    image=os.environ.get("GPU_POD_IMAGE", "runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404"))
+                    worst_case_hourly_usd=s.gpu_max_hourly_usd, warm_image=_env("POD_WARM_IMAGE", "GPU_WARM_IMAGE"),
+                    volume_id=_env("POD_VOLUME_ID", "GPU_POD_VOLUME_ID"),
+                    image=_env("POD_IMAGE", "GPU_POD_IMAGE") or "runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404")
 
 
 def build_dream_context(db: Db, s: Settings, *, llm: Any = None, gateway: Any = None, gpu: Any = None, assets: Any = None,
@@ -139,7 +146,7 @@ def build_dream_context(db: Db, s: Settings, *, llm: Any = None, gateway: Any = 
     llm = llm or build_llm(s, ledger, pricing, budget, router)
     dream_settings = dream_settings or DreamSettings.from_env(dict(os.environ))
     gpu = gpu if gpu is not None else build_dream_gpu(s, db, pricing, ledger, dream_settings)
-    gateway = gateway or LazyGateway(s.temporal_address)
+    gateway = gateway or LazyGateway(s.temporal_address, s.temporal_namespace)
     clip_progress = ClipProgress()
     lessons = DreamLessons(db)
     dreams = DreamService(db, llm, assets, pricing, budget, router, clip_progress, dream_settings, gpu, lessons)

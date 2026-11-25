@@ -60,6 +60,9 @@ def test_rule_based_fallback_reads_style_length_and_language():
     assert (p.stylePreset, p.durationSec, p.language, p.needsResearch) == ("explainer_clean", 180, "hi", True)
     s = planner(None, key="").fallback("a vertical reel of owls, 20 seconds", "test").plan
     assert (s.format, s.durationSec, s.aspectRatio, s.shortsCount) == ("short", 20, "9:16", 0)
+    # "15-second" (hyphen) was missed on the first live rehearsal and fell back to the preset's 45 s
+    assert planner(None, key="").fallback("What if the Moon were 10 times closer? A 15-second vertical Short.", "t").plan.durationSec == 15
+    assert planner(None, key="").fallback("a 2-minute explainer", "t").plan.durationSec == 120
 
 
 def test_normalise_clamps_and_fills_gaps():

@@ -1,0 +1,132 @@
+{
+  "plan_version": "1.0",
+  "title": "What if the Moon were 10 times closer?",
+  "channel": "Strange If True",
+  "note": "First live test of the Python studio (docs/runbooks/first-live-short.md). Validated by studio/tests/test_moon_plan.py.",
+  "video": {
+    "title": "What if the Moon were 10 times closer?",
+    "summary": "A 15-second vertical Short: a quiet night town, the Moon ten times closer, tides flooding the coast, and a sky that is wall to wall Moon.",
+    "format": "short",
+    "durationSec": 15,
+    "aspectRatio": "9:16",
+    "outputResolution": "1080p",
+    "stylePreset": "shorts_punchy",
+    "tone": "awed, calm, slightly ominous",
+    "language": "en",
+    "needsResearch": false,
+    "narration": "full",
+    "voice": "calm, low, documentary narrator",
+    "music": "support",
+    "soundDesign": true,
+    "visualTypes": [
+      "ai_video"
+    ],
+    "shortsCount": 0,
+    "mustInclude": [
+      "oversized Moon over a night town",
+      "ocean tides surging",
+      "cratered Moon surface filling the sky"
+    ],
+    "rationale": "Owner-chosen idea; three 5 s beats with real camera moves."
+  },
+  "generation": {
+    "width": 720,
+    "height": 1280,
+    "frames": 81,
+    "fps": 16,
+    "engine": "wan2.2 fun_camera (4-step lightx2v, fp8)",
+    "cameraPresets": [
+      "zoom_in",
+      "pan_left",
+      "zoom_in"
+    ],
+    "style": "realistic cinematic night, photographic, natural motion blur, no text, no people"
+  },
+  "bank": {
+    "locations": [
+      {
+        "id": "moon-town",
+        "description": "A quiet small coastal town at night under a clear sky: low rooftops with a few warm lit windows, a church steeple, a dark sea and a narrow shore beyond it, and a vast full Moon ten times larger than the real Moon hanging low and lighting everything in cold silver light."
+      }
+    ]
+  },
+  "script": [
+    {
+      "n": 1,
+      "text": "Imagine the Moon were ten times closer.",
+      "startSec": 0.3,
+      "beat": 1
+    },
+    {
+      "n": 2,
+      "text": "Tides would climb far higher, flooding coasts twice a day.",
+      "startSec": 5.2,
+      "beat": 2
+    },
+    {
+      "n": 3,
+      "text": "And every night, the sky would be wall to wall Moon.",
+      "startSec": 10.2,
+      "beat": 3
+    }
+  ],
+  "scenes": [
+    {
+      "lengthSec": 15,
+      "beats": [
+        {
+          "prompt": "Slow push-in on the quiet night town, the oversized Moon glowing above the rooftops, a faint mist over the shore",
+          "locationIds": [
+            "moon-town"
+          ],
+          "startSec": 0.0,
+          "durationSec": 5.0,
+          "claims": [
+            "The Moon is about 384,000 km away; ten times closer is about 38,400 km (an imagined scenario)."
+          ]
+        },
+        {
+          "prompt": "Pan left as the huge Moon rises over the sea, heavy ocean tides surging up against the shore and flooding the low coast",
+          "locationIds": [
+            "moon-town"
+          ],
+          "startSec": 5.0,
+          "durationSec": 5.0,
+          "continuity": "same giant Moon, same cold silver night light, same shoreline",
+          "claims": [
+            "The Moon's pull raises the tides; a closer Moon would raise much higher tides."
+          ]
+        },
+        {
+          "prompt": "Zoom in on the cratered grey surface of the Moon, now filling the whole sky above the town, craters and mountain ridges in sharp detail",
+          "locationIds": [
+            "moon-town"
+          ],
+          "startSec": 10.0,
+          "durationSec": 5.0,
+          "continuity": "same giant Moon, same cold silver night light"
+        }
+      ]
+    }
+  ],
+  "resolvedPrompts": [
+    {
+      "beat": 1,
+      "camera": "zoom_in",
+      "keyframePrompt": "Slow push-in on the quiet night town, the oversized Moon glowing above the rooftops, a faint mist over the shore. A quiet small coastal town at night under a clear sky: low rooftops with a few warm lit windows, a church steeple, a dark sea and a narrow shore beyond it, and a vast full Moon ten times larger than the real Moon hanging low and lighting everything in cold silver light.",
+      "motionPrompt": "Slow push-in on the quiet night town, the oversized Moon glowing above the rooftops, a faint mist over the shore. A quiet small coastal town at night under a clear sky: low rooftops with a few warm lit windows, a church steeple, a dark sea and a narrow shore beyond it, and a vast full Moon ten times larger than the real Moon hanging low and lighting everything in cold silver light."
+    },
+    {
+      "beat": 2,
+      "camera": "pan_left",
+      "keyframePrompt": "Pan left as the huge Moon rises over the sea, heavy ocean tides surging up against the shore and flooding the low coast. A quiet small coastal town at night under a clear sky: low rooftops with a few warm lit windows, a church steeple, a dark sea and a narrow shore beyond it, and a vast full Moon ten times larger than the real Moon hanging low and lighting everything in cold silver light.",
+      "motionPrompt": "Pan left as the huge Moon rises over the sea, heavy ocean tides surging up against the shore and flooding the low coast. A quiet small coastal town at night under a clear sky: low rooftops with a few warm lit windows, a church steeple, a dark sea and a narrow shore beyond it, and a vast full Moon ten times larger than the real Moon hanging low and lighting everything in cold silver light. Keep the same as the previous beat: same giant Moon, same cold silver night light, same shoreline."
+    },
+    {
+      "beat": 3,
+      "camera": "zoom_in",
+      "keyframePrompt": "Zoom in on the cratered grey surface of the Moon, now filling the whole sky above the town, craters and mountain ridges in sharp detail. A quiet small coastal town at night under a clear sky: low rooftops with a few warm lit windows, a church steeple, a dark sea and a narrow shore beyond it, and a vast full Moon ten times larger than the real Moon hanging low and lighting everything in cold silver light.",
+      "motionPrompt": "Zoom in on the cratered grey surface of the Moon, now filling the whole sky above the town, craters and mountain ridges in sharp detail. A quiet small coastal town at night under a clear sky: low rooftops with a few warm lit windows, a church steeple, a dark sea and a narrow shore beyond it, and a vast full Moon ten times larger than the real Moon hanging low and lighting everything in cold silver light. Keep the same as the previous beat: same giant Moon, same cold silver night light."
+    }
+  ]
+}
