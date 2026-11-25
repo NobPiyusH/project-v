@@ -176,3 +176,19 @@ def test_preview_decisions_are_not_logged(env):
     db, router, video = env
     router.choose(video, "FINAL_GEN", CAP, both(40, 90), None, False)
     assert logged(db, video) == 0
+
+
+def test_a_provider_over_its_own_cap_is_ineligible_and_defers(env):
+    from studio.provider.caps import ProviderCap, ProviderCaps
+
+    class Spend:
+        def spent(self, cap, since, scope_id):
+            return Decimal("29")
+
+    db, router, video = env
+    router._caps = ProviderCaps({"gemini_omni": ProviderCap("gemini_omni", "gemini_api", daily_inr=Decimal("30"))}, Spend())
+    c = router.choose(video, "FINAL_GEN", "video.i2v.final", both("5", "5"), "gemini_omni", False)
+    assert c.provider_id == "modal_wan" and "daily cap" in str(c.considered)
+    only = [Candidate("gemini_omni", Decimal("5"))]
+    with pytest.raises(BudgetExceededError, match="daily cap"):
+        router.choose(video, "FINAL_GEN", "video.i2v.final", only, "gemini_omni", False)

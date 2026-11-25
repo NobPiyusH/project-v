@@ -23,6 +23,7 @@ from studio.gpu.watchdog import PodWatchdog, WatchdogLoop
 from studio.ledger import BudgetGuard, CostLedger, Pricing
 from studio.media.wire import to_json
 from studio.planner.presets import StylePresets
+from studio.provider.caps import build_caps
 from studio.provider.registry import ProviderRegistry
 from studio.routing import Router
 from studio.singleton import JOBS, WATCHDOG, Singleton
@@ -57,7 +58,7 @@ def create_app(db: Db | None = None, settings: Settings | None = None, dream_ctx
     ledger = CostLedger(db)
     providers = ProviderRegistry(db, settings.config_dir)
     pricing = Pricing(settings.config_dir)
-    router = Router(db, BudgetGuard(db, pricing), pricing)
+    router = Router(db, BudgetGuard(db, pricing), pricing, build_caps(db, settings.config_dir))
     presets = StylePresets(settings.config_dir)
     # ---- GPU pods: the watchdog loop (STUDIO_GPU_WATCHDOG, on by default) is the only watchdog; an advisory lock keeps it to one process
     pod_api = RunPodApi(settings.runpod_base_url, settings.runpod_api_key)

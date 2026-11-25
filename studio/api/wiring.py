@@ -25,6 +25,7 @@ from studio.ledger import BudgetGuard, CostLedger, Pricing
 from studio.planner.presets import StylePresets
 from studio.production.producer import ProducerService
 from studio.production.support import ProductionDeps
+from studio.provider.caps import build_caps
 from studio.routing import Router
 from studio.video.clip_progress import ClipProgress
 
@@ -146,7 +147,7 @@ def build_dream_context(db: Db, s: Settings, *, llm: Any = None, gateway: Any = 
     ledger = CostLedger(db)
     pricing = Pricing(s.config_dir)
     budget = BudgetGuard(db, pricing)
-    router = Router(db, budget, pricing)
+    router = Router(db, budget, pricing, build_caps(db, s.config_dir))
     assets = assets or AssetStore(db)
     llm = llm or build_llm(s, ledger, pricing, budget, router)
     dream_settings = dream_settings or DreamSettings.from_env(dict(os.environ))

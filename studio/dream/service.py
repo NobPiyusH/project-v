@@ -926,7 +926,7 @@ class DreamService:
 
     def route(self, dream_id: uuid.UUID, stage: str, capability: str, provider: str, inr: Decimal) -> None:
         """The router's choice, logged and linked to the Short. Raises (deferral) when nothing can run it."""
-        choice = self.router.choose(None, stage, capability, [Candidate(provider, inr)], provider, True)
+        choice = self.router.choose(None, stage, capability, [Candidate(provider, inr)], provider, True, scope_id=dream_id)
         self.tag("routing_decision", choice.decision_id, dream_id)
 
     def tag(self, table: str, row_id: uuid.UUID | None, dream_id: uuid.UUID) -> None:
