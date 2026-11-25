@@ -1,0 +1,37 @@
+{
+ "checks": {
+  "black_frames": {
+   "status": "pass",
+   "value": 0.0
+  },
+  "colour_drift": {
+   "status": "pass",
+   "value": 0.0
+  },
+  "flicker": {
+   "status": "pass",
+   "value": 0.05
+  },
+  "frozen_frames": {
+   "status": "pass",
+   "value": 0.0
+  },
+  "independent_motion": {
+   "status": "pass",
+   "value": 14.5
+  },
+  "loudness": {
+   "status": "skip",
+   "value": null
+  },
+  "motion": {
+   "status": "pass",
+   "value": 4.49
+  },
+  "sharpness": {
+   "status": "pass",
+   "value": 1.67
+  }
+ },
+ "status": "pass"
+}

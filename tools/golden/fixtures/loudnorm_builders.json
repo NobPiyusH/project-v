@@ -1,0 +1,7 @@
+{
+ "apply": "loudnorm=I=-14.0:TP=-1.5:LRA=11.0:measured_I=-21.2:measured_TP=-1.4:measured_LRA=4.3:measured_thresh=-31.5:offset=0.2:linear=true:print_format=summary,aresample=48000",
+ "gain_limit_12db": "volume=12.00dB,alimiter=limit=0.708:attack=5:release=50:level=disabled,aresample=192000,alimiter=limit=0.750:attack=2:release=30:level=disabled,aresample=48000",
+ "linear_feasible_peaky": false,
+ "linear_feasible_quiet_peak": true,
+ "measure": "loudnorm=I=-14.0:TP=-1.5:LRA=11.0:print_format=json"
+}
