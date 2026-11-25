@@ -82,6 +82,10 @@ def create_app(db: Db | None = None, settings: Settings | None = None, dream_ctx
         from studio.api.jobs import dream_jobs
 
         jobs = dream_jobs(ctx)
+    if vctx is not None and settings.jobs:
+        from studio.api.jobs import video_jobs
+
+        jobs = jobs + video_jobs(vctx)
 
     dsn = lock_dsn or settings.dsn
     watchdog_lock = Singleton(dsn, WATCHDOG, "the GPU watchdog")

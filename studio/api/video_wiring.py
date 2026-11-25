@@ -67,6 +67,7 @@ class VideoContext:
     control: ControlActivities
     producer_acts: ProducerActivities
     gateway: Any
+    video_gpu: Any = None  # the VideoGpu when the broker route is wired (the periodic hold check needs it)
 
 
 def build_video_context(db: Db, s: Settings, *, llm: Any = None, gateway: Any = None, assets: Any = None, media_urls: Any = None,
@@ -102,7 +103,9 @@ def build_video_context(db: Db, s: Settings, *, llm: Any = None, gateway: Any = 
     video_gpu = None
     if dream_ctx is not None and dream_ctx.gpu is not None:  # inert unless a provider-* setting is "broker"
         video_gpu = VideoGpu(dream_ctx.gpu, env("VIDEO_PROVIDER_DRAFT", "wan"), env("VIDEO_PROVIDER_FINAL", "omni"),
-                             env("VIDEO_PROVIDER_KEYFRAMES", "default"), int(env("VIDEO_GPU_IDLE_MINUTES", "5")))
+                             env("VIDEO_PROVIDER_KEYFRAMES", "default"), int(env("VIDEO_GPU_IDLE_MINUTES", "5")),
+                             one_pod=_flag("VIDEO_ONE_POD"), hold_idle_minutes=int(env("VIDEO_ONE_POD_IDLE_MINUTES", "5")),
+                             camera_prefetch=_flag("VIDEO_CAMERA_PRESETS", "true"))
     producer = ProducerService(deps, llm=llm)
     inspector = Inspector(deps)
     creative = CreativeDirector(deps, CreativeDirectorAgent(llm), env("GEMINI_VISION_MODEL", "gemini-3.6-flash,gemini-3.5-flash,gemini-3.5-flash-lite"))
@@ -127,7 +130,7 @@ def build_video_context(db: Db, s: Settings, *, llm: Any = None, gateway: Any = 
     videos = VideoService(db, gateway, producer)
     return VideoContext(s, db, pricing, budget, ledger, presets, assets, media_urls or _lazy_urls(s), planner,
                         videos, producer, inspector, creative, ProductionReadModel(deps), shots, voice, video, footage, clip_progress, control,
-                        producer_acts, gateway)
+                        producer_acts, gateway, video_gpu)
 
 
 class _LazyMediaUrls:

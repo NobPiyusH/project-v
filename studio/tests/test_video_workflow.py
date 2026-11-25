@@ -34,6 +34,32 @@ def ok(summary, artifact="{}", planned=None):
     return {"summary": summary, "artifactJson": artifact, "plannedStages": planned}
 
 
+class FakePodState:
+    """The rented pod as the control plane sees it (one-pod tests): every acquire, keep and release, in order."""
+
+    def __init__(self):
+        self.open, self.log, self.lock = False, [], threading.Lock()
+
+    def acquire(self, why):
+        with self.lock:
+            if not self.open:
+                self.open = True
+                self.log.append(f"ACQUIRE:{why}")
+
+    def keep(self):
+        with self.lock:
+            self.log.append("KEEP")
+
+    def release(self, why):
+        with self.lock:
+            if self.open:
+                self.open = False
+                self.log.append(f"RELEASE:{why}")
+
+    def count(self, prefix):
+        return sum(1 for e in self.log if e.startswith(prefix))
+
+
 class FakeControl:
     """Same method names as ControlActivities (the real names are `control.<method>`); records recordStage as STAGE:attempt:STATUS."""
 
@@ -51,6 +77,12 @@ class FakeControl:
         self.keyframe_inspection_fails = 0
         self.quality_gate = False
         self.lock = threading.Lock()
+        self.pod = FakePodState()
+        self.one_pod = False  # control.one_pod_enabled: VIDEO_ONE_POD with keyframes and drafts on the pod
+        self.one_pod_calls = []  # (keyframe_request one_pod flag, save_keyframes keep_pod flag)
+        self.block_animatic = None  # a threading.Event: animatic_request waits for it (the pod is held meanwhile)
+        self.at_save = None  # a threading.Event set when save_keyframes runs; it then waits for `proceed`
+        self.proceed = None
 
     def ev(self, e):
         with self.lock:
@@ -104,11 +136,30 @@ class FakeControl:
         self.ev(f"STOCK:{request['shotId']}:{'found' if result['found'] else 'fallback'}")
         return ok("saved", None)
 
-    def keyframe_request(self, video_id, owner_notes):
+    def keyframe_request(self, video_id, owner_notes, one_pod=False):
+        self.pod.acquire("keyframes")
+        self.one_pod_calls.append(("request", one_pod))
         return {"videoId": video_id}
 
-    def save_keyframes(self, video_id, request, result):
+    def save_keyframes(self, video_id, request, result, keep_pod=False):
+        self.one_pod_calls.append(("save", keep_pod))
+        if self.at_save is not None:
+            self.at_save.set()
+            self.proceed.wait(20)
+        if keep_pod:
+            self.pod.keep()
+        else:
+            self.pod.release("keyframes saved")
         return ok("keyframes")
+
+    def one_pod_enabled(self):
+        return self.one_pod
+
+    def touch_held_pod(self, video_id):
+        return self.pod.open
+
+    def release_held_pod(self, video_id, why):
+        self.pod.release(why)
 
     def shot_keyframe_request(self, video_id, shot_ids, owner_notes, policy):
         with self.lock:
@@ -133,6 +184,8 @@ class FakeControl:
         self.ev(f"LINES:[{', '.join(map(str, line_indexes))}]:{status}")
 
     def animatic_request(self, video_id):
+        if self.block_animatic is not None:
+            self.block_animatic.wait(20)
         return {"videoId": video_id}
 
     def save_animatic(self, video_id, result):
@@ -154,9 +207,11 @@ class FakeControl:
 
     def clip_request(self, video_id, kind, shot_ids):
         self.clip_requests.append(f"{kind}:{'null' if shot_ids is None else '[' + ', '.join(shot_ids) + ']'}")
+        self.pod.acquire("clips")
         return {"videoId": video_id, "jobs": [], "provider": "wan"}
 
     def save_clips(self, video_id, request, result):
+        self.pod.release("clips saved")
         return ok("clips saved")
 
     def mark_clips(self, video_id, shot_ids, status, error):

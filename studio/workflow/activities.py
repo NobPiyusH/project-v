@@ -133,16 +133,35 @@ class ControlActivities:
     def shot_plan(self, video_id: str, owner_notes: str | None) -> dict[str, Any]:
         return stage_result_json(self.shots.shot_plan(_id(video_id), owner_notes))
 
-    def keyframe_request(self, video_id: str, owner_notes: str | None) -> dict[str, Any]:
-        return to_json(self.shots.keyframe_request(_id(video_id), owner_notes))
+    def keyframe_request(self, video_id: str, owner_notes: str | None, one_pod: bool = False) -> dict[str, Any]:
+        return to_json(self.shots.keyframe_request(_id(video_id), owner_notes, one_pod))
 
-    def save_keyframes(self, video_id: str, request: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
+    def save_keyframes(self, video_id: str, request: dict[str, Any], result: dict[str, Any], keep_pod: bool = False) -> dict[str, Any]:
+        """keep_pod (one-pod mode, the next stages are all AUTO): the pod stays for the clips stage once the keyframes are saved. Whatever else
+        happens (a failed save, the pod gone, nothing to keep) it is released here, exactly as without the flag."""
         req = from_json(KeyframeRequest, request)
+        kept = False
         try:
-            return stage_result_json(self.shots.save_keyframes(_id(video_id), req, from_json(KeyframeResult, result)))
+            saved = stage_result_json(self.shots.save_keyframes(_id(video_id), req, from_json(KeyframeResult, result)))
+            if keep_pod and req.gpu_url is not None:
+                kept = self.shots.keep_gpu(_id(video_id))
+            return saved
         finally:
-            if req.gpu_url is not None:
+            if req.gpu_url is not None and not kept:
                 self.shots.release_gpu(_id(video_id), "keyframes saved")
+
+    # ---- one-pod mode (VIDEO_ONE_POD): the workflow asks, the control plane keeps or lets go
+
+    def one_pod_enabled(self) -> bool:
+        return bool(self.shots.one_pod_enabled())
+
+    def touch_held_pod(self, video_id: str) -> bool:
+        return bool(self.shots.touch_gpu(_id(video_id)))
+
+    def release_held_pod(self, video_id: str, why: str) -> None:
+        """Idempotent: ends this video's share of the pod (and the pod when nobody else uses it) before a human wait, after a failure or cancel,
+        and when the clips stage is over."""
+        self.shots.release_gpu(_id(video_id), why)
 
     def shot_keyframe_request(self, video_id: str, shot_ids: list[str], owner_notes: str | None, policy: str | None) -> dict[str, Any]:
         return to_json(self.shots.shot_keyframe_request(_id(video_id), _ids(shot_ids), owner_notes, ImagePolicy["AUTO" if policy is None else policy]))

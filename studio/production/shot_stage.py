@@ -64,6 +64,18 @@ class ShotStage(StageSupport):
         if self.video_gpu is not None:
             self.video_gpu.release(video_id, why)
 
+    def one_pod_enabled(self) -> bool:
+        """VIDEO_ONE_POD is on and the keyframes and the draft clips both go to the broker's pod."""
+        return self.video_gpu is not None and self.video_gpu.one_pod_ready()
+
+    def keep_gpu(self, video_id: uuid.UUID) -> bool:
+        """After the keyframes are saved: keep the pod for the clips stage. False = nothing is kept, the caller releases it."""
+        return self.video_gpu is not None and self.video_gpu.keep(video_id)
+
+    def touch_gpu(self, video_id: uuid.UUID) -> bool:
+        """A stage between the keyframes and the clips started: restart the hold's idle clock. True while a pod is held."""
+        return self.video_gpu is not None and self.video_gpu.touch(video_id)
+
     def route_keyframes(self, video_id: uuid.UUID, hero: bool, images: int, policy: ImagePolicy) -> str:
         """M3a: one routed decision per class of shot (hero / standard) instead of a fixed rule. The owner's image policy is the preference
         (PREMIUM = Gemini, FREE = Z-Image); in AUTO the router's floors decide: hero keyframes need quality 7 (Gemini), standard ones are
@@ -210,8 +222,9 @@ class ShotStage(StageSupport):
 
     # ---------------------------------------------------------------------------------------------- keyframes
 
-    def keyframe_request(self, video_id: uuid.UUID, owner_notes: str | None) -> KeyframeRequest:
-        return self._build_keyframe_request(video_id, None, owner_notes, ImagePolicy.AUTO)
+    def keyframe_request(self, video_id: uuid.UUID, owner_notes: str | None, one_pod: bool = False) -> KeyframeRequest:
+        """one_pod: the workflow plans to reuse this pod for the draft clips (VIDEO_ONE_POD, AUTO stages): rent it for the whole span."""
+        return self._build_keyframe_request(video_id, None, owner_notes, ImagePolicy.AUTO, one_pod)
 
     def shot_keyframe_request(self, video_id: uuid.UUID, shot_ids: list[uuid.UUID], owner_notes: str | None,
                               policy: ImagePolicy) -> KeyframeRequest:
@@ -222,7 +235,7 @@ class ShotStage(StageSupport):
         return r
 
     def _build_keyframe_request(self, video_id: uuid.UUID, only: set[uuid.UUID] | None, owner_notes: str | None,
-                                policy: ImagePolicy) -> KeyframeRequest:
+                                policy: ImagePolicy, one_pod: bool = False) -> KeyframeRequest:
         plan = self.plan(video_id)
         preset = self.d.presets.by_id_or_default(plan.stylePreset)
         vertical = plan.aspectRatio == "9:16"
@@ -256,7 +269,8 @@ class ShotStage(StageSupport):
             sec = self.video_gpu.picture_seconds(video_id, len(jobs))
             if self.router is not None:
                 self.router.choose(video_id, "KEYFRAMES", "image.dream", [Candidate(POD, self.video_gpu.inr(sec))], POD, True)
-            session = self.video_gpu.session(video_id, sec)
+            span = self.video_gpu.span_seconds(video_id, len(jobs), len(jobs)) if one_pod and self.video_gpu.one_pod_ready() else None
+            session = self.video_gpu.session(video_id, sec, span)
             return KeyframeRequest(str(video_id), d.image_model, d.modal_app, d.modal_class, jobs, session.url, session.ready_timeout_seconds)
         return KeyframeRequest(str(video_id), d.image_model, d.modal_app, d.modal_class, jobs)
 
