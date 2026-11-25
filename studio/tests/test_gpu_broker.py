@@ -82,7 +82,7 @@ class Leases:
     def release(self, pod_id): self.released.append(pod_id)
     def find(self, pod_id): return self.map.get(pod_id)
     def attach(self, pod_id, short): self.attached_map.setdefault(pod_id, []).append(short)
-    def detach(self, pod_id, short): pass
+    def detach(self, pod_id, short): self.attached_map[pod_id] = [u for u in self.attached_map.get(pod_id, []) if u != short]
     def attached(self, pod_id): return self.attached_map.get(pod_id, [])
 
 
@@ -679,3 +679,20 @@ def test_broker_records_rent_then_running_then_the_workers_report():
     assert b.boot_timing(short)["totalSeconds"] == 1080.0
     b.report_boot(uuid.uuid4(), worker(1))  # a Short with no rental: ignored, no error
     assert len(timings.recent(5)) == 1
+
+
+def test_a_process_that_did_not_rent_still_sees_the_open_lease(e):
+    """The control worker rents; the API answers the media worker's heartbeat from its own broker. It said NONE ('the studio released
+    this Short's GPU') and the keyframe step aborted at once on the first live Short."""
+    class OpenLeases(Leases):
+        def open_for_shorts(self):
+            from studio.gpu.leases import OpenLease
+            return [OpenLease("pod-1", "runpod", "projectv-x", e.short, 0.89, "NVIDIA GeForce RTX 4090", fixed_clock()())]
+
+    e.leases = OpenLeases()
+    other = e.broker()  # a second broker: nothing rented in its memory
+    assert other.open(e.short) is None
+    assert other.pod_state(e.short) == PodState.OPEN
+    e.runpod.state = State.GONE
+    assert other.pod_state(e.short) == PodState.GONE
+    assert other.pod_state(uuid.uuid4()) == PodState.NONE

@@ -155,13 +155,13 @@ class KeyframeRequest:
 @dataclass
 class KeyframeOutput:
     shot_id: str
-    uri: str | None
-    provider: str | None
-    model: str | None
-    seed: int | None
-    seconds: float | None
-    usage: Usage | None
-    error: str | None
+    uri: str | None = None
+    provider: str | None = None
+    model: str | None = None
+    seed: int | None = None
+    seconds: float | None = None
+    usage: Usage | None = None
+    error: str | None = None
     references: list[str] | None = None  # credit lines of real reference photos (rule 6)
 
 

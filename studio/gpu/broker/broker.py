@@ -237,6 +237,24 @@ class GpuBroker:
         r = self._shared
         return r if r is not None and short_id in self._users else None
 
+    def _leased_elsewhere(self, short_id: uuid.UUID) -> Rental | None:
+        """The Short's open pod as the lease table sees it, for a process that did not rent it. The control worker rents (acquire runs in its
+        process, its memory holds the rental) while the API answers the media worker's heartbeat from ITS OWN broker, which knows nothing of
+        it: it said NONE and the worker aborted the step with 'the studio released this Short's GPU'. Read-only: nothing is adopted."""
+        try:
+            for lease in self._leases.open_for_shorts():
+                users = self._safe_attached(lease.pod_id)
+                if short_id in users or (not users and lease.dream_short_id == short_id):
+                    p = self._providers.get(lease.provider)
+                    if p is None:
+                        return None
+                    inst = Instance(lease.provider, lease.pod_id, lease.name, lease.hourly_usd, lease.gpu,
+                                    self._auth.decorate(lease.provider, lease.name, p.endpoint_for(lease.pod_id, self._config.port)))
+                    return Rental(lease.dream_short_id, inst, lease.created_at)
+        except Exception as e:  # noqa: BLE001
+            log.warning("GPU broker: could not read the lease table for Short %s: %s", short_id, e)
+        return None
+
     def has_open_pod(self) -> bool:
         """Whether the shared pod is on (rented by any Short): a new Short then starts without a boot."""
         return self._shared is not None
@@ -555,13 +573,13 @@ class GpuBroker:
 
     def heartbeat(self, short_id: uuid.UUID) -> None:
         """Keeps the lease warm without any provider call (the worker pings this while it waits or runs jobs)."""
-        r = self.open(short_id)
+        r = self.open(short_id) or self._leased_elsewhere(short_id)
         if r is not None:
             self._leases.heartbeat(r.instance.id)
 
     def pod_state(self, short_id: uuid.UUID) -> PodState:
         """One provider status call: lets a worker waiting for a pod notice within a minute that it was deleted."""
-        r = self.open(short_id)
+        r = self.open(short_id) or self._leased_elsewhere(short_id)
         if r is None:
             return PodState.NONE
         return PodState.GONE if self._gone(r) else PodState.OPEN

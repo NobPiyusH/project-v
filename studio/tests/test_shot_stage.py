@@ -470,3 +470,12 @@ def test_no_match_reverts_the_shot_to_the_ai_lane_and_never_fails(tv):
     assert not stock_shot({"prompt_json": prompt}), "keyframes will now be made for it"
     assert s.requests(video) == []
     assert "no longer part" in s.save(video, type("R", (), {"shot_id": str(uuid.uuid4()), "shot_number": 1})(), None).summary
+
+
+def test_an_error_only_keyframe_result_still_parses():
+    """The media worker answers {"error", "provider", "shotId", "uri": null} when the pod is lost; that used to crash save_keyframes."""
+    from studio.media.types import KeyframeResult
+    from studio.media.wire import from_json
+    import json
+    r = from_json(KeyframeResult, json.loads('{"modalGpuSeconds":0.0,"podGpuSeconds":0.0,"results":[{"error":"RuntimeError: GPU pod lost","provider":"gpu_pod","shotId":"s1","uri":null}]}'))
+    assert r.results[0].error and r.results[0].seed is None
