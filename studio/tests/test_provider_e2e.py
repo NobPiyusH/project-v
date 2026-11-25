@@ -114,7 +114,7 @@ def test_the_node_side_script_actually_verifies_and_rebuilds_the_payload(tmp_pat
     work = tmp_path / "opt"
     for sc in scripts[:-1]:
         subprocess.run([bash, "-c", sc.replace("/opt/projectv", str(work).replace("\\", "/"))], check=True)
-    check = scripts[-1].replace("cd /opt/projectv", f"cd {str(work)}".replace("\\", "/")).replace("then bash run.sh;", "then echo VERIFIED;")
+    check = scripts[-1].replace("cd /opt/projectv", f"cd {work!s}".replace("\\", "/")).replace("then bash run.sh;", "then echo VERIFIED;")
     out = subprocess.run([bash, "-c", check], capture_output=True, text=True)
     assert out.returncode == 0 and "VERIFIED" in out.stdout, out.stderr
     assert (work / "worker.env").read_text() == "SV_BOOT_00=QUJD\nSV_TOKEN=tok123\n"

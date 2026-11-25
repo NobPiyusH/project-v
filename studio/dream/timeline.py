@@ -205,4 +205,4 @@ def log(events: list[Event]) -> list[LogLine]:
     return out
 
 
-__all__ = ["DREAM_STEPS", "Event", "Cost", "StepTime", "LogLine", "steps", "finished_work", "typical", "describe", "log", "median"]
+__all__ = ["DREAM_STEPS", "Cost", "Event", "LogLine", "StepTime", "describe", "finished_work", "log", "median", "steps", "typical"]

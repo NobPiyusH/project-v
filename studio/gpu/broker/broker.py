@@ -775,4 +775,4 @@ class GpuBroker:
         return f"worker never became healthy within {timeout_seconds} s: {last}"
 
 
-__all__ = ["AUTO", "GpuBroker", "NoGpuAvailableError", "Option", "Pick", "PodState", "Pod", "Rental", "pick_key"]
+__all__ = ["AUTO", "GpuBroker", "NoGpuAvailableError", "Option", "Pick", "Pod", "PodState", "Rental", "pick_key"]
