@@ -262,6 +262,10 @@
      "mode": "str",
      "owner_notes": "NoneType",
      "review_deadline": "NoneType",
+     "canResume": "bool",
+     "hasStoredResult": "bool",
+     "heldReason": "NoneType",
+     "redoEstimateInr": "NoneType",
      "stage": "str",
      "started_at": "str",
      "status": "str",
@@ -271,7 +275,8 @@
    "status": "str",
    "title": "str",
    "updated_at": "str",
-   "workflow_id": "str"
+   "workflow_id": "str",
+   "auto_redo_paid": "bool"
   },
   "status": 200
  },

@@ -93,7 +93,7 @@ def register_video_routes(app: FastAPI, v: VideoContext, JavaJson: type[Response
         modes = None if b.get("modes") is None else {_stage(k): StageMode.parse(m) for k, m in b["modes"].items()}
         try:
             vid = v.videos.create(CreateVideo(prompt, None if b.get("defaultMode") is None else StageMode.parse(b["defaultMode"]), modes,
-                                              b.get("reviewMinutes"), plan_doc))
+                                              b.get("reviewMinutes"), plan_doc, bool(b.get("autoRedoPaid", False))))
         except ValueError as e:  # an invalid plan file
             raise HTTPException(status_code=400, detail=f"plan rejected: {e}") from e
         return JavaJson({"id": vid}, status_code=201)
@@ -130,6 +130,18 @@ def register_video_routes(app: FastAPI, v: VideoContext, JavaJson: type[Response
     @guarded
     def rerun(vid: uuid.UUID, stage: str):
         return JavaJson({"stages": [s.name for s in v.videos.rerun(vid, _stage(stage))]})
+
+    @app.post("/api/videos/{vid}/stages/{stage}/resume")
+    @guarded
+    def resume_stage(vid: uuid.UUID, stage: str):
+        v.videos.resume_stage(vid, _stage(stage))
+        return ok()
+
+    @app.put("/api/videos/{vid}/auto-redo-paid")
+    @guarded
+    async def set_auto_redo_paid(vid: uuid.UUID, request: Request):
+        v.videos.set_auto_redo_paid(vid, bool((await body(request)).get("enabled")))
+        return ok()
 
     @app.put("/api/videos/{vid}/modes/{stage}")
     @guarded

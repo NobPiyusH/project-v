@@ -66,6 +66,7 @@ class CreateVideo:
     modes: dict[Stage, StageMode] | None = None
     review_minutes: int | None = None
     plan_doc: dict | None = None  # a finished plan file (studio/planner/imported.py): the video starts from it, no paid planner/writer/director
+    auto_redo_paid: bool = False  # let the Inspector's one automatic redo run by itself even when it rents a pod or calls a paid service
 
 
 def modes_json(default_mode: StageMode, modes: dict[Stage, StageMode]) -> str:
@@ -92,9 +93,10 @@ class VideoService:
         prompt = req.prompt.strip()
         plan_json = None if req.plan_doc is None else initial_plan_json(req.plan_doc)  # validates: a bad plan is refused before anything is stored
         self.db.execute(
-            "INSERT INTO video (id, prompt, status, modes_json, workflow_id, review_minutes, plan_json) "
-            "VALUES (%(id)s, %(prompt)s, 'CREATED', CAST(%(modes)s AS jsonb), %(wf)s, %(review)s, CAST(%(plan)s AS jsonb))",
-            {"id": vid, "prompt": prompt, "modes": modes_json(default_mode, modes), "wf": workflow_id, "review": review, "plan": plan_json})
+            "INSERT INTO video (id, prompt, status, modes_json, workflow_id, review_minutes, plan_json, auto_redo_paid) "
+            "VALUES (%(id)s, %(prompt)s, 'CREATED', CAST(%(modes)s AS jsonb), %(wf)s, %(review)s, CAST(%(plan)s AS jsonb), %(auto)s)",
+            {"id": vid, "prompt": prompt, "modes": modes_json(default_mode, modes), "wf": workflow_id, "review": review, "plan": plan_json,
+             "auto": bool(req.auto_redo_paid)})
         self.gateway.start(queues.VIDEO_WORKFLOW, workflow_id, VideoRequest(str(vid), prompt, default_mode, modes, None, review))
         return vid
 
@@ -187,11 +189,32 @@ class VideoService:
     def detail(self, vid: uuid.UUID) -> dict[str, Any]:
         video = self._video(
             vid, "id, title, prompt, status, current_stage, spent_inr, workflow_id, created_at, updated_at, plan_json::text AS plan_json, "
-                 "modes_json::text AS modes_json, review_minutes, master_asset_id, master_package_asset_id, master_captions_asset_id")
+                 "modes_json::text AS modes_json, review_minutes, master_asset_id, master_package_asset_id, master_captions_asset_id, "
+                 "auto_redo_paid")
         runs = self.db.rows(
             "SELECT stage, attempt, mode, status, summary, artifact_json::text AS artifact_json, owner_notes, started_at, finished_at, "
-            "review_deadline FROM stage_run WHERE video_id = %(id)s ORDER BY started_at, attempt", {"id": vid})
-        return {**video, "stageRuns": runs}
+            "review_deadline, held_reason, can_resume, has_stored_result, redo_estimate_inr FROM stage_run WHERE video_id = %(id)s "
+            "ORDER BY started_at, attempt", {"id": vid})
+        return {**video, "stageRuns": self._with_holds(runs)}
+
+    @staticmethod
+    def _with_holds(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Read-model fields for a stage that waits: why (`heldReason`), the redo's estimated cost, and `canResume` (a stored media result exists and
+        this is the stage's latest attempt, still failed: an older attempt can no longer be resumed)."""
+        latest: dict[str, int] = {}
+        for r in runs:
+            latest[r["stage"]] = max(latest.get(r["stage"], 0), r["attempt"])
+        out = []
+        for r in runs:
+            r = dict(r)
+            stored, can = bool(r.pop("has_stored_result", False)), bool(r.pop("can_resume", False))
+            r["hasStoredResult"] = stored
+            r["canResume"] = can and stored and r["status"] == "FAILED" and r["attempt"] == latest[r["stage"]]
+            held = r.pop("held_reason", None)
+            r["heldReason"] = held if r["status"] in ("FAILED", "WAITING_APPROVAL") else None
+            r["redoEstimateInr"] = r.pop("redo_estimate_inr", None)
+            out.append(r)
+        return out
 
     # ------------------------------------------------------------------------------------------------ owner decisions
 
@@ -202,6 +225,21 @@ class VideoService:
     def reject(self, vid: uuid.UUID, stage: Stage, notes: str | None) -> None:
         self._signal(vid, "reject", stage, notes)
         self._record_decision(vid, stage, "reject", notes)
+
+    def resume_stage(self, vid: uuid.UUID, stage: Stage) -> None:
+        """Resume a failed stage whose media result is stored: only the cheap save runs again, no pod is rented. Refused when it is not offered."""
+        rows = self.db.rows("SELECT status, can_resume, has_stored_result FROM stage_run WHERE video_id = %(v)s AND stage = %(s)s "
+                            "ORDER BY attempt DESC LIMIT 1", {"v": vid, "s": stage.name})
+        if not rows or rows[0]["status"] != "FAILED" or not rows[0]["can_resume"] or not rows[0]["has_stored_result"]:
+            raise RuntimeError(f"{stage.label} has no stored result to resume from; use Retry to redo it")
+        self._signal(vid, "resume_stage", stage)
+        self._record_decision(vid, stage, "resume", None)
+
+    def set_auto_redo_paid(self, vid: uuid.UUID, on: bool) -> None:
+        """Per video, switchable mid-run: may the Inspector's one automatic redo spend money (pod, paid API) without asking."""
+        self._video(vid, "id")
+        self.db.execute("UPDATE video SET auto_redo_paid = %(on)s, updated_at = now() WHERE id = %(id)s", {"on": bool(on), "id": vid})
+        self._record_decision(vid, None, "mode_change", f"AUTO_REDO_PAID:{bool(on)}")
 
     def set_mode(self, vid: uuid.UUID, stage: Stage, mode: StageMode) -> None:
         self._signal(vid, "set_mode", stage, mode)
