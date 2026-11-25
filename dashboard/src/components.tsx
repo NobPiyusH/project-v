@@ -17,7 +17,7 @@ export const STATUS_TEXT: Record<string, string> = {
   PRODUCER_APPROVED: 'Approved by AI Producer', PRODUCER_REDO: 'Redone by AI Producer',
 }
 
-export const MODE_HELP: Record<Mode, string> = {
+const MODE_HELP: Record<Mode, string> = {
   AUTO: 'Auto: does the stage and moves on',
   REVIEW: 'Review: does the stage, waits the review window for you, then moves on by itself',
   MANUAL: 'Manual: does the stage and waits until you approve',

@@ -36,7 +36,7 @@ export interface ProjectRow {
   readyToPost: boolean
 }
 
-export const projectHref = (kind: Kind, id: string) => `#/p/${kind}/${id}`
+const projectHref = (kind: Kind, id: string) => `#/p/${kind}/${id}`
 const num = (v: unknown) => Number(v) || 0
 
 // ---------------------------------------------------------------- list
