@@ -70,3 +70,15 @@ Tiers 1-2 (judge OFF, free) now run automatically after the edit. Flag: `QUALITY
 
 - **Studio ASSEMBLY stage**: after `save_master`, the media worker's `quality_gate_check` activity (`workers/activities/gate_check.py`) downloads the master, runs `tools/qualitygate/hook.py`, and stores `videos/<id>/master/quality-gate.json` next to `master.mp4` (tiers, judge off, thresholds used, per-check results). A **fail** raises a non-retryable error, so the stage waits for the owner like any failed stage (rule 2b): Reject = redo the edit, Approve = continue without it. **Warns** are added to the stage summary and never block. A crash of the checker itself (ffmpeg missing) returns status `error`, logs, and does not block.
 - **Film CLI** `tools/film4k/edit.py`: after the render it writes `<name>.quality-gate.json` next to the output, prints the summary, and exits **3** on a fail ("HOLD", output kept). `--no-gate` skips it.
+
+## Golden regression tests (25 Nov 2026)
+`tools/golden/tests/test_golden_qualitygate.py` makes tiny clips with ffmpeg lavfi (a flat-colour clip, a `testsrc2` moving clip, and moving clips with silent, quiet, mid and loud audio), runs the gate and compares the per-check status and rounded value with the JSON in `tools/golden/fixtures/qg_*.json`. Hard asserts also hold regardless of the fixture: the static clip fails motion and frozen_frames, the moving clip passes both, the quiet clip fails loudness. Numbers compare with a small tolerance (`tools/golden/golden.py`); statuses compare exactly.
+
+A deliberate change (a threshold in `config.py`, a new check) is one command, then read the diff before committing:
+
+```powershell
+$env:GOLDEN_UPDATE = "1"; uv run --group dev --group studio python -m pytest tools/golden -q; Remove-Item Env:GOLDEN_UPDATE
+git diff tools/golden/fixtures
+```
+
+`--update-golden` does the same. Skipped when ffmpeg is not installed. The fixtures pin the synthetic clips only, not real-film calibration (see Calibration above).

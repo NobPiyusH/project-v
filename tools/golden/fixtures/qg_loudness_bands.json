@@ -1,0 +1,18 @@
+{
+ "loud": {
+  "status": "warn",
+  "value": -9.7
+ },
+ "mid": {
+  "status": "fail",
+  "value": -35.7
+ },
+ "quiet": {
+  "status": "fail",
+  "value": -61.8
+ },
+ "silent": {
+  "status": "fail",
+  "value": -70.0
+ }
+}
