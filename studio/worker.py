@@ -60,4 +60,7 @@ def main(env: dict[str, str] | None = None) -> int:
 
 
 if __name__ == "__main__":
+    from dotenv import load_dotenv
+
+    load_dotenv()  # see studio/__main__.py
     sys.exit(main())

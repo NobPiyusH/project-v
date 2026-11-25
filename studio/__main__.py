@@ -22,4 +22,7 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    from dotenv import load_dotenv
+
+    load_dotenv()  # the studio read no .env before: every key and flag came out blank. Walks up from this file; values are never logged
     sys.exit(main())
