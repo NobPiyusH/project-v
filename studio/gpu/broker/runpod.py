@@ -71,8 +71,10 @@ def create_body(req: CreateRequest) -> dict[str, Any]:
 
 
 class RunPodProvider(GpuProvider):
-    def __init__(self, base: RunPodApi, base_url: str, api_key: str, client: httpx.Client | None = None):
+    def __init__(self, base: RunPodApi, base_url: str, api_key: str, client: httpx.Client | None = None,
+                 clouds: tuple[str, ...] = ("COMMUNITY", "SECURE")):
         self._base = base
+        self._clouds = tuple(c.upper() for c in clouds)  # ("SECURE",) = never quote a Community offer (POD_CLOUD_PREFERENCE=secure_only)
         self._url = base_url.rstrip("/")
         self._key = (api_key or "").strip()
         self._http = client or http_client(30)
@@ -104,7 +106,7 @@ class RunPodProvider(GpuProvider):
         """Every GPU in stock, Community and Secure, cheapest first."""
         out: list[Quote] = []
         why: list[str] = []
-        for cloud in ("COMMUNITY", "SECURE"):
+        for cloud in self._clouds:
             for gpu in spec.gpu_preference:
                 try:
                     resp = self._http.get(f"{self._url}/catalog/gpus/{urlquote(gpu, safe='')}?include=AVAILABILITY&product=POD&cloud={cloud}",

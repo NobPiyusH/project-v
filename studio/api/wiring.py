@@ -124,7 +124,9 @@ def build_dream_gpu(s: Settings, db: Db, pricing: Pricing, ledger: CostLedger, d
     providers = []
     if on:
         api = RunPodApi(s.runpod_base_url, s.runpod_api_key)
-        providers.append(RunPodProvider(api, s.runpod_base_url, s.runpod_api_key))
+        # POD_CLOUD_PREFERENCE=secure_only: never quote Community (plain "secure" still lets the cheapest-first pick land on a Community offer)
+        clouds = ("SECURE",) if (s.pod_cloud_preference or "").strip().lower() == "secure_only" else ("COMMUNITY", "SECURE")
+        providers.append(RunPodProvider(api, s.runpod_base_url, s.runpod_api_key, clouds=clouds))
     prefs = support.PgPreferences(db)
     broker = GpuBroker(providers, cfg, GpuWallet.from_db(cfg, db, pricing), PgBrokerRecords(db, pricing), PgPodLeases(db), PgPodEvents(db, ledger, pricing),
                        GpuPodLimits.from_settings(s), prefs=prefs, auth=support.WorkerAuth(), states=support.PgStates(db), boot_timings=support.PgTimings(db),

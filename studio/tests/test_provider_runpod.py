@@ -30,9 +30,9 @@ class Fake:
             return httpx.Response(404, json={})
         return httpx.Response(200, json={"id": "pod123", "status": "RUNNING"})
 
-    def provider(self, key="k"):
+    def provider(self, key="k", **kw):
         client = httpx.Client(transport=httpx.MockTransport(self.handler))
-        return RunPodProvider(RunPodApi("http://fake/v2", key, client=client), "http://fake/v2", key, client=client)
+        return RunPodProvider(RunPodApi("http://fake/v2", key, client=client), "http://fake/v2", key, client=client, **kw)
 
 
 def test_unconfigured_without_key():
@@ -44,6 +44,14 @@ def test_community_preferred_when_in_stock():
     f.community_stock = "LOW"
     q = f.provider().quote(SPEC)
     assert q.available and q.hourly_usd == 0.34 and q.gpu.endswith("|COMMUNITY")
+
+
+def test_secure_only_never_quotes_or_asks_for_community():
+    f = Fake()
+    f.community_stock = "HIGH"
+    quotes = f.provider(clouds=("SECURE",)).quotes(SPEC)
+    assert [q.gpu for q in quotes] == ["NVIDIA GeForce RTX 4090|SECURE"] and quotes[0].hourly_usd == 0.89
+    assert not any("cloud=COMMUNITY" in r for r in f.requests)
 
 
 def test_falls_back_to_secure_when_community_has_no_instances():
