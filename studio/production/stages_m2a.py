@@ -34,6 +34,7 @@ from studio.media.types import (
     Usage,
 )
 from studio.media.wire import to_json
+from studio.planner import narration as narration_check
 from studio.production import timing as nt
 from studio.production.records import AudioVersion, StoredLine, StoredScript
 from studio.production.support import StageSupport, round3, with_lines
@@ -119,7 +120,9 @@ class StoryStage(StageSupport):
                 {"id": uuid.uuid4(), "v": video_id, "ver": stored.version, "md": md, "beats": _dumps(stored), "words": words,
                  "est": jround(words / 2.3)})
         spoken = sum(1 for ln in lines if ln.spoken)
-        return StageResult.of(f"{len(lines)} lines ({spoken} spoken, {words} words), voice {voice}.", _dumps(stored))
+        warn = narration_check.check_spoken_total([ln.text for ln in lines if ln.spoken], float(plan.durationSec), plan.language).warnings
+        note = "" if not warn else " Heads-up: " + "; ".join(warn) + "."  # the plan's length is the slot; a too-long script gets a slowed or cut edit
+        return StageResult.of(f"{len(lines)} lines ({spoken} spoken, {words} words), voice {voice}.{note}", _dumps(stored))
 
 
 class MusicStage(StageSupport):

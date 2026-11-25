@@ -23,6 +23,7 @@ from pydantic import BaseModel
 
 from studio.agents.types import Act, Concept, PlannedShot, Script, ScriptLine, ShotPlan
 from studio.config import REPO_ROOT
+from studio.planner import narration
 from studio.planner.bank import Bank, BankedPlan, ScenePlan, validate
 from studio.planner.plan import VideoPlan
 
@@ -57,6 +58,7 @@ class ImportedPlan(BaseModel):
     height: int = 1280
     moonCaption: dict[str, Any] | None = None  # noqa: N815  the plan's overlay.caption (text, startSec, endSec), drawn by the Moon layer
     moon: dict[str, Any] | None = None  # the plan's `moon` block (mode "layer"): composited by the MOON_LAYER stage; None = no such stage
+    narrationCheck: dict[str, Any] | None = None  # noqa: N815  spoken-length estimate per line vs its beat (studio/planner/narration.py)
 
     # ---- what the stages ask of it
 
@@ -147,9 +149,10 @@ def parse(doc: dict[str, Any]) -> ImportedPlan:
             problems.append("moon.layer.imagePath must be a text path to a local picture")
     if problems:
         raise ValueError("; ".join(problems))
+    check = None if (video.narration == "none" or not lines) else narration.check_plan(lines, beats, video.language).as_dict()
     return ImportedPlan(video=video, bank=banked.bank, beats=beats, lines=lines, allowUntested=allow,
                         width=int(gen.get("width", 720)), height=int(gen.get("height", 1280)),
-                        moon=moon if isinstance(moon, dict) else None,
+                        moon=moon if isinstance(moon, dict) else None, narrationCheck=check,
                         moonCaption=((doc.get("overlay") or {}).get("caption") if isinstance(doc.get("overlay"), dict) else None))
 
 
@@ -164,9 +167,24 @@ def read_plan_file(name: str) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def validate_doc(doc: dict[str, Any]) -> dict[str, Any]:
+    """The plan validation result the dashboard shows before a video is created: {ok, problems, warnings, narration}. Never raises: a plan
+    that does not load comes back with ok=False and its problems. A narration line more than 25% longer than its beat is a problem; more
+    than 10% is a warning (plain words, studio/planner/narration.py)."""
+    try:
+        imp = parse(doc)
+    except ValueError as e:
+        return {"ok": False, "problems": str(e).split("; "), "warnings": [], "narration": None}
+    nc = imp.narrationCheck
+    problems = [] if nc is None else list(nc["problems"])
+    return {"ok": not problems, "problems": problems, "warnings": [] if nc is None else list(nc["warnings"]), "narration": nc}
+
+
 def initial_plan_json(doc: dict[str, Any]) -> str:
     """The value stored in video.plan_json at creation (validated first). The PLAN stage keeps the key when it writes the real plan."""
-    parse(doc)
+    imp = parse(doc)
+    if imp.narrationCheck is not None and imp.narrationCheck["problems"]:  # only at creation: a stored plan must still load later
+        raise ValueError("; ".join(imp.narrationCheck["problems"]))
     return json.dumps({IMPORT_KEY: doc}, separators=(",", ":"))
 
 
