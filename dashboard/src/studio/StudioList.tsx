@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { assetUrl } from '../api'
+import { api, assetUrl } from '../api'
 import type { ProjectRow } from './projectAdapter'
 import { KIND_LABEL, age, inr, statusClass } from './format'
 
@@ -14,9 +14,11 @@ const match = (f: Filter, r: ProjectRow) =>
 export function StudioList({ rows }: { rows: ProjectRow[] | null }) {
   const [filter, setFilter] = useState<Filter>('all')
   const [shown, setShown] = useState(PAGE)
+  const [hidden, setHidden] = useState<Set<string>>(new Set())
+  const [err, setErr] = useState('')
   if (!rows) return <p className="muted">Loading…</p>
   const needs = rows.filter((r) => match('needs', r)).length
-  const list = rows.filter((r) => match(filter, r))
+  const list = rows.filter((r) => match(filter, r) && !hidden.has(r.id))
   const chips: [Filter, string][] = [['all', 'All'], ['needs', 'Needs you'], ['running', 'Running'], ['done', 'Done'], ['short', 'Shorts'], ['video', 'Videos']]
   return (
     <>
@@ -27,6 +29,7 @@ export function StudioList({ rows }: { rows: ProjectRow[] | null }) {
             onClick={() => { setFilter(k); setShown(PAGE) }}>{label}{k === 'needs' && needs > 0 && <span className="count">{needs}</span>}</button>
         ))}
       </div>
+      {err && <p className="err">{err}</p>}
       <section className="card sv-list">
         {list.length === 0 && <p className="empty">{rows.length === 0 ? 'Nothing here yet. Start one in Create.' : 'Nothing matches this filter.'}</p>}
         {list.slice(0, shown).map((r) => (
@@ -40,6 +43,13 @@ export function StudioList({ rows }: { rows: ProjectRow[] | null }) {
             <div className="side">
               <div>{inr(r.costInr)}</div><div>{age(r.createdAt)}</div>
               {r.readyToPost && <span className="badge b-ok">Ready to post</span>}
+              {r.kind === 'video' && r.status !== 'running' && (
+                <button type="button" className="small" title="Hide this video from the list (nothing is deleted)"
+                  onClick={(e) => {
+                    e.preventDefault(); e.stopPropagation()
+                    api.archiveVideo(r.id).then(() => setHidden((h) => new Set(h).add(r.id))).catch((x) => setErr(String(x?.message ?? x)))
+                  }}>Archive</button>
+              )}
             </div>
           </a>
         ))}

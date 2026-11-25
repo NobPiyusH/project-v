@@ -192,7 +192,7 @@ pricing:
   holdEstimates:
     SHOT_PLAN: {provider: Gemini (story review), inr: 3, what: the AI story review of the shot plan}
     NARRATION: {provider: voice provider (+ Gemini line check), inr: 15, what: the narration voice and the AI check of every line}
-    CRITIC: {provider: Gemini (take critic), inr: 5, what: the AI quality check of every take}
+    CRITIC: {provider: none yet, inr: 0, what: the AI quality check of every take}  # a placeholder today: it did nothing yet asked Rs 5 on the 25 Nov run
     TAKE_SELECTION: {provider: none yet, inr: 0, what: take selection}
     AUDIO: {provider: none yet, inr: 0, what: the final audio mix}
     PACKAGING: {provider: none yet, inr: 0, what: captions and packaging}

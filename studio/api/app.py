@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 import uuid
 from contextlib import asynccontextmanager
@@ -72,12 +73,20 @@ def create_app(db: Db | None = None, settings: Settings | None = None, dream_ctx
     if ctx is None and settings.dream_routes:
         from studio.api.wiring import build_dream_context
 
-        ctx = build_dream_context(db, settings)
+        try:
+            ctx = build_dream_context(db, settings)
+        except Exception:  # noqa: BLE001 - one lane must not take the other down (owner, 25 Nov 2026)
+            logging.getLogger("studio.api").exception("The Dream Shorts lane failed to start; the video lane keeps running without it")
+            ctx = None
     vctx = video_ctx
     if vctx is None and settings.video_routes:
         from studio.api.video_wiring import build_video_context
 
-        vctx = build_video_context(db, settings, dream_ctx=ctx)
+        try:
+            vctx = build_video_context(db, settings, dream_ctx=ctx)
+        except Exception:  # noqa: BLE001 - same rule the other way round
+            logging.getLogger("studio.api").exception("The video lane failed to start; the Dream Shorts lane keeps running without it")
+            vctx = None
     jobs: list[Any] = []
     if ctx is not None and settings.jobs:
         from studio.api.jobs import dream_jobs

@@ -7,7 +7,7 @@ Ship real videos on the channel (Strange If True) with the quality bar: real cam
 
 ## Budget frame (owner to set; suggestion)
 - GPU: plan on about $50 a month (Rs 4,700); hard daily cap stays $3.50. Month 1 is lower (about $25) because most work is code.
-- API: scripts and judge calls are cents; ElevenLabs paid plan only when the first monetised or client work needs it (owner decision).
+- API: scripts and judge calls are cents; ElevenLabs is already on the owner's paid Starter plan (bought 23 Nov 2026); watch the monthly credits.
 - Fixed owner jobs (no cost to the plan): rotate pasted keys, pay the Google billing, watch the camera-scene clip.
 
 ## Owner priority (25 Nov 2026): motion and animation first, then a real video through the Python studio
@@ -20,7 +20,7 @@ Goal: one real video made by the Python studio start to finish, with no forgotte
 3. Smoke-test Short (week 1-2, about $2 / Rs 190): one 30-second Short through live Temporal, `run_shard.py` on a pod, quality gate hooked in. Fix whatever breaks. This is the highest-risk item in the project.
 4. Pod reaper (week 2): dry run on the first real pod to confirm API field names, then schedule it every 10 minutes (needs the owner's OK to register the task). Add a balance, spend and lease widget to the dashboard.
 5. Repair and quality (weeks 2-3): blue-wing repair with VACE (about $0.5); tune the gate thresholds on more clips; judge off.
-6. Script-aligned captions (WhisperX alignment) and publishing set-up (upload Private first, AI-disclosure flag, scheduled `publishAt`).
+6. Script-aligned captions (WhisperX word-level alignment, from the owner's "18 repos" reference Short, 25 Nov) and publishing set-up (upload Private first, AI-disclosure flag, scheduled `publishAt`). Moon Short v2 follows the reference style: one continuous shot, locked or slow camera, a code-composited Moon over a plate with ambient motion, small hook caption (`docs/shorts/`, in progress).
 7. Publish 2 to 3 Shorts using the proven path (about $3-6).
 Gate at 31 Dec: smoke-test Short passed; 2-3 Shorts published; no unplanned pod spend; reaper scheduled. If the smoke test failed twice, month 2 becomes stabilisation only.
 
@@ -31,7 +31,8 @@ Goal: make a Short or two per week with little manual rescue.
 3. Continuity checker as a review aid that flags drift, never decides.
 4. Tests that need the owner's yes and a figure, one at a time (about $1-3 each): SeedVR2 vs Real-ESRGAN verdict; interpolation order and GIMM-VFI; Wan 2.2 Animate for recurring characters.
 5. Publish 6 to 8 Shorts and the first long film (Act 1 and Act 2 of the game film; Act 2 needs a new figure, about $6 estimated).
-6. ElevenLabs commercial-rights check before any monetised upload.
+6. Confirm the ElevenLabs Starter plan's commercial terms on the Terms page before the first monetised upload.
+7. From the owner's reference Short (25 Nov), after the first Short ships: librosa beat detection to time cuts and moves to the music (free); Openverse as a free sound-effects source, keeping only CC0 and credited CC-BY items with a provenance row per track; Manim for diagram segments of science explainers (we already have a diagram worker); run `blender-skills` through the vetting lab before trying it with the Blender depth lane. Skipped on purpose: the web and JavaScript motion-graphics repos (reanimate, anidoodle, huashu-art-motion, mg-styles-15, motion-design-skill, motionmaxxing, cinetic, three.quarks, react-postprocessing, Tweakpane) and Remotion.
 Gate at 31 Jan: median Short needs at most one targeted fix; cost per Short under the owner's target (earlier target: under Rs 20 per Short for the cheap lane, premium film lane separate).
 
 ## Month 3: February 2027. "Quality and the channel bar"

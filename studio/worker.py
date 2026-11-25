@@ -30,6 +30,10 @@ def enabled(env: dict[str, str]) -> bool:
 def build(client, ctx, vctx=None):
     """The worker for a connected client and built contexts (separate so tests can build it on a test server). With a video context it is ONE
     worker for every Python workflow type on the queue (video, Dream, post); without, the Dream and post workflows only."""
+    if ctx is None:  # the Dream lane could not start: the video lane runs alone
+        from studio.workflow.runtime import build_worker
+
+        return build_worker(client, vctx.control, vctx.producer_acts)
     dream, dream_producer, autopilot = DreamActivities(ctx.dreams), DreamProducerActivities(ctx.dream_producer), AutopilotActivities(ctx.autopilot)
     if vctx is None:
         return build_dream_worker(client, dream, dream_producer, autopilot)
@@ -41,9 +45,19 @@ async def run(settings: Settings) -> None:
 
     client = await Client.connect(settings.temporal_address, namespace=settings.temporal_namespace)
     db = ThreadLocalPgDb(settings.dsn)
-    ctx = build_dream_context(db, settings, gateway=TemporalGateway(client, asyncio.get_running_loop()))
-    vctx = build_video_context(db, settings, dream_ctx=ctx)
-    log.info("Python worker (video, Dream, post) listening on projectv-control-py at %s", settings.temporal_address)
+    # One lane failing to build must not stop the other (owner, 25 Nov 2026): a lane that cannot start is logged and left out of the worker.
+    ctx = vctx = None
+    try:
+        ctx = build_dream_context(db, settings, gateway=TemporalGateway(client, asyncio.get_running_loop()))
+    except Exception:  # noqa: BLE001
+        log.exception("The Dream Shorts lane failed to start; the worker runs the video lane only")
+    try:
+        vctx = build_video_context(db, settings, dream_ctx=ctx)
+    except Exception:  # noqa: BLE001
+        log.exception("The video lane failed to start; the worker runs the Dream Shorts lane only")
+    if ctx is None and vctx is None:
+        raise RuntimeError("neither lane could start: see the errors above")
+    log.info("Python worker (video=%s, Dream=%s) listening on projectv-control-py at %s", vctx is not None, ctx is not None, settings.temporal_address)
     await build(client, ctx, vctx).run()
 
 

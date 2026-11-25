@@ -123,8 +123,19 @@ def register_video_routes(app: FastAPI, v: VideoContext, JavaJson: type[Response
 
     @app.get("/api/videos")
     @guarded
-    def list_videos():
-        return JavaJson(v.videos.list())
+    def list_videos(archived: bool = False):
+        return JavaJson(v.videos.list(archived))
+
+    @app.put("/api/videos/{vid}/archive")
+    @guarded
+    async def archive(vid: uuid.UUID, request: Request):
+        """Hide a video from the lists (or bring it back): {"archived": true}. Nothing is deleted; a running video is refused."""
+        b = await request.json()
+        try:
+            v.videos.set_archived(vid, bool(b.get("archived", True)))
+        except ValueError as ex:
+            raise HTTPException(status_code=409, detail=str(ex)) from ex
+        return JavaJson({"archived": bool(b.get("archived", True))})
 
     @app.get("/api/videos/{vid}")
     @guarded

@@ -1,0 +1,361 @@
+{
+  "plan_version": "2.0",
+  "title": "What an ant hears at night",
+  "channel": "Strange If True",
+  "note": "Owner brief 25 Nov 2026. Script lines and facts approved from the pipeline run 539db64a (research 8 facts); redo as a plan file so the beats are 5 s each, calm, and only tested camera presets are used.",
+  "video": {
+    "title": "What an ant hears at night",
+    "summary": "A 90-second vertical film: a night meadow seen from ground level, where sound is shown as ripples in soil, trembling dew and the shockwave of a raindrop, to show what an ant senses.",
+    "format": "long_form",
+    "durationSec": 90,
+    "aspectRatio": "9:16",
+    "outputResolution": "1080p",
+    "stylePreset": "ambient_visual",
+    "tone": "Calm, curious, slightly awe-struck; photoreal, never cute or cartoonish.",
+    "language": "en",
+    "needsResearch": false,
+    "narration": "full",
+    "voice": "Calm, warm, unhurried narrator",
+    "music": "none",
+    "soundDesign": true,
+    "visualTypes": [
+      "ai_video"
+    ],
+    "shortsCount": 0,
+    "mustInclude": [
+      "no ant, people or animals visible",
+      "ground-level night meadow",
+      "sound shown as ripples, dew tremors and shockwaves",
+      "no on-screen text"
+    ],
+    "rationale": "Nine scenes of two 5 s beats; one consistent look; slow camera moves only."
+  },
+  "generation": {
+    "width": 720,
+    "height": 1280,
+    "frames": 81,
+    "fps": 16,
+    "engine": "wan2.2 fun_camera (4-step lightx2v, fp8)",
+    "cameraPresets": [
+      "slow_push",
+      "slow_push",
+      "drift_right",
+      "drift_right",
+      "slow_push",
+      "slow_push",
+      "zoom_in",
+      "zoom_in",
+      "slow_push",
+      "slow_push",
+      "pan_right",
+      "pan_right",
+      "slow_push",
+      "slow_push",
+      "drift_right",
+      "drift_right",
+      "slow_push",
+      "slow_push"
+    ],
+    "style": "photoreal night macro, cool blue moonlight, natural motion, no text, no creatures"
+  },
+  "bank": {
+    "locations": [
+      {
+        "id": "night-meadow",
+        "description": "A real-looking meadow floor at night seen from a few centimetres above the ground: dark soil, fine grass blades and tiny pebbles, beads of dew catching cold blue moonlight, soft out-of-focus background, shallow depth of field, photographic, no people, no animals, no text."
+      }
+    ]
+  },
+  "script": [
+    {
+      "n": 1,
+      "text": "An ant has no ears. So what does it hear?",
+      "startSec": 0.4,
+      "beat": 2
+    },
+    {
+      "n": 2,
+      "text": "Its antennae feel pulses in the air. Even a distant moth can bend them, like a tiny, passing pressure.",
+      "startSec": 10.4,
+      "beat": 4
+    },
+    {
+      "n": 3,
+      "text": "Below it, the ground answers faster. A far footstep sends ripples through soil, felt through the legs.",
+      "startSec": 20.4,
+      "beat": 6
+    },
+    {
+      "n": 4,
+      "text": "Then one raindrop hits. The dirt shivers, and a shockwave spreads outward through the meadow floor.",
+      "startSec": 30.4,
+      "beat": 8
+    },
+    {
+      "n": 5,
+      "text": "At the tunnel mouth, some ants drum to warn the nest. In the dark, touch becomes a message.",
+      "startSec": 40.4,
+      "beat": 10
+    },
+    {
+      "n": 6,
+      "text": "Far away, a road becomes a slow hum in the ground. Not sound exactly — more a pressure you can feel.",
+      "startSec": 50.4,
+      "beat": 12
+    },
+    {
+      "n": 7,
+      "text": "Then comes the giant step. For a moment, the whole meadow seems to lurch like an earthquake.",
+      "startSec": 60.4,
+      "beat": 14
+    },
+    {
+      "n": 8,
+      "text": "After that, only wind in the grass. A long calm, where nothing touches, and everything listens.",
+      "startSec": 70.4,
+      "beat": 16
+    },
+    {
+      "n": 9,
+      "text": "Dawn finds the dew again. The night is loud. We just can't feel it.",
+      "startSec": 80.4,
+      "beat": 18
+    }
+  ],
+  "scenes": [
+    {
+      "lengthSec": 10,
+      "title": "Dew and silence",
+      "beats": [
+        {
+          "prompt": "Still ground-level view of dew beads on grass blades and dark soil in faint moonlight, very calm, nothing moving but a slow push toward the dew",
+          "locationIds": [
+            "night-meadow"
+          ],
+          "startSec": 0.0,
+          "durationSec": 5.0,
+          "claims": [
+            "An ant has no ears like ours."
+          ]
+        },
+        {
+          "prompt": "Same scene continuing: the dew beads tremble very slightly, the grass barely moves",
+          "locationIds": [
+            "night-meadow"
+          ],
+          "startSec": 5.0,
+          "durationSec": 5.0,
+          "continuity": "same meadow floor, same cold blue moonlight, same camera height and look as the previous beat"
+        }
+      ]
+    },
+    {
+      "lengthSec": 10,
+      "title": "Air pulses",
+      "beats": [
+        {
+          "prompt": "Ground-level view, a faint pulse of moving air bends the fine hairs on a leaf edge and shivers the dew drops, soft moonlight, no creatures",
+          "locationIds": [
+            "night-meadow"
+          ],
+          "startSec": 0.0,
+          "durationSec": 5.0,
+          "claims": [
+            "Ants sense air movement through organs in their antennae (Johnston's organ)."
+          ]
+        },
+        {
+          "prompt": "Same view: a second gentle pulse of air passes across the frame, dew drops shiver and settle",
+          "locationIds": [
+            "night-meadow"
+          ],
+          "startSec": 5.0,
+          "durationSec": 5.0,
+          "continuity": "same meadow floor, same cold blue moonlight, same camera height and look as the previous beat"
+        }
+      ]
+    },
+    {
+      "lengthSec": 10,
+      "title": "Footsteps in the soil",
+      "beats": [
+        {
+          "prompt": "Dark meadow soil at ground level, a slow ripple ring spreads through the fine soil surface and bends tiny grains, as from a distant footfall",
+          "locationIds": [
+            "night-meadow"
+          ],
+          "startSec": 0.0,
+          "durationSec": 5.0,
+          "claims": [
+            "Ants' leg organs (subgenual organs) are the main receptors for vibrations through the ground."
+          ]
+        },
+        {
+          "prompt": "Same soil: a second fainter ripple ring crosses the frame, grains tremble and dew shivers on the nearest blades",
+          "locationIds": [
+            "night-meadow"
+          ],
+          "startSec": 5.0,
+          "durationSec": 5.0,
+          "continuity": "same meadow floor, same cold blue moonlight, same camera height and look as the previous beat"
+        }
+      ]
+    },
+    {
+      "lengthSec": 10,
+      "title": "Raindrop",
+      "beats": [
+        {
+          "prompt": "Ground-level meadow at night, a single raindrop falls into the frame and lands on the dark soil, droplets leaping up",
+          "locationIds": [
+            "night-meadow"
+          ],
+          "startSec": 0.0,
+          "durationSec": 5.0,
+          "claims": [
+            "A raindrop impact sends vibrations through the soil."
+          ]
+        },
+        {
+          "prompt": "Same spot: a ring-shaped shockwave spreads outward through the soil and grass, dew beads jump and settle",
+          "locationIds": [
+            "night-meadow"
+          ],
+          "startSec": 5.0,
+          "durationSec": 5.0,
+          "continuity": "same meadow floor, same cold blue moonlight, same camera height and look as the previous beat"
+        }
+      ]
+    },
+    {
+      "lengthSec": 10,
+      "title": "The colony",
+      "beats": [
+        {
+          "prompt": "A small round tunnel opening in dark soil edged with crumbs of earth, cool moonlight, perfectly still",
+          "locationIds": [
+            "night-meadow"
+          ],
+          "startSec": 0.0,
+          "durationSec": 5.0,
+          "claims": [
+            "Some ants drum or tap to alert their nest (alarm drumming in carpenter ants)."
+          ]
+        },
+        {
+          "prompt": "Same tunnel mouth: faint tremors make the crumbs at its rim shiver in a slow rhythm",
+          "locationIds": [
+            "night-meadow"
+          ],
+          "startSec": 5.0,
+          "durationSec": 5.0,
+          "continuity": "same meadow floor, same cold blue moonlight, same camera height and look as the previous beat"
+        }
+      ]
+    },
+    {
+      "lengthSec": 10,
+      "title": "The road",
+      "beats": [
+        {
+          "prompt": "Wide calm night meadow floor, long slow pulses move through the soil, dew beads trembling in time, a faint glow of a far road on the horizon",
+          "locationIds": [
+            "night-meadow"
+          ],
+          "startSec": 0.0,
+          "durationSec": 5.0,
+          "claims": [
+            "Distant traffic can travel through the ground as low-frequency vibration."
+          ]
+        },
+        {
+          "prompt": "Same view: the slow deep pulses continue, the tips of the grass sway very slightly",
+          "locationIds": [
+            "night-meadow"
+          ],
+          "startSec": 5.0,
+          "durationSec": 5.0,
+          "continuity": "same meadow floor, same cold blue moonlight, same camera height and look as the previous beat"
+        }
+      ]
+    },
+    {
+      "lengthSec": 10,
+      "title": "The giant step",
+      "beats": [
+        {
+          "prompt": "Ground-level meadow, the whole soil surface begins to shake heavily as one enormous footstep lands out of sight, dew flying off leaves",
+          "locationIds": [
+            "night-meadow"
+          ],
+          "startSec": 0.0,
+          "durationSec": 5.0,
+          "claims": [
+            "A heavy footstep makes a large ground vibration."
+          ]
+        },
+        {
+          "prompt": "Same shake fading: the soil settles, dew falls back onto the leaves, fine dust drifts in the moonlight",
+          "locationIds": [
+            "night-meadow"
+          ],
+          "startSec": 5.0,
+          "durationSec": 5.0,
+          "continuity": "same meadow floor, same cold blue moonlight, same camera height and look as the previous beat"
+        }
+      ]
+    },
+    {
+      "lengthSec": 10,
+      "title": "Quiet",
+      "beats": [
+        {
+          "prompt": "Calm night meadow at ground level, a gentle wind moving the grass, the dew steady, soft moonlight",
+          "locationIds": [
+            "night-meadow"
+          ],
+          "startSec": 0.0,
+          "durationSec": 5.0,
+          "claims": [
+            "Wind moves grass and air; the night between events is calm."
+          ]
+        },
+        {
+          "prompt": "Same calm: the wind slowly eases and stillness returns to the meadow floor",
+          "locationIds": [
+            "night-meadow"
+          ],
+          "startSec": 5.0,
+          "durationSec": 5.0,
+          "continuity": "same meadow floor, same cold blue moonlight, same camera height and look as the previous beat"
+        }
+      ]
+    },
+    {
+      "lengthSec": 10,
+      "title": "Dawn",
+      "beats": [
+        {
+          "prompt": "First pale light on the meadow floor, dew glittering, the sky turning faint blue and pink above the horizon",
+          "locationIds": [
+            "night-meadow"
+          ],
+          "startSec": 0.0,
+          "durationSec": 5.0,
+          "claims": [
+            "The night is full of vibration we cannot feel."
+          ]
+        },
+        {
+          "prompt": "Same view as the light grows, the dew sparkling, the meadow calm and still",
+          "locationIds": [
+            "night-meadow"
+          ],
+          "startSec": 5.0,
+          "durationSec": 5.0,
+          "continuity": "same meadow floor, same cold blue moonlight, same camera height and look as the previous beat"
+        }
+      ]
+    }
+  ]
+}

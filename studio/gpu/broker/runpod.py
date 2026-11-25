@@ -136,7 +136,10 @@ class RunPodProvider(GpuProvider):
         if not req.name.startswith("projectv-"):
             raise ValueError("pod name must carry the studio prefix so the watchdog can see it")
         resp = self._http.post(f"{self._url}/pods", headers=self._auth(), json=create_body(req))
-        resp.raise_for_status()
+        if resp.status_code >= 400:
+            # keep the exception type, but say WHY RunPod refused (the plain "400 Bad Request" hid it on 25 Nov 2026)
+            body = " ".join((resp.text or "").split())[:300]
+            raise httpx.HTTPStatusError(f"RunPod refused the pod ({resp.status_code}): {body or 'no reason given'}", request=resp.request, response=resp)
         r = resp.json()
         if not isinstance(r, dict) or r.get("id") is None:
             raise RuntimeError("RunPod create pod returned no id")

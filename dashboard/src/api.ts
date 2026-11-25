@@ -239,6 +239,7 @@ export const api = {
   validatePlan: (plan: unknown) => call<PlanCheck>('POST', '/plans/validate', { plan }),
   createVideoFromPlan: (plan: unknown, defaultMode: Mode, modes: Record<string, Mode>, reviewMinutes: number) =>
     call<{ id: string }>('POST', '/videos', { plan, defaultMode, modes, reviewMinutes }),
+  archiveVideo: (id: string, archived = true) => call<{ archived: boolean }>('PUT', `/videos/${id}/archive`, { archived }),
   setReviewMinutes: (id: string, minutes: number) => call<void>('PUT', `/videos/${id}/review-minutes`, { minutes }),
   approve: (id: string, stage: string, notes?: string) =>
     call<void>('POST', `/videos/${id}/stages/${stage}/approve`, { notes: notes ?? null }),

@@ -250,3 +250,13 @@ def test_the_creative_directors_shot_plan_review_is_skipped_for_a_plan_video(scr
             raise AssertionError("no LLM call for an imported plan")
 
     assert CreativeDirector(make_deps(scratch_db), Boom(), "m").review_shot_plan(video, 1) == []
+
+
+def test_a_scene_that_changes_camera_move_inside_it_gets_a_warning():
+    from studio.planner import imported
+
+    doc = {"generation": {"cameraPresets": ["slow_push", "slow_push", "pan_right", "drift_right"]},
+           "scenes": [{"beats": [{}, {}]}, {"beats": [{}, {}]}]}
+    w = imported.camera_warnings(doc)
+    assert len(w) == 1 and w[0].startswith("scene 2 changes camera move") and "pan_right then drift_right" in w[0]
+    assert imported.camera_warnings({"scenes": [{"beats": [{}]}]}) == []

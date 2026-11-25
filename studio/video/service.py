@@ -178,7 +178,7 @@ class VideoService:
 
     # ------------------------------------------------------------------------------------------------ reads
 
-    def list(self) -> list[dict[str, Any]]:
+    def list(self, include_archived: bool = False) -> list[dict[str, Any]]:
         return self.db.rows(
             """
             SELECT v.id, v.title, v.prompt, v.status, v.current_stage, v.spent_inr, v.created_at, v.updated_at, v.master_asset_id,
@@ -187,8 +187,8 @@ class VideoService:
                    (SELECT count(*) FROM shot s JOIN scene sc ON sc.id = s.scene_id WHERE sc.video_id = v.id) AS shots,
                    (SELECT r.summary FROM stage_run r WHERE r.video_id = v.id AND r.stage = v.current_stage
                     ORDER BY r.attempt DESC LIMIT 1) AS current_summary
-            FROM video v ORDER BY v.created_at DESC
-            """)
+            FROM video v WHERE %(all)s OR v.archived_at IS NULL ORDER BY v.created_at DESC
+            """, {"all": bool(include_archived)})
 
     def detail(self, vid: uuid.UUID) -> dict[str, Any]:
         video = self._video(
@@ -242,6 +242,14 @@ class VideoService:
             raise RuntimeError(f"{stage.label} has no stored result to resume from; use Retry to redo it")
         self._signal(vid, "resume_stage", stage)
         self._record_decision(vid, stage, "resume", None)
+
+    def set_archived(self, vid: uuid.UUID, archived: bool) -> None:
+        """Hide a video from the lists (or bring it back). Nothing is deleted. A video that is running cannot be archived."""
+        v = self._video(vid, "id, status")
+        if archived and v["status"] == "RUNNING":
+            raise ValueError("this video is running: stop or finish it before archiving")
+        self.db.execute("UPDATE video SET archived_at = CASE WHEN %(a)s THEN now() ELSE NULL END, updated_at = now() WHERE id = %(id)s",
+                        {"a": bool(archived), "id": vid})
 
     def set_approve_paid_first(self, vid: uuid.UUID, on: bool) -> None:
         """Ask before every paid stage of this video runs (a paid stage in Manual mode always asks first, whatever this says)."""

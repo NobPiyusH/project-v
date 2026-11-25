@@ -85,6 +85,19 @@ def test_create_sends_prefixed_name_wrapped_cmd_and_returns_proxy_endpoint():
         p.create(CreateRequest("other-pod", "img", 80, ["x"], {}, 8000, None, q))
 
 
+def test_a_refused_create_says_why():
+    class Refuse(Fake):
+        def handler(self, request):
+            if request.method == "POST":
+                return httpx.Response(400, json={"error": "no instances currently available"})
+            return super().handler(request)
+
+    p = Refuse().provider()
+    q = Quote("runpod", True, "HIGH", "NVIDIA GeForce RTX 4090|SECURE", 0.89, "")
+    with pytest.raises(httpx.HTTPStatusError, match="no instances currently available"):
+        p.create(CreateRequest("projectv-runpod-abc", "img", 80, ["x"], {}, 8000, None, q))
+
+
 def test_status_maps_running_and_gone():
     p = Fake().provider()
     assert p.status("pod123").state == State.RUNNING and p.status("gone").state == State.GONE

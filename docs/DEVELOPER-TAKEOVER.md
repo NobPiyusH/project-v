@@ -103,7 +103,7 @@ Proven: Wan 2.2 plus LightX2V on 4090 pods; Fun Camera at 720p; shot-level re-cu
 ## 11. Decisions already made (do not reopen without a reason)
 - Wan 2.2 stays the main video model. Fp8 accepted. Last-frame chaining preferred over first-last.
 - FLUX.2 klein 4B for keyframes (never the 9B). Scripts: OpenAI gpt-5.4-mini won the A/B.
-- Music: Lyria preferred by ear; ACE-Step off. Chatterbox voice retired. ElevenLabs: free plan is non-commercial, a paid plan is needed before publishing.
+- Music: Lyria preferred by ear; ACE-Step off. Chatterbox voice retired. ElevenLabs: the owner's plan is paid (Starter, bought 23 Nov 2026); confirm the commercial terms before the first publish.
 - MiniMax H3: licence excludes the US, EU, UK and South Korea (use and displaying outputs); open weights only 768p: ignore for this channel.
 - Ignore list and watch list: `reports/AI video studio landscape.md` (prioritised adoption plan).
 - Dependency policy: vet third-party tools with `tools/vetting` before installing; study premium software as a black box only (no cracking, no extraction).

@@ -177,7 +177,24 @@ def validate_doc(doc: dict[str, Any]) -> dict[str, Any]:
         return {"ok": False, "problems": str(e).split("; "), "warnings": [], "narration": None}
     nc = imp.narrationCheck
     problems = [] if nc is None else list(nc["problems"])
-    return {"ok": not problems, "problems": problems, "warnings": [] if nc is None else list(nc["warnings"]), "narration": nc}
+    warnings = ([] if nc is None else list(nc["warnings"])) + camera_warnings(doc)
+    return {"ok": not problems, "problems": problems, "warnings": warnings, "narration": nc}
+
+
+def camera_warnings(doc: dict[str, Any]) -> list[str]:
+    """A scene whose beats use different camera moves jerks every beat (left, straight, left on the ant film, 25 Nov 2026). One move per scene
+    (or a chained clip that continues it) reads as one smooth shot. A warning, not an error: the owner may want the change."""
+    cams = (doc.get("generation") or {}).get("cameraPresets")
+    if not isinstance(cams, list):
+        return []
+    out, i = [], 0
+    for n, sc in enumerate(doc.get("scenes") or [], start=1):
+        k = len(sc.get("beats") or [])
+        used = cams[i:i + k]
+        i += k
+        if len(set(used)) > 1:
+            out.append(f"scene {n} changes camera move inside the scene ({' then '.join(map(str, used))}): it will jerk at the cut; use one move for the whole scene")
+    return out
 
 
 def initial_plan_json(doc: dict[str, Any]) -> str:
