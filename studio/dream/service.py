@@ -438,7 +438,7 @@ class DreamService:
             if jobs:
                 inr = self.pricing.zimage_inr(len(jobs))
                 self.route(dream_id, "DREAM_PICTURES", "image.dream", ZIMAGE, inr)
-                self.budget.require_gpu(inr, f"{len(jobs)} Dream Short pictures")
+                self.budget.require_gpu(inr, f"{len(jobs)} Dream Short pictures", dream_id)
             return KeyframeRequest(storage_id(dream_id), None, self.zimage_app, self.zimage_class, jobs)
 
     def save_pictures(self, dream_id: uuid.UUID, req: KeyframeRequest, r: KeyframeResult) -> str:
@@ -537,7 +537,7 @@ class DreamService:
             gpu_sec = self.gpu_seconds(jobs, d.get("quality"))
             inr = self.pricing.modal_gpu_inr("H100", gpu_sec)
             self.route(dream_id, "DREAM_CLIPS", "video.i2v.dream", WAN, inr)
-            self.budget.require_gpu(inr, f"{len(jobs)} Dream Short clips")
+            self.budget.require_gpu(inr, f"{len(jobs)} Dream Short clips", dream_id)
             # One GPU, clips in turn: the ~2 min start-up + model load is paid once for the whole Short. When the AI Producer runs this
             # Short by itself, the GPU stays warm a little after each batch so its redo skips a start-up.
             return ClipRequest(storage_id(dream_id), self.wan_app, self.wan_class, self.public_url, jobs, 1, gpu_sec, _hu(inr, 2), "wan", None,
@@ -926,7 +926,7 @@ class DreamService:
 
     def route(self, dream_id: uuid.UUID, stage: str, capability: str, provider: str, inr: Decimal) -> None:
         """The router's choice, logged and linked to the Short. Raises (deferral) when nothing can run it."""
-        choice = self.router.choose(None, stage, capability, [Candidate(provider, inr)], provider, True)
+        choice = self.router.choose(None, stage, capability, [Candidate(provider, inr)], provider, True, scope_id=dream_id)
         self.tag("routing_decision", choice.decision_id, dream_id)
 
     def tag(self, table: str, row_id: uuid.UUID | None, dream_id: uuid.UUID) -> None:

@@ -10,6 +10,7 @@ import functools
 import inspect
 import json
 import uuid
+from decimal import Decimal
 from typing import Annotated, Any
 
 from fastapi import FastAPI, HTTPException, Query, Request
@@ -17,6 +18,7 @@ from fastapi.responses import RedirectResponse, Response
 
 from studio.api import plan_preview
 from studio.api.video_wiring import VideoContext
+from studio.ledger.cost_view import CostView
 from studio.media.wire import to_json
 from studio.planner.imported import read_plan_file, title_of
 from studio.video.service import REDO_WITH, CreateVideo
@@ -91,10 +93,13 @@ def register_video_routes(app: FastAPI, v: VideoContext, JavaJson: type[Response
             prompt = title_of(plan_doc)  # the plan carries the idea; the prompt is only its label
         if prompt is None or not str(prompt).strip() or len(prompt) > 4000:
             raise HTTPException(status_code=400, detail="prompt must not be blank and at most 4000 characters")
+        budget = b.get("budgetInr")
+        if budget is not None and (isinstance(budget, bool) or not isinstance(budget, (int, float)) or budget < 0):
+            raise HTTPException(status_code=400, detail="budgetInr must be a number of rupees, 0 or more (0 = no cap); leave it out for the default")
         modes = None if b.get("modes") is None else {_stage(k): StageMode.parse(m) for k, m in b["modes"].items()}
         try:
             vid = v.videos.create(CreateVideo(prompt, None if b.get("defaultMode") is None else StageMode.parse(b["defaultMode"]), modes,
-                                              b.get("reviewMinutes"), plan_doc))
+                                              b.get("reviewMinutes"), budget, plan_doc, bool(b.get("autoRedoPaid", False))))
         except ValueError as e:  # an invalid plan file
             raise HTTPException(status_code=400, detail=f"plan rejected: {e}") from e
         return JavaJson({"id": vid}, status_code=201)
@@ -125,9 +130,28 @@ def register_video_routes(app: FastAPI, v: VideoContext, JavaJson: type[Response
     def detail(vid: uuid.UUID):
         d = dict(v.videos.detail(vid))
         d["costs"] = v.ledger.for_video(vid)
+        d["budget"] = v.budget.video_budget(vid)  # cap, spent and what is left of this video's own spend cap
         d["inspections"] = v.inspector.reports(vid)
         d["creativeReviews"] = v.creative.reports(vid)
         return JavaJson(d)
+
+    @app.get("/api/videos/{vid}/cost")
+    @guarded
+    def cost(vid: uuid.UUID):
+        """Read-only: cost per stage, provider and pod, total vs cap, cost per second of the finished video."""
+        return JavaJson(CostView(v.db, v.budget).for_video(vid))
+
+    @app.put("/api/videos/{vid}/budget")
+    @guarded
+    async def set_budget(vid: uuid.UUID, request: Request):
+        """Raise (or lower) one video's spend cap, e.g. to let a stage held by the cap go on: {"budgetInr": 300}; null = the default."""
+        b = await body(request)
+        n = b.get("budgetInr")
+        if n is not None and (isinstance(n, bool) or not isinstance(n, (int, float)) or n < 0):
+            raise HTTPException(status_code=400, detail="budgetInr must be a number of rupees, 0 or more (0 = no cap), or null for the default")
+        if not v.budget.set_video_budget(vid, None if n is None else Decimal(str(n))):
+            raise LookupError(f"video {vid}: not found")
+        return JavaJson(v.budget.video_budget(vid))
 
     @app.post("/api/videos/{vid}/stages/{stage}/approve")
     @guarded
@@ -147,6 +171,18 @@ def register_video_routes(app: FastAPI, v: VideoContext, JavaJson: type[Response
     @guarded
     def rerun(vid: uuid.UUID, stage: str):
         return JavaJson({"stages": [s.name for s in v.videos.rerun(vid, _stage(stage))]})
+
+    @app.post("/api/videos/{vid}/stages/{stage}/resume")
+    @guarded
+    def resume_stage(vid: uuid.UUID, stage: str):
+        v.videos.resume_stage(vid, _stage(stage))
+        return ok()
+
+    @app.put("/api/videos/{vid}/auto-redo-paid")
+    @guarded
+    async def set_auto_redo_paid(vid: uuid.UUID, request: Request):
+        v.videos.set_auto_redo_paid(vid, bool((await body(request)).get("enabled")))
+        return ok()
 
     @app.put("/api/videos/{vid}/modes/{stage}")
     @guarded

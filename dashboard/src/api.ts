@@ -87,6 +87,7 @@ export interface VideoDetail extends VideoSummary {
   review_minutes: number
   stageRuns: StageRun[]
   costs: CostRow[]
+  budget?: { capInr: number | null; spentInr: number; remainingInr: number | null }  // this video's own spend cap
   inspections: Inspection[]
   master_asset_id: string | null
   master_package_asset_id: string | null

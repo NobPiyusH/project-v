@@ -37,6 +37,7 @@ from studio.media.wire import to_json
 from studio.production import timing as nt
 from studio.production.records import AudioVersion, StoredLine, StoredScript
 from studio.production.support import StageSupport, round3, with_lines
+from studio.provider.caps import check_provider_budget
 from studio.workflow.types import StageResult
 
 
@@ -53,7 +54,7 @@ class ResearchStage(StageSupport):
 
     def research_request(self, video_id: uuid.UUID, owner_notes: str | None) -> ResearchRequest:
         plan = self.plan(video_id)
-        self.d.budget.require(Decimal(3), "RESEARCH")
+        self.d.budget.require(Decimal(3), "RESEARCH", video_id)
         return ResearchRequest(self.prompt(video_id), plan.summary, plan.mustInclude, plan.language,
                                max(8, min(20, plan.durationSec // 15)), self.d.text_model, owner_notes)
 
@@ -129,7 +130,8 @@ class MusicStage(StageSupport):
         script = self.latest_script(video_id)
         target = float(plan.durationSec)
         max_segments = int(min(6, math.ceil(target / 55.0) + 1))
-        self.d.budget.require(self.d.pricing.music_inr(max_segments), f"MUSIC ({max_segments} Lyria generations at most)")
+        self.d.budget.require(self.d.pricing.music_inr(max_segments), f"MUSIC ({max_segments} Lyria generations at most)", video_id)
+        check_provider_budget("gemini_lyria", self.d.pricing.music_inr(max_segments), stage="MUSIC", scope_id=video_id)  # Lyria is not routed: its own cap
         brief = script.music_brief if script is not None and script.music_brief is not None else f"Cinematic score matching the tone: {plan.tone}"
         notes = "" if owner_notes is None or not owner_notes.strip() else "Owner's notes: " + owner_notes
         prompt = (f"Instrumental film score, no vocals, no lyrics. About {jround(target)} seconds long.\n"
@@ -166,7 +168,7 @@ class VoiceStage(StageSupport):
         lines = [NarrationLine(ln.index, ln.text, ln.delivery) for ln in s.lines if ln.spoken]
         # ~25 audio tokens per second of speech at ~2.3 words per second.
         words = sum(_words(ln.text) for ln in lines)
-        self.d.budget.require(self.d.pricing.tts_inr(Usage(words * 2, jround(words / 2.3 * 25 * 1.5), 0, 0)), "NARRATION")
+        self.d.budget.require(self.d.pricing.tts_inr(Usage(words * 2, jround(words / 2.3 * 25 * 1.5), 0, 0)), "NARRATION", video_id)
         # Short "in a <style> voice" phrase: long instructions get read aloud by the TTS model (owner feedback).
         raw = re.sub(r"[.\s]+$", "", (s.voice_style or "").strip())
         short_style = " ".join(re.split(r"\s+", raw)[:8]).lower()

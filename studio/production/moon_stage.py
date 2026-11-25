@@ -48,6 +48,8 @@ class MoonLayerStage(StageSupport):
         if not rows:
             raise RuntimeError("There is no master video yet: run Assembly first, then the Moon layer.")
         m = rows[0]
+        if m["clip_kind"] == "interpolated" and m["derived_from"] is not None:  # redo of the Moon layer after INTERPOLATE: start from what was interpolated
+            m = self.db.rows("SELECT id, uri_hot, clip_kind, derived_from FROM asset WHERE id = %(a)s", {"a": m["derived_from"]})[0]
         plate_id, plate_uri = m["id"], m["uri_hot"]
         if m["clip_kind"] == KIND and m["derived_from"] is not None:  # redo: composite over the original plate, not over the last composite
             plate_id, plate_uri = m["derived_from"], self.d.assets.uri_of(m["derived_from"])

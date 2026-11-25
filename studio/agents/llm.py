@@ -96,7 +96,7 @@ class Llm:
         use_preferred = bool(preferred and preferred.strip()) and (not handles_claude(preferred) or self._claude.configured())
         models = model_fallback.models(f"{preferred},{self._model}" if use_preferred else self._model, self._fallbacks)
         try:
-            self._budget.require(Decimal(1), purpose)  # a text call costs well under ₹1; refuse only when the cap is hit
+            self._budget.require(Decimal(1), purpose, video_id)  # a text call costs well under ₹1; refuse only when the cap is hit
         except BudgetExceededError as e:
             # Owner (19 Nov 2026): a capped text call may go to the AICredits fallback (its own cap), if enabled.
             fb = self._aicredits.retry(video_id, purpose, models, e, system, user, tp)

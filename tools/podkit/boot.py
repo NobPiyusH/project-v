@@ -11,8 +11,15 @@ from __future__ import annotations
 
 import base64
 import json
+from pathlib import Path
 
-ESRGAN_URL = "https://huggingface.co/lllyasviel/Annotators/resolve/main/RealESRGAN_x4plus.pth"
+from . import groups
+
+# Pinned (25 Nov 2026): the commit of lllyasviel/Annotators in groups.REVISIONS, not /resolve/main/ (a floating file).
+ESRGAN_URL = f"https://huggingface.co/{groups.ESRGAN[0]}/resolve/{groups.REVISIONS[groups.ESRGAN[0]]}/{groups.ESRGAN[1]}"
+ESRGAN_SHA256 = groups.SHA256[groups.ESRGAN[1]]
+COMFY_TAG = "v0.45.0"  # the same tag workers/pod/server.py pins; the boot fetched the floating master branch before
+COMFY_URL = f"https://github.com/comfyanonymous/ComfyUI/archive/refs/tags/{COMFY_TAG}.tar.gz"
 READY_MARKERS = ("BOOT COMPLETE",)
 BAD_MARKERS = ("CUDA False", "FAILED")
 
@@ -28,12 +35,19 @@ http.server.ThreadingHTTPServer(("0.0.0.0", 8189), Q).serve_forever()
 DL = """
 import json, os, shutil, time, threading
 from huggingface_hub import hf_hub_download
-files = json.load(open("/workspace/files.json")); root = "/workspace/ComfyUI-master/models"
+import sys; sys.path.insert(0, "/workspace"); import verify
+files = json.load(open("/workspace/files.json")); pins = json.load(open("/workspace/pins.json")); root = "/workspace/ComfyUI-master/models"
 def one(name, v):
-    repo, path, sub, size = v; t = time.time()
+    repo, path, sub, size = v; t = time.time(); pin = pins.get(name)
+    if not pin: print(f"UNPINNED {name}: downloading without a sha256 check", flush=True)
     for a in (1, 2, 3):
         try:
-            p = hf_hub_download(repo, path, local_dir="/workspace/dl", token=os.environ.get("HF_TOKEN"))
+            p = hf_hub_download(repo, path, local_dir="/workspace/dl", token=os.environ.get("HF_TOKEN"), revision=pin["revision"] if pin else None)
+            if pin:
+                ok, why = verify.verify_file(p, pin["sha256"], size)
+                if not ok:
+                    os.remove(p); print(f"SHA MISMATCH {name}: {why}", flush=True); raise ValueError("sha256 mismatch")
+                print(f"SHA OK {name}", flush=True)
             os.makedirs(f"{root}/{sub}", exist_ok=True); shutil.move(p, f"{root}/{sub}/{name}")
             print(f"DOWNLOADED {name} in {time.time()-t:.0f}s", flush=True); return
         except Exception as e:
@@ -49,7 +63,8 @@ def boot_script(esrgan: bool = True) -> str:
     esr = (
         (
             f"mkdir -p models/upscale_models && wget -q -O models/upscale_models/RealESRGAN_x4plus.pth {ESRGAN_URL} "
-            '&& echo "ESRGAN DONE"\n'
+            f'&& echo "{ESRGAN_SHA256}  models/upscale_models/RealESRGAN_x4plus.pth" | sha256sum -c - '
+            '&& echo "ESRGAN DONE" || echo "FAILED ESRGAN sha256"\n'
         )
         if esrgan
         else ""
@@ -59,12 +74,12 @@ mkdir -p /workspace/logs && echo "$SRV_B64" | base64 -d > /workspace/srv.py && (
 exec > >(tee -a /workspace/logs/boot.log) 2>&1
 date; nvidia-smi --query-gpu=name,memory.total --format=csv,noheader; python3 -c "import torch;print('CUDA',torch.cuda.is_available())"
 cd /workspace; T0=$(date +%s)
-echo "$FILES_B64" | base64 -d > files.json; echo "$DL_B64" | base64 -d > dl.py
+echo "$FILES_B64" | base64 -d > files.json; echo "$PINS_B64" | base64 -d > pins.json; echo "$DL_B64" | base64 -d > dl.py; echo "$VERIFY_B64" | base64 -d > verify.py
 export HF_HUB_ENABLE_HF_TRANSFER=1 HF_HUB_DISABLE_XET=1
 pip install -q hf_transfer "huggingface_hub>=0.34" 2>&1 | tail -1
 (python dl.py 2>&1) &
 DLPID=$!
-curl -sL https://github.com/comfyanonymous/ComfyUI/archive/refs/heads/master.tar.gz | tar xz
+curl -sL "$COMFY_URL" | tar xz && mv ComfyUI-* ComfyUI-master
 cd ComfyUI-master
 grep -viE '^(torch|torchvision|torchaudio)([=<>~ ]|$)' requirements.txt > /workspace/req.txt
 pip install -q -r /workspace/req.txt 2>&1 | tail -2
@@ -88,6 +103,9 @@ def pod_env(hf_token: str, kj_url: str, files: dict) -> list[dict]:
     return [
         {"key": "HF_TOKEN", "value": hf_token},
         {"key": "KJ_URL", "value": kj_url},
+        {"key": "COMFY_URL", "value": COMFY_URL},
+        {"key": "PINS_B64", "value": b64(json.dumps(groups.pins_for(files)))},
+        {"key": "VERIFY_B64", "value": b64((Path(__file__).parent / "verify.py").read_text(encoding="utf-8"))},
         {"key": "SRV_B64", "value": b64(SRV)},
         {"key": "FILES_B64", "value": b64(json.dumps(files))},
         {"key": "DL_B64", "value": b64(DL)},

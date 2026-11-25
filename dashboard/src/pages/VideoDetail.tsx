@@ -140,6 +140,9 @@ export function VideoDetail({ id, stages }: { id: string; stages: StageInfo[] })
           )}
           <div className="card small" style={{ display: 'grid', gap: 6 }}>
             <div className="row"><span className="muted">Spent</span><span className="grow" /><strong>₹{Number(video.spent_inr).toFixed(2)}</strong></div>
+            {video.budget?.capInr != null && (
+              <div className="row"><span className="muted">Video cap</span><span className="grow" /><strong>₹{Number(video.budget.remainingInr).toFixed(0)} left of ₹{Number(video.budget.capInr).toFixed(0)}</strong></div>
+            )}
             {p && <div className="row"><span className="muted">Shots</span><span className="grow" /><strong>{p.shots.length}</strong></div>}
             <div className="row"><span className="muted">Started</span><span className="grow" />{fmtTime(video.created_at)}</div>
             {!finished && (

@@ -179,7 +179,7 @@ class FakeBudget:
     def can_spend_aicredits(self, x):
         return self.can
 
-    def require(self, x, what):
+    def require(self, x, what, video_id=None):
         if self.gemini_blocked:
             raise BudgetExceededError("Monthly Gemini cap of ₹1000 would be exceeded by " + what)
 

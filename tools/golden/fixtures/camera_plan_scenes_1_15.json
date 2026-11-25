@@ -1,0 +1,124 @@
+{
+ "1": {
+  "filter": "scale=w='trunc(1080*(1+0.16*n/226)/2)*2':h='trunc(1920*(1+0.16*n/226)/2)*2':eval=frame:flags=bilinear,crop=1080:1920:x='(in_w-1080)/2+60*(n/226-0.5)+14*sin(n*0.37)':y='(in_h-1920)/2+0*(0.5-n/226)+14*sin(n*0.29+1)',format=yuv420p",
+  "move": {
+   "dx": 60,
+   "dy": 0,
+   "zoom": 0.16
+  }
+ },
+ "10": {
+  "filter": "scale=w='trunc(1080*(1+0.16*n/226)/2)*2':h='trunc(1920*(1+0.16*n/226)/2)*2':eval=frame:flags=bilinear,crop=1080:1920:x='(in_w-1080)/2+-60*(n/226-0.5)+14*sin(n*0.37)':y='(in_h-1920)/2+0*(0.5-n/226)+14*sin(n*0.29+1)',format=yuv420p",
+  "move": {
+   "dx": -60,
+   "dy": 0,
+   "zoom": 0.16
+  }
+ },
+ "11": {
+  "filter": "scale=w='trunc(1080*(1+0.16*n/226)/2)*2':h='trunc(1920*(1+0.16*n/226)/2)*2':eval=frame:flags=bilinear,crop=1080:1920:x='(in_w-1080)/2+60*(n/226-0.5)+14*sin(n*0.37)':y='(in_h-1920)/2+0*(0.5-n/226)+14*sin(n*0.29+1)',format=yuv420p",
+  "move": {
+   "dx": 60,
+   "dy": 0,
+   "zoom": 0.16
+  }
+ },
+ "12": {
+  "filter": "scale=w='trunc(1080*(1+0.16*n/226)/2)*2':h='trunc(1920*(1+0.16*n/226)/2)*2':eval=frame:flags=bilinear,crop=1080:1920:x='(in_w-1080)/2+0*(n/226-0.5)+14*sin(n*0.37)':y='(in_h-1920)/2+160*(0.5-n/226)+14*sin(n*0.29+1)',format=yuv420p",
+  "move": {
+   "dx": 0,
+   "dy": 160,
+   "zoom": 0.16
+  }
+ },
+ "13": {
+  "filter": "scale=w='trunc(1080*(1+0.16*n/226)/2)*2':h='trunc(1920*(1+0.16*n/226)/2)*2':eval=frame:flags=bilinear,crop=1080:1920:x='(in_w-1080)/2+-60*(n/226-0.5)+14*sin(n*0.37)':y='(in_h-1920)/2+0*(0.5-n/226)+14*sin(n*0.29+1)',format=yuv420p",
+  "move": {
+   "dx": -60,
+   "dy": 0,
+   "zoom": 0.16
+  }
+ },
+ "14": {
+  "filter": "scale=w='trunc(1080*(1+0.16*n/226)/2)*2':h='trunc(1920*(1+0.16*n/226)/2)*2':eval=frame:flags=bilinear,crop=1080:1920:x='(in_w-1080)/2+60*(n/226-0.5)+14*sin(n*0.37)':y='(in_h-1920)/2+0*(0.5-n/226)+14*sin(n*0.29+1)',format=yuv420p",
+  "move": {
+   "dx": 60,
+   "dy": 0,
+   "zoom": 0.16
+  }
+ },
+ "15": {
+  "filter": "scale=w='trunc(1080*(1+0.16*n/226)/2)*2':h='trunc(1920*(1+0.16*n/226)/2)*2':eval=frame:flags=bilinear,crop=1080:1920:x='(in_w-1080)/2+0*(n/226-0.5)+14*sin(n*0.37)':y='(in_h-1920)/2+160*(0.5-n/226)+14*sin(n*0.29+1)',format=yuv420p",
+  "move": {
+   "dx": 0,
+   "dy": 160,
+   "zoom": 0.16
+  }
+ },
+ "2": {
+  "filter": "scale=w='trunc(1080*(1+0.16*n/226)/2)*2':h='trunc(1920*(1+0.16*n/226)/2)*2':eval=frame:flags=bilinear,crop=1080:1920:x='(in_w-1080)/2+-60*(n/226-0.5)+14*sin(n*0.37)':y='(in_h-1920)/2+0*(0.5-n/226)+14*sin(n*0.29+1)',format=yuv420p",
+  "move": {
+   "dx": -60,
+   "dy": 0,
+   "zoom": 0.16
+  }
+ },
+ "3": {
+  "filter": "scale=w='trunc(1080*(1+0.16*n/226)/2)*2':h='trunc(1920*(1+0.16*n/226)/2)*2':eval=frame:flags=bilinear,crop=1080:1920:x='(in_w-1080)/2+0*(n/226-0.5)+14*sin(n*0.37)':y='(in_h-1920)/2+0*(0.5-n/226)+14*sin(n*0.29+1)',format=yuv420p",
+  "move": {
+   "dx": 0,
+   "dy": 0,
+   "zoom": 0.16
+  }
+ },
+ "4": {
+  "filter": "scale=w='trunc(1080*(1+0.16*n/226)/2)*2':h='trunc(1920*(1+0.16*n/226)/2)*2':eval=frame:flags=bilinear,crop=1080:1920:x='(in_w-1080)/2+0*(n/226-0.5)+14*sin(n*0.37)':y='(in_h-1920)/2+160*(0.5-n/226)+14*sin(n*0.29+1)',format=yuv420p",
+  "move": {
+   "dx": 0,
+   "dy": 160,
+   "zoom": 0.16
+  }
+ },
+ "5": {
+  "filter": "scale=w='trunc(1080*(1+0.16*n/226)/2)*2':h='trunc(1920*(1+0.16*n/226)/2)*2':eval=frame:flags=bilinear,crop=1080:1920:x='(in_w-1080)/2+60*(n/226-0.5)+14*sin(n*0.37)':y='(in_h-1920)/2+0*(0.5-n/226)+14*sin(n*0.29+1)',format=yuv420p",
+  "move": {
+   "dx": 60,
+   "dy": 0,
+   "zoom": 0.16
+  }
+ },
+ "6": {
+  "filter": "scale=w='trunc(1080*(1+0.16*n/226)/2)*2':h='trunc(1920*(1+0.16*n/226)/2)*2':eval=frame:flags=bilinear,crop=1080:1920:x='(in_w-1080)/2+0*(n/226-0.5)+14*sin(n*0.37)':y='(in_h-1920)/2+160*(0.5-n/226)+14*sin(n*0.29+1)',format=yuv420p",
+  "move": {
+   "dx": 0,
+   "dy": 160,
+   "zoom": 0.16
+  }
+ },
+ "7": {
+  "filter": "scale=w='trunc(1080*(1+0.16*n/226)/2)*2':h='trunc(1920*(1+0.16*n/226)/2)*2':eval=frame:flags=bilinear,crop=1080:1920:x='(in_w-1080)/2+-60*(n/226-0.5)+14*sin(n*0.37)':y='(in_h-1920)/2+0*(0.5-n/226)+14*sin(n*0.29+1)',format=yuv420p",
+  "move": {
+   "dx": -60,
+   "dy": 0,
+   "zoom": 0.16
+  }
+ },
+ "8": {
+  "filter": "scale=w='trunc(1080*(1+0.16*n/226)/2)*2':h='trunc(1920*(1+0.16*n/226)/2)*2':eval=frame:flags=bilinear,crop=1080:1920:x='(in_w-1080)/2+60*(n/226-0.5)+14*sin(n*0.37)':y='(in_h-1920)/2+0*(0.5-n/226)+14*sin(n*0.29+1)',format=yuv420p",
+  "move": {
+   "dx": 60,
+   "dy": 0,
+   "zoom": 0.16
+  }
+ },
+ "9": {
+  "filter": "scale=w='trunc(1080*(1+0.16*n/226)/2)*2':h='trunc(1920*(1+0.16*n/226)/2)*2':eval=frame:flags=bilinear,crop=1080:1920:x='(in_w-1080)/2+0*(n/226-0.5)+14*sin(n*0.37)':y='(in_h-1920)/2+160*(0.5-n/226)+14*sin(n*0.29+1)',format=yuv420p",
+  "move": {
+   "dx": 0,
+   "dy": 160,
+   "zoom": 0.16
+  }
+ },
+ "join": "[0:v]scale=1080:1920:flags=lanczos,setsar=1[a];[1:v]scale=1080:1920:flags=lanczos,setsar=1[b];[2:v]scale=1080:1920:flags=lanczos,setsar=1[c];[a][b]xfade=transition=fade:duration=0.5:offset=4.5625[ab];[ab][c]xfade=transition=fade:duration=0.5:offset=9.1250",
+ "rife_target": 545
+}

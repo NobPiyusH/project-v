@@ -72,7 +72,9 @@ def test_the_read_routes_match_the_java_shapes(a):
     shot, img, clip = with_shots(db, video)
     lst = a.c.get("/api/videos").json()
     shape_ok("/api/videos", [r for r in lst if r["id"] == str(video)])
-    shape_ok("/api/videos/{id}", a.c.get(f"/api/videos/{video}").json())
+    detail = a.c.get(f"/api/videos/{video}").json()
+    detail.pop("budget", None)  # additive: the per-video cap, not in the recorded Java shape
+    shape_ok("/api/videos/{id}", detail)
     prod = a.c.get(f"/api/videos/{video}/production").json()
     shape_ok("/api/videos/{id}/production", prod)
     assert prod["shots"][0]["id"] == str(shot)
@@ -161,3 +163,18 @@ def test_the_ai_producer_settings_and_rules_routes(a):
     assert c.put(f"/api/producer/rules/{rid}", json={"enabled": False}).status_code == 200
     assert c.delete(f"/api/producer/rules/{rid}").status_code == 200
     assert c.put("/api/producer/settings", json={"trust": "sometimes"}).status_code == 500
+
+
+def test_resume_and_the_paid_redo_switch_routes(a):
+    video = seed_video(a.db, status="RUNNING")
+    assert a.c.post(f"/api/videos/{video}/stages/DRAFT_GEN/resume").status_code == 409, "nothing stored: Resume is refused like any other refusal"
+    a.db.execute("INSERT INTO stage_run (id, video_id, stage, attempt, mode, status, held_reason, can_resume, has_stored_result) "
+                 "VALUES (%(i)s, %(v)s, 'DRAFT_GEN', 1, 'AUTO', 'FAILED', 'save crashed', true, true)", {"i": uuid.uuid4(), "v": video})
+    assert a.c.post(f"/api/videos/{video}/stages/DRAFT_GEN/resume").status_code == 200
+    assert a.gw.signals[-1][1] == "resume_stage"
+    run = a.c.get(f"/api/videos/{video}").json()["stageRuns"][0]
+    assert run["canResume"] is True and run["heldReason"] == "save crashed"
+    assert a.c.put(f"/api/videos/{video}/auto-redo-paid", json={"enabled": True}).status_code == 200
+    assert a.c.get(f"/api/videos/{video}").json()["auto_redo_paid"] is True
+    created = a.c.post("/api/videos", json={"prompt": "x", "autoRedoPaid": True}).json()["id"]
+    assert a.c.get(f"/api/videos/{created}").json()["auto_redo_paid"] is True

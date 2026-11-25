@@ -36,30 +36,50 @@ def to_json(obj: Any) -> Any:
     return obj
 
 
-def from_json(cls: type[T], data: dict[str, Any]) -> T:
+def from_json(cls: type[T], data: dict[str, Any], dropped: list[str] | None = None, _path: str = "") -> T:
+    """Fields the sender left out: optional ones (`X | None`) become None and list ones become [], and the name is appended to `dropped`
+    (when given) so the caller can say what was missing. A required scalar that is missing still raises: guessing it would hide a real fault."""
     hints = typing.get_type_hints(cls)
     kwargs = {}
     for f in dataclasses.fields(cls):  # type: ignore[arg-type]
         key = camel(f.name)
         if key in data:
-            kwargs[f.name] = _convert(hints[f.name], data[key])
+            kwargs[f.name] = _convert(hints[f.name], data[key], dropped, _path + key + ".")
+        elif f.default is dataclasses.MISSING and f.default_factory is dataclasses.MISSING:
+            tolerated = _absent_value(hints[f.name])
+            if tolerated is not _REQUIRED:
+                kwargs[f.name] = tolerated
+                if dropped is not None:
+                    dropped.append(_path + key)
     return cls(**kwargs)
 
 
-def _convert(tp: Any, value: Any) -> Any:
+_REQUIRED = object()
+
+
+def _absent_value(tp: Any) -> Any:
+    origin = typing.get_origin(tp)
+    if origin in (typing.Union, types.UnionType) and type(None) in typing.get_args(tp):
+        return None
+    if origin is list:
+        return []
+    return _REQUIRED
+
+
+def _convert(tp: Any, value: Any, dropped: list[str] | None = None, path: str = "") -> Any:
     if value is None:
         return None
     origin = typing.get_origin(tp)
     if origin in (typing.Union, types.UnionType):
         inner = [a for a in typing.get_args(tp) if a is not type(None)]
-        return _convert(inner[0], value) if len(inner) == 1 else value
+        return _convert(inner[0], value, dropped, path) if len(inner) == 1 else value
     if origin is list:
         (item,) = typing.get_args(tp)
-        return [_convert(item, v) for v in value]
+        return [_convert(item, v, dropped, f"{path}{i}.") for i, v in enumerate(value)]
     if isinstance(tp, type) and issubclass(tp, BaseModel):
         return tp.model_validate(value)
     if dataclasses.is_dataclass(tp):
-        return from_json(tp, value)
+        return from_json(tp, value, dropped, path)
     if tp is uuid.UUID:
         return value if isinstance(value, uuid.UUID) else uuid.UUID(str(value))
     if tp is Decimal:

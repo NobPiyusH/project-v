@@ -76,6 +76,7 @@ class FakeControl:
         self.fail_creative = False
         self.keyframe_inspection_fails = 0
         self.quality_gate = False
+        self.interpolate = False  # INTERPOLATE_FPS=local: INTERPOLATE asks for a RIFE run
         self.moon = False  # the plan has a moon block: MOON_LAYER is planned and asks for a composite
         self.lock = threading.Lock()
         self.pod = FakePodState()
@@ -84,6 +85,11 @@ class FakeControl:
         self.block_animatic = None  # a threading.Event: animatic_request waits for it (the pod is held meanwhile)
         self.at_save = None  # a threading.Event set when save_keyframes runs; it then waits for `proceed`
         self.proceed = None
+        self.auto_redo_paid = False  # the video's flag: may a paid automatic redo start without asking
+        self.forced_fails = {}  # stage -> how many more inspections fail it (no shot targets)
+        self.save_clips_failures = 0  # the next N save_clips calls crash after the media job succeeded
+        self.saved_clips = 0
+        self.holds = []
 
     def ev(self, e):
         with self.lock:
@@ -195,6 +201,14 @@ class FakeControl:
     def record_stage(self, video_id, stage, attempt, mode, status, summary, artifact_json, owner_notes):
         self.ev(f"{stage}:{attempt}:{status}")
 
+    def redo_check(self, video_id, stage, shot_ids):
+        from studio.production.redo_policy import redo_is_paid, redo_what
+        return {"paid": redo_is_paid(stage), "autoPaid": self.auto_redo_paid, "inr": 42.0, "what": redo_what(stage)}
+
+    def record_hold(self, video_id, stage, attempt, held_reason, can_resume, has_stored_result, redo_estimate_inr):
+        self.ev(f"HOLD:{stage}:{attempt}:resume={can_resume}:inr={redo_estimate_inr}")
+        self.holds.append(held_reason)
+
     def set_review_deadline(self, video_id, stage, attempt, deadline_iso):
         self.ev(f"DEADLINE:{stage}:{'cleared' if deadline_iso is None else 'set'}")
 
@@ -212,6 +226,12 @@ class FakeControl:
         return {"videoId": video_id, "jobs": [], "provider": "wan"}
 
     def save_clips(self, video_id, request, result):
+        with self.lock:
+            self.saved_clips += 1
+            crash = self.save_clips_failures > 0
+            self.save_clips_failures -= 1 if crash else 0
+        if crash:
+            raise ApplicationError("save crashed: missing field", type="Test", non_retryable=True)
         self.pod.release("clips saved")
         return ok("clips saved")
 
@@ -249,6 +269,13 @@ class FakeControl:
     def save_moon_layer(self, video_id, request, result):
         self.ev(f"MOON:{result['videoUri']}")
         return ok("moon saved")
+
+    def interpolate_request(self, video_id):
+        return {"videoId": video_id, "sourceUri": "s3://b/master.mp4", "factor": 2} if self.interpolate else {"skip": "Interpolation is off."}
+
+    def save_interpolated(self, video_id, request, result):
+        self.ev(f"INTERP:{result['videoUri']}")
+        return ok("interpolated")
 
     def footage_search_request(self, video_id, shot_ids, query):
         return {"queries": [{"shotId": f"shot-{i}", "query": "solar flare"} for i in range(self.footage_queries)]}
@@ -294,6 +321,9 @@ class FakeControl:
         if stage == "DRAFT_GEN" and self.broken_clip_inspections > 0:
             self.broken_clip_inspections -= 1
             return {"verdict": "FAIL", "summary": "Inspector: frozen clip", "notes": "fix", "redoTargets": ["shot-7"]}
+        if self.forced_fails.get(stage, 0) > 0:
+            self.forced_fails[stage] -= 1
+            return {"verdict": "FAIL", "summary": f"Inspector: {stage} FAIL", "notes": "fix", "redoTargets": []}
         if stage == "KEYFRAMES" and self.keyframe_inspection_fails > 0:
             self.keyframe_inspection_fails -= 1
             return {"verdict": "FAIL", "summary": "Inspector: FAIL", "notes": "shot 3: blank image", "redoTargets": []}
@@ -310,6 +340,10 @@ class FakeMedia:
         self.gate_calls = 0
         self.moon_fails = 0  # the next N Moon composites fail (missing picture)
         self.moon_calls = 0
+        self.interp_fails = 0  # the next N RIFE runs fail
+        self.interp_skip = False  # the worker reports no RIFE program
+        self.interp_calls = 0
+        self.clip_jobs = 0  # generate_clips runs: each one is a pod's work
 
     def defs(self):
         m = self
@@ -352,6 +386,18 @@ class FakeMedia:
                 raise ApplicationError("The Moon picture was not found", type="MoonLayerInputMissing", non_retryable=True)
             return {"videoUri": "s3://b/moon-layer.mp4", "durationSec": 10.0, "width": 720, "height": 1280, "fps": 16}
 
+        def interp(req):
+            m.interp_calls += 1
+            if m.interp_fails > 0:
+                m.interp_fails -= 1
+                raise ApplicationError("RIFE failed", type="Test", non_retryable=True)
+            if m.interp_skip:
+                return {"skip": "Interpolation skipped: the RIFE program was not found."}
+            return {"videoUri": "s3://b/interpolated.mp4", "durationSec": 10.0, "width": 720, "height": 1280, "fpsIn": 24.0, "fpsOut": 48.0}
+        def clips(req):
+            m.clip_jobs += 1
+            return {"clips": [], "containers": 1, "stopped": False}
+
         def inspect(req):
             if m.fail_inspector:
                 raise ApplicationError("ffmpeg missing", type="Test", non_retryable=True)
@@ -364,11 +410,12 @@ class FakeMedia:
             mk("synthesize_narration", voice),
             mk("generate_keyframes", keyframes),
             mk("render_animatic", lambda r: {"uri": "s3://b/a.mp4"}),
-            mk("generate_clips", lambda r: {"clips": [], "containers": 1, "stopped": False}),
+            mk("generate_clips", clips),
             mk("smooth_clips", lambda r: {"clips": [], "containers": 1, "stopped": False}),
             mk("upscale_clips", lambda r: {"clips": [], "containers": 1, "stopped": False}),
             mk("quality_gate_check", gate),
             mk("moon_layer_composite", moon),
+            mk("interpolate_master", interp),
             mk("assemble_video", lambda r: {"masterUri": "s3://b/master.mp4"}),
             mk("search_footage", lambda r: {"results": [{"shotId": q["shotId"], "query": q["query"]} for q in r["queries"]]}),
             mk("fetch_footage", lambda r: {"uri": "s3://b/f.mp4"}),
@@ -531,6 +578,7 @@ def test_a_failed_stage_waits_for_the_owner_then_retries_or_skips():
 
 def test_inspector_fail_is_redone_once_automatically_with_the_findings_as_notes():
     async def case(h):
+        h.c.auto_redo_paid = True
         h.c.keyframe_inspection_fails = 1
         w = await h.start("inspect-once")
         await w.result()
@@ -544,6 +592,7 @@ def test_inspector_fail_is_redone_once_automatically_with_the_findings_as_notes(
 
 def test_inspector_failing_twice_waits_for_the_owner_even_in_auto():
     async def case(h):
+        h.c.auto_redo_paid = True
         h.c.keyframe_inspection_fails = 2
         w = await h.start("inspect-twice")
         await h.await_waiting(w, "KEYFRAMES")
@@ -557,6 +606,7 @@ def test_inspector_failing_twice_waits_for_the_owner_even_in_auto():
 
 def test_a_weak_image_is_redone_on_its_own_with_the_better_prompt_then_the_plan_continues():
     async def case(h):
+        h.c.auto_redo_paid = True
         h.c.weak_image_reviews = 1
         w = await h.start("cd-image")
         await w.result()
@@ -572,6 +622,7 @@ def test_a_weak_image_is_redone_on_its_own_with_the_better_prompt_then_the_plan_
 
 def test_a_still_weak_image_waits_for_the_owner_and_reject_redoes_that_shot_with_their_notes():
     async def case(h):
+        h.c.auto_redo_paid = True
         h.c.weak_image_reviews = 2
         w = await h.start("cd-image-owner")
         await h.await_waiting(w, "KEYFRAMES")
@@ -610,6 +661,7 @@ def test_clips_above_the_auto_approve_amount_wait_for_the_owners_go_ahead_even_i
 
 def test_a_broken_clip_is_redone_on_its_own():
     async def case(h):
+        h.c.auto_redo_paid = True
         h.c.broken_clip_inspections = 1
         w = await h.start("clips-fix")
         await w.result()
@@ -865,3 +917,170 @@ def test_moon_layer_failure_can_be_continued_without_and_manual_mode_holds_a_goo
         assert "MOON_LAYER:1:APPROVED" in h.c.events and "MOON:s3://b/moon-layer.mp4" in h.c.events
 
     run_case(manual)
+
+
+def test_interpolate_is_skipped_without_a_media_call_when_the_flag_is_off():
+    async def case(h):
+        w = await h.start("interp-off")
+        await w.result()
+        assert "INTERPOLATE:1:SKIPPED" in h.c.events and h.m.interp_calls == 0 and h.c.events[-1] == "VIDEO:COMPLETED"
+
+    run_case(case)
+
+
+# ---------------------------------------------------------------------------------------------------- paid redos and Resume (25 Nov 2026)
+
+
+def test_a_paid_automatic_redo_waits_for_the_owner_with_the_reason_and_the_estimate():
+    async def case(h):
+        h.c.keyframe_inspection_fails = 1
+        w = await h.start("paid-held")
+        await h.await_waiting(w, "KEYFRAMES")
+        e = h.c.events
+        assert "KEYFRAMES:1:WAITING_APPROVAL" in e and "KEYFRAMES:1:INSPECTION_FAILED" not in e
+        assert "HOLD:KEYFRAMES:1:resume=False:inr=42.0" in e
+        assert "rent a GPU pod" in h.c.holds[-1] and "about ₹42" in h.c.holds[-1] and "waits for you" in h.c.holds[-1]
+        view = next(v for v in (await w.query("status"))["stages"] if v["stage"] == "KEYFRAMES")
+        assert view["heldReason"] == h.c.holds[-1] and view["canResume"] is False and view["redoEstimateInr"] == 42.0
+        assert h.c.pod.count("ACQUIRE:keyframes") == 1, "no second pod was rented"
+        await w.signal("approve", args=["KEYFRAMES", None])  # continue with the current result
+        await w.result()
+        assert "KEYFRAMES:1:APPROVED" in h.c.events and h.c.pod.count("ACQUIRE:keyframes") == 1 and h.c.events[-1] == "VIDEO:COMPLETED"
+
+    run_case(case)
+
+
+def test_interpolate_runs_after_the_moon_layer_and_a_missing_rife_program_is_a_clear_skip():
+    async def run(h):
+        h.c.interpolate, h.c.moon = True, True
+        w = await h.start("interp-run")
+        await w.result()
+        ev = h.c.events
+        assert "INTERP:s3://b/interpolated.mp4" in ev and "INTERPOLATE:1:AUTO_PASSED" in ev and ev[-1] == "VIDEO:COMPLETED"
+        assert ev.index("INTERP:s3://b/interpolated.mp4") > ev.index("MOON:s3://b/moon-layer.mp4")
+
+    run_case(run)
+
+    async def missing(h):
+        h.c.interpolate, h.m.interp_skip = True, True
+        w = await h.start("interp-missing")
+        await w.result()
+        assert "INTERPOLATE:1:SKIPPED" in h.c.events and not any(e.startswith("INTERP:") for e in h.c.events) and h.c.events[-1] == "VIDEO:COMPLETED"
+
+    run_case(missing)
+
+
+def test_interpolate_failure_waits_for_the_owner_who_can_retry_or_continue_without_it():
+    async def retry(h):
+        h.c.interpolate, h.m.interp_fails = True, 1
+        w = await h.start("interp-retry")
+        await h.await_waiting(w, "INTERPOLATE")
+        assert "INTERPOLATE:1:FAILED" in h.c.events and h.m.interp_calls == 1, "Temporal does not retry it: the owner decides"
+        await w.signal("reject", args=["INTERPOLATE", "retry"])
+        await w.result()
+        assert "INTERPOLATE:2:AUTO_PASSED" in h.c.events and h.c.events[-1] == "VIDEO:COMPLETED"
+
+    run_case(retry)
+
+    async def without(h):
+        h.c.interpolate, h.m.interp_fails = True, 5
+        w = await h.start("interp-continue")
+        await h.await_waiting(w, "INTERPOLATE")
+        await w.signal("approve", args=["INTERPOLATE", None])
+        await w.result()
+        assert "INTERPOLATE:1:SKIPPED" in h.c.events and h.c.events[-1] == "VIDEO:COMPLETED"
+
+    run_case(without)
+
+    async def manual(h):
+        h.c.interpolate = True
+        w = await h.start("interp-manual", modes={"INTERPOLATE": "MANUAL"})
+        await h.await_waiting(w, "INTERPOLATE")
+        await w.signal("approve", args=[ "INTERPOLATE", None])
+        await w.result()
+        assert "INTERPOLATE:1:APPROVED" in h.c.events and "INTERP:s3://b/interpolated.mp4" in h.c.events
+
+    run_case(manual)
+
+
+def test_the_owner_can_redo_a_held_paid_redo_and_a_second_fail_still_holds():
+    async def case(h):
+        h.c.keyframe_inspection_fails = 2
+        w = await h.start("paid-redo")
+        await h.await_waiting(w, "KEYFRAMES")
+        await w.signal("reject", args=["KEYFRAMES", "again please"])
+        await h.await_waiting(w, "KEYFRAMES")  # the redo failed again: the cap of one automatic redo holds it as before
+        assert "KEYFRAMES:2:WAITING_APPROVAL" in h.c.events and h.c.pod.count("ACQUIRE:keyframes") == 2
+        await w.signal("approve", args=["KEYFRAMES", None])
+        await w.result()
+
+    run_case(case)
+
+
+def test_a_free_automatic_redo_stays_automatic():
+    async def case(h):
+        h.c.forced_fails = {"ANIMATIC": 1}  # local ffmpeg: no pod, no paid call
+        w = await h.start("free-redo")
+        await w.result()
+        assert "ANIMATIC:1:INSPECTION_FAILED" in h.c.events and "ANIMATIC:2:AUTO_PASSED" in h.c.events
+        assert not any(x.startswith("HOLD:ANIMATIC") for x in h.c.events)
+
+    run_case(case)
+
+
+def test_with_auto_redo_paid_on_the_paid_redo_starts_by_itself():
+    async def case(h):
+        h.c.auto_redo_paid = True
+        h.c.keyframe_inspection_fails = 1
+        w = await h.start("paid-auto")
+        await w.result()
+        assert "KEYFRAMES:1:INSPECTION_FAILED" in h.c.events and "KEYFRAMES:2:AUTO_PASSED" in h.c.events
+        assert h.c.pod.count("ACQUIRE:keyframes") == 2 and not any(x.startswith("HOLD:KEYFRAMES") for x in h.c.events)
+
+    run_case(case)
+
+
+def test_resume_after_a_save_crash_reuses_the_stored_result_and_rents_no_pod():
+    async def case(h):
+        h.c.save_clips_failures = 1
+        w = await h.start("resume")
+        await h.await_waiting(w, "DRAFT_GEN")
+        assert "DRAFT_GEN:1:FAILED" in h.c.events and "HOLD:DRAFT_GEN:1:resume=True:inr=None" in h.c.events
+        view = next(v for v in (await w.query("status"))["stages"] if v["stage"] == "DRAFT_GEN")
+        assert view["canResume"] is True and view["hasStoredResult"] is True and "save crashed" in view["heldReason"]
+        assert h.m.clip_jobs == 1 and h.c.clip_requests == ["draft:null"]
+        await w.signal("resume_stage", "DRAFT_GEN")
+        await w.result()
+        assert h.c.saved_clips == 3, "the save ran again (draft crash + draft resume + final)"
+        assert h.c.clip_requests.count("draft:null") == 1, "no second draft batch: the pod's work was kept"
+        assert "DRAFT_GEN:2:AUTO_PASSED" in h.c.events and h.c.events[-1] == "VIDEO:COMPLETED"
+
+    run_case(case)
+
+
+def test_retry_after_a_save_crash_still_redoes_the_whole_stage():
+    async def case(h):
+        h.c.save_clips_failures = 1
+        w = await h.start("retry")
+        await h.await_waiting(w, "DRAFT_GEN")
+        await w.signal("reject", args=["DRAFT_GEN", None])
+        await w.result()
+        assert h.c.clip_requests.count("draft:null") == 2, "Retry makes the clips again"
+        assert "DRAFT_GEN:2:AUTO_PASSED" in h.c.events
+
+    run_case(case)
+
+
+def test_resume_is_not_offered_when_the_media_job_itself_failed():
+    async def case(h):
+        h.m.fail_keyframes = True
+        w = await h.start("no-resume")
+        await h.await_waiting(w, "KEYFRAMES")
+        assert "HOLD:KEYFRAMES:1:resume=False:inr=None" in h.c.events
+        await w.signal("resume_stage", "KEYFRAMES")  # ignored: nothing is stored
+        await h.env.sleep(1)
+        assert (await w.query("status"))["phase"] == "WAITING"
+        await w.signal("approve", args=["KEYFRAMES", None])
+        await w.result()
+
+    run_case(case)

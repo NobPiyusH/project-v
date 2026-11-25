@@ -27,6 +27,7 @@ class Stage(Enum):
     AUDIO = ("Audio", "Final narration, sound effects, mix and loudness")
     ASSEMBLY = ("Assembly", "Timeline, Premiere XML and the master render")
     MOON_LAYER = ("Moon layer", "Optional: composite a growing Moon picture (scale curve, glow, caption) over the master; only for plans with a moon block")
+    INTERPOLATE = ("Interpolate", "Optional: local RIFE frame interpolation of the master (24 to 48 fps, audio untouched); off unless INTERPOLATE_FPS=local")
     ROUGH_CUT_REVIEW = ("Rough cut review", "Review the cut and turn notes into changes")
     PACKAGING = ("Packaging", "Captions, dubs, titles, thumbnails, Shorts")
     FINAL_APPROVAL = ("Final approval", "Last check before publishing")

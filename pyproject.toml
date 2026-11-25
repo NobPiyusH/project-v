@@ -67,4 +67,5 @@ explicit = true
 
 [tool.pytest.ini_options]
 # tools/blender scripts need Blender's own Python (bpy): never collect them.
-testpaths = ["studio", "workers/tests", "tools/podkit", "tools/film4k", "tools/gpu_lease", "tools/vetting", "tools/qualitygate"]
+markers = ["slow: runs a real external program (RIFE on the laptop GPU); skipped when it is not installed"]
+testpaths = ["studio", "workers/tests", "tools/podkit", "tools/film4k", "tools/gpu_lease", "tools/vetting", "tools/qualitygate", "tools/golden"]
