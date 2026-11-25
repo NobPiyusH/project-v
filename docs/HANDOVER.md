@@ -1,3 +1,5 @@
+> **STALE IN PLACES (Java era).** The Java control plane was removed on 24 Nov 2026 (git tag `java-final`; see `docs/java-removal.md`). `CLAUDE.md` and `docs/DEVELOPER-TAKEOVER.md` win wherever they disagree with this book. Most affected: §7 Technology stack, §24 Repository layout, and the M1 tasks in §23 (also any mention of Spring, Gradle, `control-plane/`). The book is otherwise kept as written.
+
 # CINESTACK — Handover Book for Claude Code
 
 > **Update, 24 Nov 2026:** the control plane is now Python (`studio/`, FastAPI + Temporal Python SDK). The Java/Spring Boot control plane described in this book was removed; it stays restorable from the git tag `java-final` (see `docs/java-removal.md`). Wherever this book says Java, Spring, Gradle or Flyway-in-Java, read `studio/`, `python -m studio`, `uv` and `studio/migrate.py`.

@@ -1,3 +1,5 @@
+> **Java-era document.** The Java control plane was removed on 24 Nov 2026 (tag `java-final`); `CLAUDE.md` and `docs/DEVELOPER-TAKEOVER.md` win. Class and path names below refer to the removed `control-plane/`; see `docs/java-removal.md`.
+
 # Control-plane refactor, 22 Nov 2026 (Java)
 
 Branch `claude/refactor-java-300f79`. Scope: `control-plane/` only. No behaviour change intended; no workflow code
