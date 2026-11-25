@@ -15,6 +15,7 @@ from typing import Annotated, Any
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse, Response
 
+from studio.api import plan_preview
 from studio.api.video_wiring import VideoContext
 from studio.media.wire import to_json
 from studio.planner.imported import read_plan_file, title_of
@@ -97,6 +98,22 @@ def register_video_routes(app: FastAPI, v: VideoContext, JavaJson: type[Response
         except ValueError as e:  # an invalid plan file
             raise HTTPException(status_code=400, detail=f"plan rejected: {e}") from e
         return JavaJson({"id": vid}, status_code=201)
+
+    @app.post("/api/plans/validate")
+    @guarded
+    async def validate_plan(request: Request):
+        """Dry run for the dashboard's "Load plan file": the same loader as POST /api/videos, nothing stored or started. Always 200 with
+        {"ok": false, "error"} for a bad plan, so the page can show the reason; 400 only when the request itself is malformed."""
+        b = await body(request)
+        doc = b.get("plan")
+        if b.get("planFile") is not None:
+            try:
+                doc = read_plan_file(str(b["planFile"]))
+            except (ValueError, OSError) as e:
+                return JavaJson({"ok": False, "error": str(e)})
+        if not isinstance(doc, dict):
+            return JavaJson({"ok": False, "error": "Give a plan: a JSON object (or a planFile name)"})
+        return JavaJson(plan_preview.summary(v, doc))
 
     @app.get("/api/videos")
     @guarded
@@ -331,6 +348,12 @@ def register_video_routes(app: FastAPI, v: VideoContext, JavaJson: type[Response
     @guarded
     def stages():
         return JavaJson([{"id": s.name, "label": s.label, "description": s.description, "redoWith": [x.name for x in REDO_WITH.get(s, [])]} for s in Stage])
+
+    @app.get("/api/stages/paid")
+    @guarded
+    def paid_stages():
+        """Stage id -> what paid service it calls (a separate route: /api/stages keeps the Java shape)."""
+        return JavaJson(plan_preview.PAID_STAGES)
 
     @app.get("/api/system")
     @guarded

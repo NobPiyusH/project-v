@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { api, type Mode, type StageInfo } from '../api'
 import { ModeSwitch } from '../components'
+import { LoadPlan } from './LoadPlan'
 
 export function NewVideo({ stages }: { stages: StageInfo[] }) {
   const [prompt, setPrompt] = useState('')
@@ -67,6 +68,7 @@ export function NewVideo({ stages }: { stages: StageInfo[] }) {
         </table>
       )}
       {error && <p className="error">{error}</p>}
+      <LoadPlan stages={stages} />
     </section>
   )
 }

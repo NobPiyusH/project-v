@@ -249,6 +249,10 @@ export function StageRow(props: {
         <div className="row">
           <span className="title">{stage.label}</span>
           <StatusBadge status={status} />
+          {stage.paid && <span className="badge b-bad" title={`Calls a paid service: ${stage.paid}`}>Paid</span>}
+          {mode === 'MANUAL' && !locked && !waiting && (
+            <span className="badge b-warn" title="Manual: the stage runs, then holds for your Approve before the next one starts">Will hold for you</span>
+          )}
           {attempts > 1 && <span className="muted small">attempt {run?.attempt}</span>}
           {waiting && run?.review_deadline && <Countdown deadline={run.review_deadline} />}
         </div>

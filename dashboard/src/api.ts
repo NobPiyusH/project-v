@@ -3,7 +3,19 @@ import { request } from './http'
 
 export type Mode = 'AUTO' | 'REVIEW' | 'MANUAL' | 'PRODUCER'
 
-export interface StageInfo { id: string; label: string; description: string; redoWith: string[] }
+export interface StageInfo { id: string; label: string; description: string; redoWith: string[]; paid?: string | null }
+
+/** Dry run of a plan file (POST /api/plans/validate): the summary the owner sees before Start, or the reason it was refused. */
+export interface PlanSummary {
+  ok: true; title: string; totalSec: number; width: number; height: number
+  beats: { n: number; startSec: number; durationSec: number; camera: string | null; prompt: string }[]
+  lines: { n: number; text: string; beat: number | null; startSec: number | null }[]
+  cameraPresets: string[]; moonLayer: boolean; moonImage: string | null; music: string | null; narration: string | null
+  paidStages: { id: string; note: string; leaveOut: boolean }[]
+  estimate: { clips: number; minutes: number; inrLow: number; inrHigh: number; usdLow: number; usdHigh: number; where: string; note: string } | null
+  estimateError?: string
+}
+export type PlanCheck = PlanSummary | { ok: false; error: string }
 
 export interface VideoSummary {
   id: string
@@ -206,7 +218,11 @@ export const api = {
   gpuPods: () => call<GpuPods>('GET', '/gpu/pods'),
   gpuLogs: (id: string, since: string | null) =>
     call<GpuLogPage>('GET', `/gpu/pods/${encodeURIComponent(id)}/logs${since ? `?since=${encodeURIComponent(since)}` : '?tail=150'}`),
-  stages: () => call<StageInfo[]>('GET', '/stages'),
+  /** The stage list, each stage tagged with what paid service it calls (if any). */
+  stages: async (): Promise<StageInfo[]> => {
+    const [list, paid] = await Promise.all([call<StageInfo[]>('GET', '/stages'), call<Record<string, string>>('GET', '/stages/paid').catch(() => ({}))])
+    return list.map((s) => ({ ...s, paid: (paid as Record<string, string>)[s.id] ?? null }))
+  },
   styles: () => call<StylePreset[]>('GET', '/styles'),
   providers: () => call<Provider[]>('GET', '/providers'),
   videos: () => call<VideoSummary[]>('GET', '/videos'),
@@ -215,6 +231,9 @@ export const api = {
   budget: () => call<Budget>('GET', '/budget'),
   createVideo: (prompt: string, defaultMode: Mode, modes: Record<string, Mode>, reviewMinutes: number) =>
     call<{ id: string }>('POST', '/videos', { prompt, defaultMode, modes, reviewMinutes }),
+  validatePlan: (plan: unknown) => call<PlanCheck>('POST', '/plans/validate', { plan }),
+  createVideoFromPlan: (plan: unknown, defaultMode: Mode, modes: Record<string, Mode>, reviewMinutes: number) =>
+    call<{ id: string }>('POST', '/videos', { plan, defaultMode, modes, reviewMinutes }),
   setReviewMinutes: (id: string, minutes: number) => call<void>('PUT', `/videos/${id}/review-minutes`, { minutes }),
   approve: (id: string, stage: string, notes?: string) =>
     call<void>('POST', `/videos/${id}/stages/${stage}/approve`, { notes: notes ?? null }),
