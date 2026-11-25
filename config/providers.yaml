@@ -186,6 +186,16 @@ pricing:
   # 0 = no cap. 150 INR is about $1.6, the budget of one Short.
   perVideo:
     defaultCapInr: 150
+  # Hold before run (25 Nov 2026): rough cost of ONE run of a stage that calls a paid service, shown when the stage waits for the owner
+  # before it spends (Manual mode, or the video's approve_paid_first). Stages priced from live numbers (MUSIC, KEYFRAMES, clips, UPSCALE)
+  # are not listed. inr 0 = nothing to spend today (the stage is still a placeholder): it is never held. Re-measure on the first live run.
+  holdEstimates:
+    SHOT_PLAN: {provider: Gemini (story review), inr: 3, what: the AI story review of the shot plan}
+    NARRATION: {provider: voice provider (+ Gemini line check), inr: 15, what: the narration voice and the AI check of every line}
+    CRITIC: {provider: Gemini (take critic), inr: 5, what: the AI quality check of every take}
+    TAKE_SELECTION: {provider: none yet, inr: 0, what: take selection}
+    AUDIO: {provider: none yet, inr: 0, what: the final audio mix}
+    PACKAGING: {provider: none yet, inr: 0, what: captions and packaging}
   # AI Producer mode (docs/plans/ai-producer.md, owner 18 Nov 2026). P1 = advise-only: it recommends, the owner decides.
   producer:
     budgetPerShortInr: 100       # owner set: what the Producer may approve per Short (never above the monthly caps)

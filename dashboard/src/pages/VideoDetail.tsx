@@ -244,6 +244,7 @@ export function StageRow(props: {
   const status = run?.status ?? 'PENDING'
   const failed = status === 'FAILED'
   const waiting = status === 'WAITING_APPROVAL' || failed
+  const beforeRun = status === 'WAITING_APPROVAL' && !!run?.heldBeforeRun
 
   return (
     <div className={`stage ${waiting ? 'waiting' : ''} ${status === 'SKIPPED' ? 'skipped' : ''}`}>
@@ -259,7 +260,7 @@ export function StageRow(props: {
           {attempts > 1 && <span className="muted small">attempt {run?.attempt}</span>}
           {waiting && run?.review_deadline && <Countdown deadline={run.review_deadline} />}
         </div>
-        <div className="muted small">{run?.summary ?? stage.description}</div>
+        <div className="muted small">{beforeRun ? (run?.heldReason ?? run?.summary) : (run?.summary ?? stage.description)}</div>
         {run?.owner_notes && <div className="small">Your notes: “{run.owner_notes}”</div>}
         {props.inspection && <InspectorPanel report={props.inspection} />}
         <div className="row" style={{ marginTop: 6 }}>
@@ -293,7 +294,15 @@ export function StageRow(props: {
             <textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)}
               placeholder={failed ? 'Optional notes for the retry' : 'Notes (required to reject: tell the system what to change)'} />
             <div className="row">
-              {failed ? (
+              {beforeRun ? (
+                <>
+                  <button className="primary" onClick={() => { props.onApprove(notes || undefined); setNotes('') }}>
+                    Approve{run?.estimateInr != null ? ` (about ₹${Math.round(Number(run.estimateInr))})` : ''}
+                  </button>
+                  <button className="danger" title="Skip this stage: nothing is spent" onClick={() => { props.onReject(notes || 'Skipped before it spent'); setNotes('') }}>Skip</button>
+                  <span className="muted small">Nothing has been spent on this stage yet.</span>
+                </>
+              ) : failed ? (
                 <>
                   <button className="primary" onClick={() => { props.onReject(notes || 'Retry'); setNotes('') }}>Retry</button>
                   <button onClick={() => { props.onApprove(notes || undefined); setNotes('') }}>Continue without it</button>

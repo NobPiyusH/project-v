@@ -74,6 +74,7 @@ def test_the_read_routes_match_the_java_shapes(a):
     shape_ok("/api/videos", [r for r in lst if r["id"] == str(video)])
     detail = a.c.get(f"/api/videos/{video}").json()
     detail.pop("budget", None)  # additive: the per-video cap, not in the recorded Java shape
+    detail.pop("approve_paid_first", None)  # additive: hold before run
     shape_ok("/api/videos/{id}", detail)
     prod = a.c.get(f"/api/videos/{video}/production").json()
     shape_ok("/api/videos/{id}/production", prod)

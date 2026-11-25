@@ -13,6 +13,7 @@ from collections.abc import Callable
 from decimal import Decimal
 from typing import Any
 
+from studio.api import plan_preview
 from studio.media.types import (
     AnimaticResult,
     AssemblyResult,
@@ -334,6 +335,69 @@ class ControlActivities:
             "WHERE video_id = %(v)s AND stage = %(s)s AND attempt = %(a)s",
             {"r": held_reason, "c": can_resume, "h": has_stored_result, "i": redo_estimate_inr, "v": _id(video_id), "s": stage, "a": attempt})
 
+    # ---- hold before run: a stage that can spend waits for the owner first
+
+    def hold_check(self, video_id: str, stage: str, manual: bool) -> dict[str, Any]:
+        """Must this stage wait for the owner BEFORE it runs, and what to show them: a paid stage in Manual mode, or on a video with
+        `approve_paid_first`. A stage with nothing to spend (estimate 0, or not a paid stage) never holds. An estimate that can't be made holds
+        (unknown cost is not free). The cap line shows the video's budget and, when this run would break it, why."""
+        vid = _id(video_id)
+        rows = self.db.rows("SELECT approve_paid_first FROM video WHERE id = %(v)s", {"v": vid})
+        flag = bool(rows and rows[0]["approve_paid_first"])
+        out: dict[str, Any] = {"hold": False, "flag": flag, "estimateInr": None, "provider": None, "what": stage, "text": "", "refusal": None}
+        if stage not in plan_preview.HOLDABLE or not (flag or manual):
+            return out
+        inr, provider, what = self._spend_estimate(vid, stage)
+        if inr is not None and inr <= 0:
+            return {**out, "estimateInr": 0.0, "provider": provider, "what": what}
+        budget, refusal, left = self.shots.d.budget, None, ""
+        try:
+            b = budget.video_budget(vid)
+            if b["capInr"] is not None:
+                left = f" Budget of this video: ₹{float(b['remainingInr']):.0f} left of ₹{float(b['capInr']):.0f}."
+            if inr is not None:
+                refusal = budget.video_refusal(vid, Decimal(str(inr)), what)
+        except Exception as e:  # noqa: BLE001 - the question to the owner must never fail because the budget could not be read
+            log.warning("Could not read the budget of %s for the hold before %s: %s", video_id, stage, e)
+        cost = "about ₹%.0f" % inr if inr is not None else "cost not estimated"
+        text = f"Waiting before it spends: {what} on {provider}, {cost}.{left}"
+        if refusal is not None:
+            text += f" Over the cap: {refusal}"
+        text += " Approve to run it, or Reject to skip it (nothing is spent)."
+        return {**out, "hold": True, "estimateInr": inr, "provider": provider, "what": what, "text": text, "refusal": refusal}
+
+    def _spend_estimate(self, vid: uuid.UUID, stage: str) -> tuple[float | None, str, str]:
+        """(about how many rupees one run costs, the provider, plain words). Live prices where the stage has them, else pricing.holdEstimates.
+        Best effort: None = could not be priced."""
+        d = self.shots.d
+        flat = d.pricing.hold_estimate(stage)
+        try:
+            if stage == "MUSIC":
+                return float(d.pricing.music_inr(1)), "Lyria (Gemini)", "one music track"
+            if stage == "KEYFRAMES":
+                n = int(self.db.rows("SELECT count(*) AS n FROM shot s JOIN scene sc ON sc.id = s.scene_id WHERE sc.video_id = %(v)s", {"v": vid})[0]["n"])
+                review = flat[0] if flat is not None else 0.0
+                return float(d.pricing.image_inr("1K") * n) + review, "GPU pod or Gemini images, plus the AI picture review", f"{n} pictures and their AI review"
+            if stage in ("DRAFT_GEN", "FINAL_GEN"):
+                e = self.video.estimate(vid, "draft" if stage == "DRAFT_GEN" else "final", None)
+                return (float(e.inr), "GPU pod or Gemini Omni", f"{e.clips} clips") if e.clips else (0.0, "GPU pod", "the clips")
+            if stage == "UPSCALE":
+                a, b = self.finish.estimate(vid), self.sharpen.estimate(vid)
+                return float(a.inr + b.inr), "GPU pod", f"smoothing {a.clips} and sharpening {b.clips} clips"
+        except Exception as e:  # noqa: BLE001
+            log.warning("Could not price %s for the hold before it runs: %s", stage, e)
+            return None, "a paid service", stage
+        if flat is not None:
+            return flat
+        return None, "a paid service", stage
+
+    def record_hold_before_run(self, video_id: str, stage: str, attempt: int, reason: str, estimate_inr: float | None) -> None:
+        """The dashboard's 'Waiting before it spends' line for this attempt (cleared when the stage starts running, see record_stage)."""
+        self.db.execute(
+            "UPDATE stage_run SET held_before_run = true, held_reason = %(r)s, estimate_inr = %(i)s "
+            "WHERE video_id = %(v)s AND stage = %(s)s AND attempt = %(a)s",
+            {"r": reason, "i": estimate_inr, "v": _id(video_id), "s": stage, "a": attempt})
+
     # ---- the database mirror of the workflow
 
     def record_stage(self, video_id: str, stage: str, attempt: int, mode: str, status: str, summary: str | None, artifact_json: str | None,
@@ -353,7 +417,10 @@ class ControlActivities:
                     artifact_json = COALESCE(EXCLUDED.artifact_json, stage_run.artifact_json),
                     owner_notes = COALESCE(EXCLUDED.owner_notes, stage_run.owner_notes),
                     finished_at = EXCLUDED.finished_at,
-                    review_deadline = CASE WHEN EXCLUDED.status = 'WAITING_APPROVAL' THEN stage_run.review_deadline END
+                    review_deadline = CASE WHEN EXCLUDED.status = 'WAITING_APPROVAL' THEN stage_run.review_deadline END,
+                    held_before_run = CASE WHEN EXCLUDED.status = 'RUNNING' THEN false ELSE stage_run.held_before_run END,
+                    held_reason = CASE WHEN EXCLUDED.status = 'RUNNING' THEN NULL ELSE stage_run.held_reason END,
+                    estimate_inr = CASE WHEN EXCLUDED.status = 'RUNNING' THEN NULL ELSE stage_run.estimate_inr END
                 """,
                 {"rid": uuid.uuid4(), "vid": vid, "stage": stage, "attempt": attempt, "mode": mode, "status": status, "summary": summary,
                  "artifact": artifact_json, "notes": owner_notes, "done": done})

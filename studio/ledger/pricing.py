@@ -154,6 +154,14 @@ class Pricing:
         n = v.get("defaultCapInr") if isinstance(v, dict) else None
         return dec(n) if isinstance(n, (int, float)) and not isinstance(n, bool) and n > 0 else Decimal(0)
 
+    def hold_estimate(self, stage: str) -> tuple[float, str, str] | None:
+        """(inr, provider, what) of one run of a stage that is priced by a flat estimate in pricing.holdEstimates; None when not listed."""
+        table = self._pricing.get("holdEstimates")
+        e = table.get(stage) if isinstance(table, dict) else None
+        if not isinstance(e, dict) or isinstance(e.get("inr"), bool) or not isinstance(e.get("inr"), (int, float)):
+            return None
+        return float(e["inr"]), str(e.get("provider", "a paid service")), str(e.get("what", stage))
+
     # ---- AI Producer
 
     def producer_budget_inr(self, short_video: bool) -> Decimal:

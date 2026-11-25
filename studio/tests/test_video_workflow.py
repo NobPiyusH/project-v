@@ -90,6 +90,11 @@ class FakeControl:
         self.save_clips_failures = 0  # the next N save_clips calls crash after the media job succeeded
         self.saved_clips = 0
         self.holds = []
+        self.approve_paid_first = False  # the video's flag
+        self.stage_inr = {}  # hold_check: stage -> estimate (default 12.0); 0 = nothing to spend, never held
+        self.cap_reason = None  # hold_check: the cap line shown when this run would break the video's budget
+        self.plan_music = False  # plan MUSIC (the default plan leaves it out)
+        self.ran = []  # every paid stage's real work, in order: nothing here before the owner approved the spend
 
     def ev(self, e):
         with self.lock:
@@ -98,9 +103,10 @@ class FakeControl:
     def plan(self, video_id, prompt, owner_notes, attempt):
         if owner_notes is not None:
             self.notes_seen.append(owner_notes)
-        return ok(f"plan v{attempt}", planned=[s for s in ALL if s not in ("RESEARCH", "MUSIC") and (self.moon or s != "MOON_LAYER")])  # skips RESEARCH, MUSIC and (no moon block) MOON_LAYER
+        return ok(f"plan v{attempt}", planned=[s for s in ALL if s != "RESEARCH" and (self.plan_music or s != "MUSIC") and (self.moon or s != "MOON_LAYER")])  # skips RESEARCH, MUSIC and (no moon block) MOON_LAYER
 
     def run_stage(self, video_id, stage, owner_notes, attempt):
+        self.ran.append(stage)
         return ok(f"{stage} done")
 
     def research_request(self, video_id, owner_notes):
@@ -122,18 +128,21 @@ class FakeControl:
         return {"videoId": video_id}
 
     def save_music(self, video_id, result):
+        self.ran.append("MUSIC")
         return ok("music")
 
     def narration_request(self, video_id):
         return {"videoId": video_id}
 
     def save_narration(self, video_id, result):
+        self.ran.append("NARRATION")
         return ok("voice")
 
     def last_attempt(self, video_id, stage):
         return 2
 
     def shot_plan(self, video_id, owner_notes):
+        self.ran.append("SHOT_PLAN")
         return ok("shots")
 
     def stock_requests(self, video_id):
@@ -149,6 +158,7 @@ class FakeControl:
         return {"videoId": video_id}
 
     def save_keyframes(self, video_id, request, result, keep_pod=False):
+        self.ran.append("KEYFRAMES")
         self.one_pod_calls.append(("save", keep_pod))
         if self.at_save is not None:
             self.at_save.set()
@@ -204,6 +214,17 @@ class FakeControl:
     def redo_check(self, video_id, stage, shot_ids):
         from studio.production.redo_policy import redo_is_paid, redo_what
         return {"paid": redo_is_paid(stage), "autoPaid": self.auto_redo_paid, "inr": 42.0, "what": redo_what(stage)}
+
+    def hold_check(self, video_id, stage, manual):
+        inr = self.stage_inr.get(stage, 12.0)
+        hold = stage in vp.HOLDABLE and (manual or self.approve_paid_first) and inr > 0
+        text = f"Waiting before it spends: {stage}, about ₹{inr:.0f}." + (f" Over the cap: {self.cap_reason}" if self.cap_reason else "")
+        return {"hold": hold, "flag": self.approve_paid_first, "estimateInr": inr, "provider": "fake", "what": stage, "text": text if hold else "",
+                "refusal": self.cap_reason}
+
+    def record_hold_before_run(self, video_id, stage, attempt, reason, estimate_inr):
+        self.ev(f"BEFORE_RUN:{stage}:{attempt}:inr={estimate_inr}")
+        self.holds.append(reason)
 
     def record_hold(self, video_id, stage, attempt, held_reason, can_resume, has_stored_result, redo_estimate_inr):
         self.ev(f"HOLD:{stage}:{attempt}:resume={can_resume}:inr={redo_estimate_inr}")
@@ -344,6 +365,7 @@ class FakeMedia:
         self.interp_skip = False  # the worker reports no RIFE program
         self.interp_calls = 0
         self.clip_jobs = 0  # generate_clips runs: each one is a pod's work
+        self.paid_calls = []  # every paid media call (music, voice, keyframes, clips): none before the owner approved
 
     def defs(self):
         m = self
@@ -363,11 +385,13 @@ class FakeMedia:
             return {"found": False, "reason": "no candidates"}
 
         def keyframes(req):
+            m.paid_calls.append("keyframes")
             if m.fail_keyframes:
                 raise ApplicationError("GPU unavailable", type="Test", non_retryable=True)
             return {"results": [], "modalGpuSeconds": 0}
 
         def voice(req):
+            m.paid_calls.append("voice")
             if m.fail_voice:
                 raise ApplicationError("TTS quota", type="Test", non_retryable=True)
             return {"lines": [], "model": "m", "voiceName": "v"}
@@ -394,7 +418,12 @@ class FakeMedia:
             if m.interp_skip:
                 return {"skip": "Interpolation skipped: the RIFE program was not found."}
             return {"videoUri": "s3://b/interpolated.mp4", "durationSec": 10.0, "width": 720, "height": 1280, "fpsIn": 24.0, "fpsOut": 48.0}
+        def music(req):
+            m.paid_calls.append("music")
+            return {"uri": "s3://b/m.wav"}
+
         def clips(req):
+            m.paid_calls.append("clips")
             m.clip_jobs += 1
             return {"clips": [], "containers": 1, "stopped": False}
 
@@ -406,7 +435,7 @@ class FakeMedia:
         return [
             mk("research_topic", lambda r: {"facts": [], "sources": [], "queries": [], "model": "m"}),
             mk("check_sources", lambda r: r),
-            mk("generate_music", lambda r: {"uri": "s3://b/m.wav"}),
+            mk("generate_music", music),
             mk("synthesize_narration", voice),
             mk("generate_keyframes", keyframes),
             mk("render_animatic", lambda r: {"uri": "s3://b/a.mp4"}),

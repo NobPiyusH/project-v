@@ -35,6 +35,11 @@ STAGES = [s.name for s in Stage]
 # Same sets as studio.production.inspector (a test keeps them equal); strings so the sandbox imports nothing heavy.
 INSPECTED = {"RESEARCH", "SCRIPT", "MUSIC", "NARRATION", "SHOT_PLAN", "KEYFRAMES", "ANIMATIC", "DRAFT_GEN", "FINAL_GEN", "ASSEMBLY"}
 PER_SHOT = {"KEYFRAMES", "DRAFT_GEN", "FINAL_GEN"}
+# Stages that can spend money (same keys as studio.api.plan_preview.HOLDABLE, a test keeps them equal). Before such a stage runs, the activity
+# `control.hold_check` says whether it must wait for the owner (Manual mode, or the video's approve_paid_first).
+HOLDABLE = {"SHOT_PLAN", "MUSIC", "NARRATION", "KEYFRAMES", "DRAFT_GEN", "FINAL_GEN", "CRITIC", "UPSCALE", "TAKE_SELECTION", "AUDIO", "PACKAGING"}
+# These two already ask for the spend themselves (clip estimate / smoothing estimate); the hold only makes that ask mandatory.
+ASKS_ITSELF = {"DRAFT_GEN", "FINAL_GEN", "UPSCALE"}
 
 
 def _retry(initial: int | None = None, maximum_interval: int | None = None, attempts: int = 0, no_retry: list[str] | None = None) -> RetryPolicy:
@@ -139,6 +144,8 @@ class VideoProductionWorkflow:
         self.stored: dict[str, tuple[str, list[Any]]] = {}  # stage -> the save activity (name, args) whose media result is already made and kept
         self.resume_next = False  # the owner chose Resume: the next attempt re-runs only the stored save
         self.waiting_can_resume = False
+        self.hold_v1 = False  # patch "2026-11-25-hold-before-run": paid stages wait for the owner BEFORE they run (off for runs started before it)
+        self.force_ask: set[str] = set()  # clip / smoothing stages whose spend ask is mandatory this attempt (hold_check said hold)
         self.stages = STAGES  # without MOON_LAYER for runs started before it existed (replay-safe, see _run)
 
     # ------------------------------------------------------------------------------------------- the run
@@ -165,6 +172,7 @@ class VideoProductionWorkflow:
             self.one_pod = bool(await _ctl("one_pod_enabled"))
 
         self.holds_v1 = workflow.patched("2026-11-25-redo-resume-holds")
+        self.hold_v1 = workflow.patched("2026-11-25-hold-before-run")
         if not workflow.patched("moon-layer-v1"):
             self.stages = [s for s in STAGES if s != "MOON_LAYER"]
         if not workflow.patched("interpolate-v1"):  # histories from before the INTERPOLATE stage existed never run it (replay-safe)
@@ -217,6 +225,10 @@ class VideoProductionWorkflow:
                 self.stored.pop(stage, None)  # a full redo starts from nothing
             self.current_stage = stage
             await self._pod_gate(video_id, stage)
+            if self.hold_v1 and not resuming and stage in HOLDABLE and not await self._approved_to_spend(video_id, stage, attempt, notes):
+                skipped = _result("Skipped: the owner didn't approve the spend before it ran, so nothing was spent.")
+                await self._finish(video_id, stage, attempt, "SKIPPED", skipped, notes)
+                return skipped
             start_mode = self._mode(stage)
             self.views[stage] = self._view(stage, start_mode, "RUNNING", attempt, None)
             await _ctl("record_stage", video_id, stage, attempt, start_mode, "RUNNING", None, None, notes)
@@ -384,18 +396,42 @@ class VideoProductionWorkflow:
             await self._finish(video_id, stage, attempt, "REJECTED", result, notes)
             notes = d.notes
 
+    async def _approved_to_spend(self, video_id: str, stage: str, attempt: int, notes: str | None) -> bool:
+        """Hold before run. False only when the owner rejected the spend (the stage is then skipped, nothing is spent). A stage in Manual mode
+        or on a video with approve_paid_first waits here BEFORE its first paid call, with the estimate and the video's budget. Clip and
+        smoothing stages ask for themselves; for them this only makes their own ask mandatory."""
+        self.force_ask.discard(stage)
+        gate = await _ctl("hold_check", video_id, stage, self._mode(stage) == "MANUAL")
+        if not gate["hold"]:
+            return True
+        if stage in ASKS_ITSELF:
+            self.force_ask.add(stage)
+            return True
+        inr = gate["estimateInr"]
+        if inr is not None and await self._producer_approves_spend(video_id, stage, inr):
+            return True
+        before = {"text": gate["text"], "inr": inr}
+        # Switching a stage that is not flagged back to AUTO lets it go; a flagged video always waits for a yes.
+        d = await self._await_owner(video_id, stage, attempt, "WAITING_APPROVAL", gate["text"], gate["text"], None, notes, not gate["flag"],
+                                    before_run=before)
+        return d is None or d.approve
+
     async def _await_owner(self, video_id: str, stage: str, attempt: int, status: str, view_summary: str | None, summary: str | None,
                            artifact_json: str | None, notes: str | None, auto_releases: bool,
-                           hold: tuple[str, bool, bool, float | None] | None = None) -> Any:
+                           hold: tuple[str, bool, bool, float | None] | None = None, before_run: dict[str, Any] | None = None) -> Any:
         """Records the stage as waiting and blocks until the owner approves/rejects (or, when auto_releases, until the stage is switched to AUTO,
         which returns None)."""
         await self._release_pod(video_id, f"{stage} waits for the owner ({status}): never keep a pod across a human wait")
         # hold = (why it waits, Resume offered, a stored result exists, estimated cost of the redo in INR): shown by the dashboard.
         extra = None if hold is None else {"heldReason": hold[0], "canResume": hold[1], "hasStoredResult": hold[2], "redoEstimateInr": hold[3]}
+        if before_run is not None:
+            extra = {"heldBeforeRun": True, "heldReason": before_run["text"], "estimateInr": before_run["inr"]}
         self.views[stage] = self._view(stage, self._mode(stage), status, attempt, view_summary, extra)
         await _ctl("record_stage", video_id, stage, attempt, self._mode(stage), status, summary, artifact_json, notes)
         if hold is not None:
             await _ctl("record_hold", video_id, stage, attempt, *hold)
+        if before_run is not None:
+            await _ctl("record_hold_before_run", video_id, stage, attempt, before_run["text"], before_run["inr"])
         self.phase = "WAITING"
         self.waiting_stage = stage
         self.waiting_can_resume = hold is not None and hold[1]
@@ -548,7 +584,8 @@ class VideoProductionWorkflow:
         if estimate["clips"] == 0:
             self.skip_stage = True
             return _result(estimate["summary"])
-        if estimate["needsApproval"] and not await self._producer_approves_spend(video_id, stage, estimate["inr"]):
+        if (estimate["needsApproval"] or stage in self.force_ask) and not await self._producer_approves_spend(video_id, stage, estimate["inr"]):
+            self.force_ask.discard(stage)
             ask = await self._with_spend_advice(video_id, stage, estimate["summary"], estimate["inr"])
             d = await self._await_owner(video_id, stage, attempt, "WAITING_APPROVAL", ask,
                                         f"{ask} Approve to start, or Reject to skip this stage (nothing is spent).", None, notes, False)
@@ -577,7 +614,9 @@ class VideoProductionWorkflow:
             self.skip_stage = True
             return _result(summary)
         total_inr = smooth["inr"] + sharp["inr"]
-        if (smooth["needsApproval"] or sharp["needsApproval"]) and not await self._producer_approves_spend(video_id, stage, total_inr):
+        asked = stage in self.force_ask
+        self.force_ask.discard(stage)
+        if (smooth["needsApproval"] or sharp["needsApproval"] or asked) and not await self._producer_approves_spend(video_id, stage, total_inr):
             ask = await self._with_spend_advice(video_id, stage, summary, total_inr)
             d = await self._await_owner(video_id, stage, attempt, "WAITING_APPROVAL", ask,
                                         f"{ask} Approve to start, or Reject to skip (nothing is spent).", None, notes, False)

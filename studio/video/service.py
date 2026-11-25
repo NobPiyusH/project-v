@@ -68,6 +68,7 @@ class CreateVideo:
     review_minutes: int | None = None
     budget_inr: float | None = None  # this video's own spend cap in INR (0 = no cap); None = the default in config/providers.yaml
     plan_doc: dict | None = None  # a finished plan file (studio/planner/imported.py): the video starts from it, no paid planner/writer/director
+    approve_paid_first: bool | None = None  # ask before every paid stage runs; None = on for a video made from a plan file, off otherwise
     auto_redo_paid: bool = False  # let the Inspector's one automatic redo run by itself even when it rents a pod or calls a paid service
 
 
@@ -95,10 +96,11 @@ class VideoService:
         prompt = req.prompt.strip()
         plan_json = None if req.plan_doc is None else initial_plan_json(req.plan_doc)  # validates: a bad plan is refused before anything is stored
         self.db.execute(
-            "INSERT INTO video (id, prompt, status, modes_json, workflow_id, review_minutes, plan_json, budget_inr, auto_redo_paid) "
-            "VALUES (%(id)s, %(prompt)s, 'CREATED', CAST(%(modes)s AS jsonb), %(wf)s, %(review)s, CAST(%(plan)s AS jsonb), %(budget)s, %(auto)s)",
+            "INSERT INTO video (id, prompt, status, modes_json, workflow_id, review_minutes, plan_json, budget_inr, auto_redo_paid, approve_paid_first) "
+            "VALUES (%(id)s, %(prompt)s, 'CREATED', CAST(%(modes)s AS jsonb), %(wf)s, %(review)s, CAST(%(plan)s AS jsonb), %(budget)s, %(auto)s, %(first)s)",
             {"id": vid, "prompt": prompt, "modes": modes_json(default_mode, modes), "wf": workflow_id, "review": review, "plan": plan_json,
-             "budget": req.budget_inr, "auto": bool(req.auto_redo_paid)})
+             "budget": req.budget_inr, "auto": bool(req.auto_redo_paid),
+             "first": req.plan_doc is not None if req.approve_paid_first is None else bool(req.approve_paid_first)})
         self.gateway.start(queues.VIDEO_WORKFLOW, workflow_id, VideoRequest(str(vid), prompt, default_mode, modes, None, review))
         return vid
 
@@ -192,10 +194,10 @@ class VideoService:
         video = self._video(
             vid, "id, title, prompt, status, current_stage, spent_inr, workflow_id, created_at, updated_at, plan_json::text AS plan_json, "
                  "modes_json::text AS modes_json, review_minutes, master_asset_id, master_package_asset_id, master_captions_asset_id, "
-                 "auto_redo_paid")
+                 "auto_redo_paid, approve_paid_first")
         runs = self.db.rows(
             "SELECT stage, attempt, mode, status, summary, artifact_json::text AS artifact_json, owner_notes, started_at, finished_at, "
-            "review_deadline, held_reason, can_resume, has_stored_result, redo_estimate_inr FROM stage_run WHERE video_id = %(id)s "
+            "review_deadline, held_reason, can_resume, has_stored_result, redo_estimate_inr, held_before_run, estimate_inr FROM stage_run WHERE video_id = %(id)s "
             "ORDER BY started_at, attempt", {"id": vid})
         return {**video, "stageRuns": self._with_holds(runs)}
 
@@ -215,6 +217,10 @@ class VideoService:
             held = r.pop("held_reason", None)
             r["heldReason"] = held if r["status"] in ("FAILED", "WAITING_APPROVAL") else None
             r["redoEstimateInr"] = r.pop("redo_estimate_inr", None)
+            before = bool(r.pop("held_before_run", False)) and r["status"] == "WAITING_APPROVAL"
+            est = r.pop("estimate_inr", None)
+            r["heldBeforeRun"] = before
+            r["estimateInr"] = est if before else None
             out.append(r)
         return out
 
@@ -236,6 +242,11 @@ class VideoService:
             raise RuntimeError(f"{stage.label} has no stored result to resume from; use Retry to redo it")
         self._signal(vid, "resume_stage", stage)
         self._record_decision(vid, stage, "resume", None)
+
+    def set_approve_paid_first(self, vid: uuid.UUID, on: bool) -> None:
+        """Ask before every paid stage of this video runs (a paid stage in Manual mode always asks first, whatever this says)."""
+        self._video(vid, "id")
+        self.db.execute("UPDATE video SET approve_paid_first = %(on)s, updated_at = now() WHERE id = %(id)s", {"on": bool(on), "id": vid})
 
     def set_auto_redo_paid(self, vid: uuid.UUID, on: bool) -> None:
         """Per video, switchable mid-run: may the Inspector's one automatic redo spend money (pod, paid API) without asking."""

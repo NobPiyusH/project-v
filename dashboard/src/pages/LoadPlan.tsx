@@ -7,8 +7,8 @@ const LEAVE_OUT: Record<string, 'music' | 'narration'> = { MUSIC: 'music', NARRA
 
 /**
  * "Load plan file" inside New video: paste or pick a plan JSON, see what it will do and which stages call paid services, then Start.
- * The paid stages begin on Manual (their result waits for Approve). A mode is applied after a stage ran, so the only way to stop the
- * spend of Music or Voice is "Leave out", which sends the plan with video.music / video.narration = "none".
+ * The paid stages begin on Manual: each waits for Approve BEFORE it spends (hold before run; a video made from a plan file also asks first
+ * whatever the mode), and its result waits afterwards. "Leave out" removes Music or Voice: it sends video.music / video.narration = "none".
  */
 export function LoadPlan({ stages }: { stages: StageInfo[] }) {
   const [text, setText] = useState('')
@@ -123,8 +123,8 @@ export function LoadPlan({ stages }: { stages: StageInfo[] }) {
           <div className="card" style={{ margin: 0 }}>
             <strong>These stages call paid services</strong>
             <p className="muted small" style={{ margin: '4px 0 8px' }}>
-              They start on <strong>Manual</strong>: the stage runs, then waits for your Approve before the next one starts. A mode never stops
-              the stage's own spend. To make sure Music or Voice spends nothing, tick <strong>Leave out</strong>.
+              They start on <strong>Manual</strong>: each one waits for your Approve (with the estimate and what is left of the video's budget)
+              BEFORE it spends, and again after it ran. Skip makes it spend nothing. To remove Music or Voice altogether, tick <strong>Leave out</strong>.
             </p>
             <table>
               <tbody>

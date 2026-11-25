@@ -43,6 +43,10 @@ export interface StageRun {
   started_at: string
   finished_at: string | null
   review_deadline: string | null
+  /** Hold before run: the stage waits for you BEFORE it spends; estimateInr is about what it will cost. */
+  heldBeforeRun?: boolean
+  estimateInr?: number | string | null
+  heldReason?: string | null
 }
 
 export interface CostRow {
