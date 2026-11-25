@@ -18,7 +18,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from temporalio import activity
@@ -447,7 +447,7 @@ def stock_fetch(req: dict) -> dict:
             except Exception as e:  # noqa: BLE001
                 skipped.append(f"{c['source']} {c['id']}: {type(e).__name__}")
                 continue
-            now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            now = datetime.now(UTC).isoformat(timespec="seconds")
             log.info("stock clip %s:%s for shot %s", c["source"], c["id"], req.get("shotNumber"))
             return {"found": True, "reason": None, "queries": queries, "skipped": skipped, "uri": uri,
                     "width": c["width"], "height": c["height"], "durationSec": round(got, 3), "sourceWidth": c["width"],

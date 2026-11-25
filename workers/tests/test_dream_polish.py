@@ -16,7 +16,7 @@ def test_flags_are_opt_in():
     assert polish.flag({"beatSnap": True}, "beatSnap")
 
 
-BEATS = [round(0.5 * k, 3) for k in range(0, 40)]  # 120 bpm
+BEATS = [round(0.5 * k, 3) for k in range(40)]  # 120 bpm
 
 
 def test_snap_trims_to_a_beat_before_the_cut():

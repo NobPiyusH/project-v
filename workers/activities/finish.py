@@ -16,8 +16,8 @@ import queue
 import subprocess
 import threading
 import uuid
+from collections.abc import Callable, Iterable
 from pathlib import Path
-from typing import Callable, Iterable
 
 import modal
 from temporalio import activity
@@ -109,7 +109,7 @@ def _stream(req: dict, kind: str, folder: str, payload: Callable[[dict], dict],
     return result
 
 
-def _stream_jobs(req: dict, kind: str, folder: str, payload, start, jobs: list[dict], hb: "_Heartbeat") -> dict:
+def _stream_jobs(req: dict, kind: str, folder: str, payload, start, jobs: list[dict], hb: _Heartbeat) -> dict:
     video_id = req["videoId"]
     base = (req.get("progressUrl") or "http://127.0.0.1:8080").rstrip("/")
     progress = modal.Dict.from_name("projectv-progress", create_if_missing=True)
