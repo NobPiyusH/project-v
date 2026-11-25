@@ -23,7 +23,7 @@ from enum import Enum
 from typing import Any
 
 from studio.agents.jfmt import fixed, jround
-from studio.gpu.broker import support
+from studio.gpu.broker import community, support
 from studio.gpu.broker.config import BrokerConfig
 from studio.gpu.broker.provider import (
     CreateRequest,
@@ -140,6 +140,8 @@ class GpuBroker:
         self, providers: list[GpuProvider], config: BrokerConfig, wallet: GpuWallet, records: BrokerRecords, leases: PgPodLeases,
         events: PodEvents, limits: GpuPodLimits, clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         prefs: Any = None, auth: support.WorkerAuth | None = None, states: Any = None, boot_timings: Any = None,
+        cloud_preference: str = community.SECURE, boot_probe: community.BootProbe | None = None,
+        attempt_limits: community.AttemptLimits | None = None, sleep: Callable[[float], None] = time.sleep,
     ):
         self._providers = {p.provider(): p for p in providers}
         self._config, self._wallet, self._records, self._leases, self._events = config, wallet, records, leases, events
@@ -154,6 +156,12 @@ class GpuBroker:
         self._pending_carry: list[uuid.UUID] = []  # Shorts on a pod retired as never-ready: they move to the next rental
         self._used_seconds: dict[uuid.UUID, int] = {}  # seconds used by Shorts that detached from the current pod
         self._canary_running: str | None = None
+        # POD_CLOUD_PREFERENCE=community_then_secure needs a probe to look at the pod's boot; without one it stays 'secure'
+        wants = community.normalise_preference(cloud_preference) == community.COMMUNITY_THEN_SECURE
+        if wants and boot_probe is None:
+            log.warning("GPU broker: POD_CLOUD_PREFERENCE=community_then_secure but no boot probe is wired; using today's behaviour")
+        self._community = wants and boot_probe is not None
+        self._probe, self._attempt_limits, self._sleep = boot_probe, attempt_limits or community.AttemptLimits(), sleep
 
     # ------------------------------------------------------------------------------------------------ boot timing
 
@@ -381,10 +389,20 @@ class GpuBroker:
                     eligible.insert(0, fav)
                     how = "learned from your last picks (you keep choosing it over the cheapest)"
             unsafe = False
+            attempts_made = 0
+            if self._community:
+                eligible = self._community_order(eligible)
             for e in eligible:
                 if unsafe:
                     break
                 id_, p, q, row = e.id, e.p, e.q, e.row
+                on_community = self._community and id_ == "runpod" and community.is_community(q.gpu)
+                if on_community and attempts_made > 0:
+                    # every earlier attempt is already booked in the ledger the wallet reads: the cap counts failed attempts too
+                    why = self._wallet.refusal(id_, q.hourly_usd * hours)
+                    if why is not None:
+                        row["skipped"] = f"retry not started: {why}"
+                        continue
                 now = self._clock()
                 name = f"{self._limits.prefix}{id_}-{str(short_id)[:8]}-{uuid.uuid4().hex[:4]}"
                 argv = p.guard(worker_argv, self._limits.max_runtime_minutes, self._limits.idle_minutes, now)
@@ -416,6 +434,14 @@ class GpuBroker:
                     self._safe_terminate(p, inst.id)
                     row["skipped"] = f"lease failed, pod terminated: {ex}"
                     continue
+                if on_community:
+                    attempts_made += 1
+                    outcome = self._boot_check(p, inst, short_id, row, attempts_made, now)
+                    if outcome == "unsafe":
+                        unsafe = True
+                        continue
+                    if outcome == "aborted":
+                        continue
                 row["chosen"] = True
                 n_ok = sum(1 for c in allc if c.ok())
                 reason = f"{id_}: {how}, ${fixed(inst.hourly_usd, 2)}/h ({n_ok} eligible)"
@@ -445,6 +471,57 @@ class GpuBroker:
             reason = f"No GPU can run {capability} now: {skipped}"
             self._records.decision(short_id, capability, considered, None, reason)
             raise NoGpuAvailableError(reason)
+
+    # ------------------------------------------------------------------------------------------------ community mode
+
+    def _community_order(self, eligible: list[_Cand]) -> list[_Cand]:
+        """Community mode: at most max_community_attempts RunPod Community tries (the cheapest offer, then another one, else the same
+        again), then everything else in the usual cheapest-first order (RunPod Secure included). Never more Community tries."""
+        comm = [c for c in eligible if c.id == "runpod" and community.is_community(c.q.gpu)]
+        rest = [c for c in eligible if c not in comm]
+        n = self._attempt_limits.max_community_attempts
+        plan = [comm[min(i, len(comm) - 1)] for i in range(n)] if comm else []
+        return plan + rest
+
+    def _boot_check(self, p: GpuProvider, inst: Instance, short_id: uuid.UUID, row: dict[str, Any], n: int, started: datetime) -> str:
+        """Watches a just-rented Community pod until decide() says keep or abort. Returns 'kept', 'aborted' (pod terminated, booked,
+        lease released) or 'unsafe' (it could not be terminated: the caller must not rent anything else). Whatever goes wrong inside
+        (even an exception or interrupt), the pod is terminated before this returns or the exception leaves."""
+        limits, state, keep, ended = self._attempt_limits, community.AttemptState(), False, True
+        decision = community.Decision(community.Verdict.WAIT, "", state)
+        try:
+            while True:
+                elapsed = max(0.0, (self._clock() - started).total_seconds())
+                text = ""
+                try:
+                    text = self._probe.observe(inst.id) if self._probe is not None else ""
+                except Exception as ex:  # noqa: BLE001 - an unreadable log is 'nothing new'; the timeout still ends the attempt
+                    log.warning("GPU broker: could not read the boot log of %s: %s", inst.id, ex)
+                decision = community.decide(state, elapsed, text, community.parse_cuda(text), limits)
+                state = decision.state
+                if decision.verdict is not community.Verdict.WAIT:
+                    break
+                try:
+                    self._leases.heartbeat(inst.id)
+                except Exception:  # noqa: BLE001
+                    pass
+                self._sleep(limits.poll_s)
+            keep = decision.verdict is community.Verdict.KEEP
+        finally:
+            if not keep:  # abort, or any exception on the way: the pod does not outlive this call
+                spent = max(0.0, (self._clock() - started).total_seconds())
+                why = decision.reason or "interrupted"
+                ended = self._end_pod(Rental(short_id, inst, started), {short_id: 1}, f"community attempt {n} aborted: {why}")
+                log.warning("GPU attempt %d (runpod COMMUNITY %s pod=%s $%s/h): ABORT after %d s: %s; terminated=%s",
+                            n, inst.gpu, inst.id, fixed(inst.hourly_usd, 2), int(spent), why, ended)
+        if keep:
+            log.info("GPU attempt %d (runpod COMMUNITY %s pod=%s $%s/h): KEEP: %s", n, inst.gpu, inst.id, fixed(inst.hourly_usd, 2), decision.reason)
+            return "kept"
+        if not ended:
+            row["skipped"] = f"aborted ({decision.reason}) but the pod could not be terminated: not renting anywhere else"
+            return "unsafe"
+        row["skipped"] = f"aborted attempt {n}: {decision.reason}"
+        return "aborted"
 
     def _with_endpoint(self, r: Rental) -> Rental:
         """A rental rebuilt after a restart may not know its address yet (Vast maps the port late): ask the provider again."""
@@ -591,8 +668,8 @@ class GpuBroker:
         self._used_seconds.clear()
         self._end_pod(r, weights, why)
 
-    def _end_pod(self, r: Rental, weights: dict[uuid.UUID, int], why: str) -> None:
-        """Terminates a pod, books its time (split by weights) and releases its lease."""
+    def _end_pod(self, r: Rental, weights: dict[uuid.UUID, int], why: str) -> bool:
+        """Terminates a pod, books its time (split by weights) and releases its lease. True when the terminate call went through."""
         p = self._providers.get(r.instance.provider)
         end = self._clock()
         if self._gone(r):  # deleted or self-stopped earlier: it stopped billing at about its last heartbeat, not now
@@ -609,6 +686,7 @@ class GpuBroker:
             log.warning("GPU broker: rental %s ended but its ledger row failed: %s", r.instance.id, e)
         if not gone:
             log.warning("GPU broker: could not terminate %s; lease released, the watchdog will", r.instance.id)
+        return gone
 
     def _book_rental(self, r: Rental, hours: float, weights: dict[uuid.UUID, int], why: str) -> None:
         note = f"GPU rental {r.instance.id} ({r.instance.gpu}) ended: {why}"

@@ -1147,6 +1147,11 @@ def main(argv=None) -> int:
         return 0
     state = State()
     touch_heartbeat()
+    try:  # the studio's Community-pod check reads this line from the pod log (studio/gpu/broker/community.py)
+        import torch
+        log(f"cuda_available={bool(torch.cuda.is_available())}")
+    except Exception as e:  # noqa: BLE001 - no torch/driver: the studio then sees no CUDA answer
+        log(f"cuda_available=False ({type(e).__name__})")
     threading.Thread(target=boot_heartbeat, args=(state,), daemon=True, name="boot-beat").start()
     threading.Thread(target=boot, args=(state,), daemon=True, name="boot").start()
     try:

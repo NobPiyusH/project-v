@@ -280,3 +280,13 @@ $env:TEMPORAL_NAMESPACE = "rehearsal"; $env:POSTGRES_DB = "projectv_dryrun"   # 
 ```
 
 Expect PLAN to pass and RESEARCH to fail with "GEMINI_API_KEY is not set" (section 2). With `planFile` on `POST /api/videos` (section 5) PLAN, CONCEPT, SCRIPT and SHOT_PLAN pass with no keys; MUSIC and NARRATION fail closed (no Gemini key), then KEYFRAMES stops because no pod can be rented (`DREAM_GPU_PROVIDER=modal`): the free stop point is now KEYFRAMES.
+
+## 11. Optional: Community pods with abort-and-retry (`POD_CLOUD_PREFERENCE`, added 25 Nov 2026, never run on a real pod)
+
+Flag in `.env`: `POD_CLOUD_PREFERENCE=secure` (default: today's behaviour, no probing) or `community_then_secure`. Anything else counts as `secure`. Measured 24-25 Nov: Community 4090 about $0.34/h but some hosts are bad; Secure about $0.89/h is reliable. Prices are read live, never set here.
+
+Rule (code: `studio/gpu/broker/community.py`, pure `decide()`; I/O in `GpuBroker._boot_check`): the broker rents RunPod Community and looks at the pod log every 15 s. It terminates that pod at once when (a) there is no `[pod-worker` log line within 9 minutes (540 s), (b) the pod prints `cuda_available=False`, (c) no boot line yet and pull output has appeared but stopped growing for 6 minutes, or (d) a boot line exists but CUDA was never reported in 9 minutes. It then tries Community once more (another offer if one is in stock, else the same), then falls back to Secure (not probed). Keep = boot line plus `cuda_available=True`. Every attempt gets a lease, is booked as a CostEntry when it ends (so the wallet and the $3.50 daily cap count failed attempts; a retry is refused when the cap no longer fits), and writes one log line `GPU attempt n (runpod COMMUNITY ...): ABORT|KEEP ...`. At most one pod is alive at a time: if a terminate fails, nothing else is rented (the released lease lets the watchdog end it).
+
+The pod worker now prints `cuda_available=True|False` at start (`workers/pod/server.py`). The warm image must be rebuilt/pulled with that change for the CUDA check to report; an old image never reports and is aborted at 9 minutes, so keep the flag `secure` until the image carries the line.
+
+Check on the first live run: the log line really appears in RunPod's log stream (`GET /pods/{id}/logs`) and `PodLogsProbe` returns it; a good Community host is KEPT (not aborted by a late boot line, warm image boot is 8-18 min: `boot_timeout_s` 540 may be too short for a cold pull, then raise `AttemptLimits`); the terminate of an aborted pod works and `list-pods` is empty afterwards; each attempt's cost row exists; the lock is held during the wait (up to 18 min), so "Turn off GPU" waits meanwhile.
