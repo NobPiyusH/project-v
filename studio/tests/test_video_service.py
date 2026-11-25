@@ -189,3 +189,47 @@ def test_detail_has_stage_runs(svc):
     vid = s.create(CreateVideo("x"))
     assert s.detail(vid)["stageRuns"] == [] and s.detail(vid)["prompt"] == "x"
     assert any(v["id"] == vid for v in s.list())
+
+
+def _stage_run(db, vid, stage, attempt, status, *, can_resume=False, stored=False, reason=None, inr=None):
+    db.execute("INSERT INTO stage_run (id, video_id, stage, attempt, mode, status, held_reason, can_resume, has_stored_result, redo_estimate_inr) "
+               "VALUES (%(i)s, %(v)s, %(s)s, %(a)s, 'AUTO', %(st)s, %(r)s, %(c)s, %(h)s, %(inr)s)",
+               {"i": uuid.uuid4(), "v": vid, "s": stage, "a": attempt, "st": status, "r": reason, "c": can_resume, "h": stored, "inr": inr})
+
+
+def test_resume_is_signalled_only_when_a_stored_result_is_offered(svc):
+    s, gw, _, db = svc
+    vid = s.create(CreateVideo("x"))
+    with pytest.raises(RuntimeError, match="no stored result"):
+        s.resume_stage(vid, Stage.DRAFT_GEN)
+    _stage_run(db, vid, "DRAFT_GEN", 1, "FAILED", can_resume=True, stored=True, reason="boom")
+    s.resume_stage(vid, Stage.DRAFT_GEN)
+    assert gw.signals[-1] == (f"video-{vid}", "resume_stage", (Stage.DRAFT_GEN,))
+    assert db.rows("SELECT decision FROM approval WHERE video_id = %(v)s", {"v": vid})[0]["decision"] == "resume"
+    _stage_run(db, vid, "KEYFRAMES", 1, "FAILED", can_resume=False, stored=False)  # the pod job itself failed: nothing stored
+    with pytest.raises(RuntimeError, match="no stored result"):
+        s.resume_stage(vid, Stage.KEYFRAMES)
+
+
+def test_detail_shows_the_held_reason_the_estimate_and_can_resume_only_on_the_latest_failed_attempt(svc):
+    s, _, _, db = svc
+    vid = s.create(CreateVideo("x"))
+    _stage_run(db, vid, "DRAFT_GEN", 1, "FAILED", can_resume=True, stored=True, reason="save crashed")
+    _stage_run(db, vid, "KEYFRAMES", 1, "WAITING_APPROVAL", reason="a redo would rent a pod", inr=42)
+    runs = {(r["stage"], r["attempt"]): r for r in s.detail(vid)["stageRuns"]}
+    d = runs[("DRAFT_GEN", 1)]
+    assert d["canResume"] is True and d["hasStoredResult"] is True and d["heldReason"] == "save crashed"
+    k = runs[("KEYFRAMES", 1)]
+    assert k["canResume"] is False and k["heldReason"] == "a redo would rent a pod" and float(k["redoEstimateInr"]) == 42
+    _stage_run(db, vid, "DRAFT_GEN", 2, "RUNNING")  # Resume or Retry started a new attempt: the old one is no longer resumable
+    runs = {(r["stage"], r["attempt"]): r for r in s.detail(vid)["stageRuns"]}
+    assert runs[("DRAFT_GEN", 1)]["canResume"] is False
+
+
+def test_auto_redo_paid_is_off_by_default_and_switchable_per_video(svc):
+    s, _, _, db = svc
+    vid = s.create(CreateVideo("x"))
+    assert s.detail(vid)["auto_redo_paid"] is False
+    s.set_auto_redo_paid(vid, True)
+    assert s.detail(vid)["auto_redo_paid"] is True
+    assert s.detail(s.create(CreateVideo("y", auto_redo_paid=True)))["auto_redo_paid"] is True

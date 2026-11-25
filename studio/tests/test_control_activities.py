@@ -159,3 +159,47 @@ def test_every_activity_is_named_and_unique():
     names = activity_names()
     assert len(names) == len(set(names)) and "control.record_stage" in names and "producer.save_review" in names
     assert all(n.startswith(("control.", "producer.")) for n in names)
+
+
+def test_redo_check_free_stages_paid_stages_and_the_per_video_flag(acts):
+    db, c, _, video = acts
+    free = c.redo_check(str(video), "ANIMATIC", None)
+    assert free["paid"] is False
+    paid = c.redo_check(str(video), "KEYFRAMES", ["00000000-0000-0000-0000-000000000001"])
+    assert paid["paid"] is True and paid["autoPaid"] is False and "pod" in paid["what"]
+    db.execute("UPDATE video SET auto_redo_paid = true WHERE id = %(i)s", {"i": video})
+    assert c.redo_check(str(video), "DRAFT_GEN", None)["autoPaid"] is True
+
+
+def test_record_hold_is_what_the_dashboard_reads(acts):
+    db, c, _, video = acts
+    c.record_stage(str(video), "DRAFT_GEN", 1, "AUTO", "FAILED", "failed", None, None)
+    c.record_hold(str(video), "DRAFT_GEN", 1, "save crashed", True, True, None)
+    row = db.rows("SELECT held_reason, can_resume, has_stored_result FROM stage_run WHERE video_id = %(v)s", {"v": video})[0]
+    assert row == {"held_reason": "save crashed", "can_resume": True, "has_stored_result": True}
+
+
+def test_the_tolerant_parser_defaults_missing_optional_fields_and_names_them():
+    from dataclasses import dataclass
+
+    from studio.media.types import ClipResult
+    from studio.media.wire import from_json
+
+    @dataclass
+    class Item:
+        name: str
+        note: str | None  # no default: a sender that forgets it must not crash the save
+
+    @dataclass
+    class Batch:
+        items: list[Item]
+        tags: list[str]
+        total: int
+
+    dropped: list[str] = []
+    b = from_json(Batch, {"items": [{"name": "a"}, {"name": "b", "note": "x"}], "total": 2}, dropped)
+    assert b.tags == [] and b.items[0].note is None and b.items[1].note == "x"
+    assert sorted(dropped) == ["items.0.note", "tags"]
+    with pytest.raises(TypeError):  # a required scalar is never guessed
+        from_json(Batch, {"items": [], "tags": []})
+    assert from_json(ClipResult, {"clips": [], "containers": 1, "stopped": False}).cold_starts is None

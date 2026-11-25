@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import functools
 import json
+import logging
+import re
 import uuid
 from collections.abc import Callable
 from decimal import Decimal
@@ -35,10 +37,13 @@ from studio.media.types import (
 )
 from studio.media.wire import from_json, to_json
 from studio.production.records import ImagePolicy
+from studio.production.redo_policy import redo_is_paid, redo_what
 from studio.video.clip_progress import ClipProgress
 from studio.workflow.codec import inspection_report_json, stage_result_json
 from studio.workflow.stage import Stage, StageMode
 from studio.workflow.types import StageResult
+
+log = logging.getLogger(__name__)
 
 
 def _id(s: str) -> uuid.UUID:
@@ -47,6 +52,13 @@ def _id(s: str) -> uuid.UUID:
 
 def _ids(shot_ids: list[str] | None) -> list[uuid.UUID] | None:
     return None if shot_ids is None else [uuid.UUID(s) for s in shot_ids]
+
+
+def _dropped_note(dropped: list[str]) -> str:
+    """What the media worker's result left out (optional fields, defaulted by the tolerant parser): named once each, without shot indexes."""
+    names = sorted({re.sub(r"\d+\.", "", d) for d in dropped})
+    log.warning("The media result lacked optional field(s) %s; defaults were used", ", ".join(names))
+    return f" (the worker's result lacked {', '.join(names)}: defaults used)"
 
 
 def _compact(o: Any) -> str:
@@ -226,8 +238,10 @@ class ControlActivities:
 
     def save_clips(self, video_id: str, request: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
         req = from_json(ClipRequest, request)
+        dropped: list[str] = []
         try:
-            return stage_result_json(self.video.save_clips(_id(video_id), req, from_json(ClipResult, result)))
+            saved = stage_result_json(self.video.save_clips(_id(video_id), req, from_json(ClipResult, result, dropped)))
+            return {**saved, "summary": saved["summary"] + _dropped_note(dropped)} if dropped else saved
         finally:
             if req.provider == "pod":
                 self.video.release_gpu(_id(video_id), "clip batch saved")
@@ -293,6 +307,32 @@ class ControlActivities:
 
     def save_sharp(self, video_id: str, request: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
         return stage_result_json(self.sharpen.save(_id(video_id), from_json(SmoothRequest, request), from_json(SmoothResult, result)))
+
+    # ---- paid automatic redos need approval; held stages and Resume
+
+    def redo_check(self, video_id: str, stage: str, shot_ids: list[str] | None) -> dict[str, Any]:
+        """Would the Inspector's automatic redo of this stage cost money, may it go ahead without asking (the video's `auto_redo_paid`), and about
+        how much. The estimate is best effort: a failure to price it never blocks the question."""
+        paid = redo_is_paid(stage)
+        auto = bool(self.db.rows("SELECT auto_redo_paid FROM video WHERE id = %(v)s", {"v": _id(video_id)})[0]["auto_redo_paid"])
+        inr: float | None = None
+        if paid:
+            try:
+                if stage in ("DRAFT_GEN", "FINAL_GEN"):
+                    inr = float(self.video.estimate(_id(video_id), "draft" if stage == "DRAFT_GEN" else "final", _ids(shot_ids)).inr)
+                elif stage == "KEYFRAMES" and shot_ids:
+                    inr = float(self.shots.d.pricing.image_inr("1K") * len(shot_ids))  # the dearest image model, per redone shot
+            except Exception as e:  # noqa: BLE001
+                log.warning("Could not price the redo of %s: %s", stage, e)
+        return {"paid": paid, "autoPaid": auto, "inr": inr, "what": redo_what(stage)}
+
+    def record_hold(self, video_id: str, stage: str, attempt: int, held_reason: str | None, can_resume: bool, has_stored_result: bool,
+                    redo_estimate_inr: float | None) -> None:
+        """What the dashboard shows next to a stage that waits for the owner: why, whether Resume is offered, and the redo's estimated cost."""
+        self.db.execute(
+            "UPDATE stage_run SET held_reason = %(r)s, can_resume = %(c)s, has_stored_result = %(h)s, redo_estimate_inr = %(i)s "
+            "WHERE video_id = %(v)s AND stage = %(s)s AND attempt = %(a)s",
+            {"r": held_reason, "c": can_resume, "h": has_stored_result, "i": redo_estimate_inr, "v": _id(video_id), "s": stage, "a": attempt})
 
     # ---- the database mirror of the workflow
 

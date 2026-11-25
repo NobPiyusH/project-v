@@ -83,6 +83,7 @@ class _Decision:
     stage: str
     approve: bool
     notes: str | None
+    resume: bool = False  # "Resume": re-run only the save from the stored media result (a failed-stage hold only)
 
 
 @dataclass
@@ -133,6 +134,11 @@ class VideoProductionWorkflow:
         # between them waits for a human); every pod action is an activity (control.keyframe_request/save_keyframes/touch_held_pod/release_held_pod).
         self.one_pod = False
         self.chain: list[str] = []  # the stages this run will execute, in order
+        # Paid redos wait for the owner and a failed save can be resumed (patch "2026-11-25-redo-resume-holds"; off for runs started before it).
+        self.holds_v1 = False
+        self.stored: dict[str, tuple[str, list[Any]]] = {}  # stage -> the save activity (name, args) whose media result is already made and kept
+        self.resume_next = False  # the owner chose Resume: the next attempt re-runs only the stored save
+        self.waiting_can_resume = False
         self.stages = STAGES  # without MOON_LAYER for runs started before it existed (replay-safe, see _run)
 
     # ------------------------------------------------------------------------------------------- the run
@@ -158,6 +164,7 @@ class VideoProductionWorkflow:
         if workflow.patched("one-pod-v1"):  # histories started before this feature never ask the question (replay-safe)
             self.one_pod = bool(await _ctl("one_pod_enabled"))
 
+        self.holds_v1 = workflow.patched("2026-11-25-redo-resume-holds")
         if not workflow.patched("moon-layer-v1"):
             self.stages = [s for s in STAGES if s != "MOON_LAYER"]
         if not workflow.patched("interpolate-v1"):  # histories from before the INTERPOLATE stage existed never run it (replay-safe)
@@ -204,6 +211,10 @@ class VideoProductionWorkflow:
                 await _ctl("set_video_status", video_id, "PAUSED")
                 await workflow.wait_condition(lambda: not self.paused)
                 await _ctl("set_video_status", video_id, "RUNNING")
+            resuming = self.holds_v1 and self.resume_next and stage in self.stored
+            self.resume_next = False
+            if self.holds_v1 and not resuming:
+                self.stored.pop(stage, None)  # a full redo starts from nothing
             self.current_stage = stage
             await self._pod_gate(video_id, stage)
             start_mode = self._mode(stage)
@@ -211,7 +222,12 @@ class VideoProductionWorkflow:
             await _ctl("record_stage", video_id, stage, attempt, start_mode, "RUNNING", None, None, notes)
 
             try:
-                result = await self._run_stage_activity(video_id, stage, prompt, notes, attempt)
+                if resuming:
+                    # The media work is done and kept: only the cheap save runs again. No pod is rented, nothing is paid for twice.
+                    name, saved_args = self.stored[stage]
+                    result = await _ctl(name, *saved_args)
+                else:
+                    result = await self._run_stage_activity(video_id, stage, prompt, notes, attempt)
                 if stage == "DRAFT_GEN":  # the clips stage is over (saved, or nothing to make): the pod is not needed any more
                     await self._release_pod(video_id, "draft clips stage finished")
                 if self.skip_stage:
@@ -222,8 +238,15 @@ class VideoProductionWorkflow:
                 # A failed stage never kills the video: it waits for the owner, whatever the stage's mode.
                 # Approve = continue without this stage's output; reject (with notes) = run it again.
                 reason = root_message(failure)
-                d = await self._await_owner(video_id, stage, attempt, "FAILED", reason,
-                                            f"Failed: {reason} Approve to continue without it, or Reject to retry.", None, notes, False)
+                can_resume = self.holds_v1 and stage in self.stored
+                text = f"Failed: {reason} Approve to continue without it, or Reject to retry."
+                if can_resume:
+                    text += " Resume re-runs only the save from the result already made (no new pod, nothing paid twice)."
+                d = await self._await_owner(video_id, stage, attempt, "FAILED", reason, text, None, notes, False,
+                                            hold=(reason, can_resume, can_resume, None) if self.holds_v1 else None)
+                if d.resume:
+                    self.resume_next = True
+                    continue
                 if d.approve:
                     skipped = _result(f"Skipped by owner after failure: {reason}")
                     await self._finish(video_id, stage, attempt, "SKIPPED", skipped, notes)
@@ -236,17 +259,31 @@ class VideoProductionWorkflow:
                 result = {**result, "summary": f"{result['summary']} {inspection['summary']}"}
             mode = self._mode(stage)
             if inspection["verdict"] == "FAIL" and mode != "MANUAL":
+                paid_check: dict[str, Any] | None = None
                 if stage not in self.inspector_redone:
-                    # First FAIL: redo once by itself. Images and clips: only the shots that failed, with better prompts.
-                    self.inspector_redone.add(stage)
-                    workflow.logger.info("Inspector failed stage %s, redoing once", stage)
-                    await self._finish(video_id, stage, attempt, "INSPECTION_FAILED", result, notes)
-                    notes = None if self._targeted_redo(stage, inspection, None) else inspection.get("notes")
-                    continue
-                # Failed again after the automatic redo: never pass it unseen, whatever the mode or review timer.
-                d = await self._await_owner(video_id, stage, attempt, "WAITING_APPROVAL", result["summary"],
-                                            f"{result['summary']} Approve to accept it anyway, or Reject (with notes) to redo.",
-                                            result.get("artifactJson"), notes, False)
+                    if self.holds_v1:
+                        # An automatic redo that would rent a pod or call a paid service waits for the owner unless the video allows it.
+                        check = await _ctl("redo_check", video_id, stage, inspection.get("redoTargets") if stage in PER_SHOT else None)
+                        if check["paid"] and not check["autoPaid"]:
+                            paid_check = check
+                    if paid_check is None:
+                        # First FAIL: redo once by itself. Images and clips: only the shots that failed, with better prompts.
+                        self.inspector_redone.add(stage)
+                        workflow.logger.info("Inspector failed stage %s, redoing once", stage)
+                        await self._finish(video_id, stage, attempt, "INSPECTION_FAILED", result, notes)
+                        notes = None if self._targeted_redo(stage, inspection, None) else inspection.get("notes")
+                        continue
+                    self.inspector_redone.add(stage)  # whatever the owner picks is the one redo this stage gets by itself
+                    cost = "cost not estimated" if paid_check["inr"] is None else f"about ₹{paid_check['inr']:.0f}"
+                    why = f"{result['summary']} Redoing it would {paid_check['what']} ({cost}), so it waits for you."
+                    d = await self._await_owner(video_id, stage, attempt, "WAITING_APPROVAL", result["summary"],
+                                                f"{why} Approve to continue with the current result, or Reject (with notes) to redo it.",
+                                                result.get("artifactJson"), notes, False, hold=(why, False, False, paid_check["inr"]))
+                else:
+                    # Failed again after the automatic redo: never pass it unseen, whatever the mode or review timer.
+                    d = await self._await_owner(video_id, stage, attempt, "WAITING_APPROVAL", result["summary"],
+                                                f"{result['summary']} Approve to accept it anyway, or Reject (with notes) to redo.",
+                                                result.get("artifactJson"), notes, False)
                 if d.approve:
                     await self._finish(video_id, stage, attempt, "APPROVED", result, notes)
                     return result
@@ -348,17 +385,24 @@ class VideoProductionWorkflow:
             notes = d.notes
 
     async def _await_owner(self, video_id: str, stage: str, attempt: int, status: str, view_summary: str | None, summary: str | None,
-                           artifact_json: str | None, notes: str | None, auto_releases: bool) -> Any:
+                           artifact_json: str | None, notes: str | None, auto_releases: bool,
+                           hold: tuple[str, bool, bool, float | None] | None = None) -> Any:
         """Records the stage as waiting and blocks until the owner approves/rejects (or, when auto_releases, until the stage is switched to AUTO,
         which returns None)."""
         await self._release_pod(video_id, f"{stage} waits for the owner ({status}): never keep a pod across a human wait")
-        self.views[stage] = self._view(stage, self._mode(stage), status, attempt, view_summary)
+        # hold = (why it waits, Resume offered, a stored result exists, estimated cost of the redo in INR): shown by the dashboard.
+        extra = None if hold is None else {"heldReason": hold[0], "canResume": hold[1], "hasStoredResult": hold[2], "redoEstimateInr": hold[3]}
+        self.views[stage] = self._view(stage, self._mode(stage), status, attempt, view_summary, extra)
         await _ctl("record_stage", video_id, stage, attempt, self._mode(stage), status, summary, artifact_json, notes)
+        if hold is not None:
+            await _ctl("record_hold", video_id, stage, attempt, *hold)
         self.phase = "WAITING"
         self.waiting_stage = stage
+        self.waiting_can_resume = hold is not None and hold[1]
         self.decision = None
         await workflow.wait_condition(lambda: self.decision is not None or (auto_releases and self._mode(stage) == "AUTO"))
         self.waiting_stage = None
+        self.waiting_can_resume = False
         self.phase = "RUNNING"
         d, self.decision = self.decision, None
         return d
@@ -417,13 +461,13 @@ class VideoProductionWorkflow:
             except ActivityError as failure:
                 workflow.logger.warning("Claude research failed (%s); using Gemini with Google Search", root_message(failure))
                 found = await _media("research_topic", research)
-            return await _ctl("save_research", video_id, await self._check_sources(found))
+            return await self._save(stage, "save_research", video_id, await self._check_sources(found))
         if stage == "CONCEPT":
             return await _agents("concept", video_id, notes)
         if stage == "SCRIPT":
             return await _agents("script", video_id, notes)
         if stage == "MUSIC":
-            return await _ctl("save_music", video_id, await _media("generate_music", await _agents("music_request", video_id, notes)))
+            return await self._save(stage, "save_music", video_id, await _media("generate_music", await _agents("music_request", video_id, notes)))
         if stage == "NARRATION":
             # Voiced before the shot plan so every shot is timed against the real narration length.
             if self.producer_voice_notes is not None:  # AI Producer redo: its precise notes become the reading style
@@ -431,19 +475,21 @@ class VideoProductionWorkflow:
                 request = await _producer("narration_redo_request", video_id, voice_notes)
             else:
                 request = await _agents("narration_request", video_id)
-            return await _ctl("save_narration", video_id, await _media("synthesize_narration", request))
+            return await self._save(stage, "save_narration", video_id, await _media("synthesize_narration", request))
         if stage == "SHOT_PLAN":
             return await self._run_stock(video_id, await _agents("shot_plan", video_id, notes))
         if stage == "KEYFRAMES":
             fix = self._take_fix("KEYFRAMES")
             if not self.one_pod:
                 request = await _ctl("keyframe_request", video_id, notes) if fix is None else await _agents("fix_keyframe_request", video_id, fix.shot_ids, fix.owner_notes)
-                return await _ctl("save_keyframes", video_id, request, await _media("generate_keyframes", request))
+                return await self._save(stage, "save_keyframes", video_id, request, await _media("generate_keyframes", request))
             keep = self._keep_pod_after_keyframes()
             request = await _ctl("keyframe_request", video_id, notes, keep) if fix is None else await _agents("fix_keyframe_request", video_id, fix.shot_ids, fix.owner_notes)
-            return await _ctl("save_keyframes", video_id, request, await _media("generate_keyframes", request), keep and fix is None)
+            made = await _media("generate_keyframes", request)
+            # Resume never keeps the pod for the clips: it saves and lets go, exactly like a save that failed.
+            return await self._save(stage, "save_keyframes", video_id, request, made, keep and fix is None, stored_args=[video_id, request, made])
         if stage == "ANIMATIC":
-            return await _ctl("save_animatic", video_id, await _media("render_animatic", await _ctl("animatic_request", video_id)))
+            return await self._save(stage, "save_animatic", video_id, await _media("render_animatic", await _ctl("animatic_request", video_id)))
         if stage == "LIBRARY_MATCH":
             # Free: suggests real NASA footage for the shots the Director marked; the owner picks.
             search = await _ctl("footage_search_request", video_id, None, None)
@@ -470,7 +516,7 @@ class VideoProductionWorkflow:
             if request.get("skip"):
                 self.skip_stage = True
                 return _result(request["skip"])
-            return await _ctl("save_moon_layer", video_id, request, await _media("moon_layer_composite", request, MOON_MEDIA))
+            return await self._save(stage, "save_moon_layer", video_id, request, await _media("moon_layer_composite", request, MOON_MEDIA))
         if stage == "INTERPOLATE":
             # Optional, free, local: RIFE doubles the master's frame rate (INTERPOLATE_FPS=local). Off, or no RIFE program on the worker: skipped.
             # A real failure raises (waits for the owner: Retry / Continue without it).
@@ -482,8 +528,15 @@ class VideoProductionWorkflow:
             if made.get("skip"):
                 self.skip_stage = True
                 return _result(made["skip"])
-            return await _ctl("save_interpolated", video_id, request, made)
+            return await self._save(stage, "save_interpolated", video_id, request, made)
         return await _ctl("run_stage", video_id, stage, notes, attempt)
+
+    async def _save(self, stage: str, name: str, *args: Any, stored_args: list[Any] | None = None) -> dict[str, Any]:
+        """The save step that follows a finished media job. The media result is kept in the workflow first, so a crash in the save leaves the
+        owner a Resume that re-runs only this call (never the pod). Same single activity call as before the patch."""
+        if self.holds_v1:
+            self.stored[stage] = (name, list(args) if stored_args is None else stored_args)
+        return await _ctl(name, *args)
 
     async def _run_clips(self, video_id: str, stage: str, attempt: int, notes: str | None) -> dict[str, Any]:
         """The batch is estimated first and, unless it is under the auto-approve amount, the owner must approve the GPU spend before anything runs
@@ -505,7 +558,7 @@ class VideoProductionWorkflow:
             await _ctl("record_stage", video_id, stage, attempt, self._mode(stage), "RUNNING", None, None, notes)
             self.views[stage] = self._view(stage, self._mode(stage), "RUNNING", attempt, None)
         request = await _agents("clip_request", video_id, kind, only)
-        return await _ctl("save_clips", video_id, request, await _media("generate_clips", request, CLIP_MEDIA))
+        return await self._save(stage, "save_clips", video_id, request, await _media("generate_clips", request, CLIP_MEDIA))
 
     async def _run_smooth(self, video_id: str, stage: str, attempt: int, notes: str | None) -> dict[str, Any]:
         """Upscale stage (GPU finishing): smooth motion (RIFE, L4), then sharpness (SeedVR2, H100). Both are estimated first and shown as one
@@ -644,8 +697,8 @@ class VideoProductionWorkflow:
             workflow.logger.warning("Could not release the held pod (%s); the hold timer and the watchdog will", e)
 
     @staticmethod
-    def _view(stage: str, mode: str, status: str, attempt: int, summary: str | None) -> dict[str, Any]:
-        return {"stage": stage, "mode": mode, "status": status, "attempt": attempt, "summary": summary}
+    def _view(stage: str, mode: str, status: str, attempt: int, summary: str | None, extra: dict[str, Any] | None = None) -> dict[str, Any]:
+        return {"stage": stage, "mode": mode, "status": status, "attempt": attempt, "summary": summary, **(extra or {})}
 
     # ------------------------------------------------------------------------------------------- signals and query
 
@@ -660,6 +713,12 @@ class VideoProductionWorkflow:
         """Owner rejects the waiting stage; it runs again with the notes as guidance."""
         if stage == self.waiting_stage:
             self.decision = _Decision(stage, False, notes)
+
+    @workflow.signal
+    def resume_stage(self, stage: str) -> None:
+        """Owner chose Resume on a failed stage whose media result is stored: only the save runs again. Ignored if Resume is not offered."""
+        if stage == self.waiting_stage and self.waiting_can_resume:
+            self.decision = _Decision(stage, False, None, True)
 
     @workflow.signal
     def set_mode(self, stage: str, mode: str) -> None:

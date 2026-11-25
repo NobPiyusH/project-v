@@ -26,7 +26,7 @@ EXPECTED = {
     "PostWorkflowPy": ("post", [], [], []),
     "DreamShortWorkflowPy": ("run", ["approve", "cancel", "redo", "retry", "set_mode"], ["view"], []),
     "VideoProductionWorkflowPy": (
-        "run", ["approve", "pause", "reject", "resume", "set_all_modes", "set_mode", "set_review_minutes"], ["status"], []),
+        "run", ["approve", "pause", "reject", "resume", "resume_stage", "set_all_modes", "set_mode", "set_review_minutes"], ["status"], []),
     "ShotRedoWorkflowPy": ("run", [], [], []),
     "ClipRedoWorkflowPy": ("run", [], [], []),
     "VoiceRedoWorkflowPy": ("run", [], [], []),
